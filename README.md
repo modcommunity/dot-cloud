@@ -16,13 +16,13 @@ Runtime content delivery for Godot 4. A server hands a client a manifest; the
 client downloads what it is missing, verifies it, and mounts it — on Windows,
 macOS, Linux, Android, iOS and in the browser.
 
-Part of the `dot-*` family alongside [dot-core](../dot-core),
-[dot-server](../dot-server) and [dot-auth](../dot-auth).
+Part of the `dot-*` family alongside [dot-core](https://github.com/modcommunity/dot-core),
+[dot-server](https://github.com/modcommunity/dot-server) and [dot-auth](https://github.com/modcommunity/dot-auth).
 
 ## Install
 
 Copy `addons/dot_core/` and `addons/dot_cloud/` into your project and enable both
-in *Project → Project Settings → Plugins*. Requires Godot 4.4+.
+in *Project → Project Settings → Plugins*. Requires Godot 4.7+.
 
 ## Use
 
