@@ -689,6 +689,31 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 	if not checked.ok:
 		return checked
 
+	# [b]A pack's objects live beside its manifest, so where the manifest came from is
+	# always a valid mirror.[/b] Added here rather than assumed downstream, because
+	# nothing else in the client knows the URL by the time the objects are fetched.
+	#
+	# Without it a pack published the way `DotCloudPublisher` writes one -- manifest and
+	# `objects/` together under a per-content directory -- is unreachable unless somebody
+	# remembered `--mirror` at publish time. `DotCloudSourceHttp` builds
+	# `<base>/objects/<aa>/<hash>` from the CONFIGURED base, which for a client pointed
+	# at a content root is missing the content id: the manifest fetches from
+	# `<root>/<id>/manifest.json` and every object is then asked for at `<root>/objects/`,
+	# one directory too high. On S3 that answers 403 rather than 404 -- a missing key
+	# with no `ListBucket` permission is indistinguishable from a forbidden one -- so it
+	# reads as a credentials problem on a public bucket, which is where the time goes.
+	#
+	# Measured: surf_mesa@1.0.0, manifest verified, 12 objects needed, all 13 URLs
+	# returning 200 to curl and every one of them 403 to the client.
+	#
+	# Appended, never prepended: a mirror the publisher named is a statement about where
+	# the operator wants load to land, and this is only the fallback that is always true.
+	if not is_local_manifest_url(manifest_url):
+		var here := manifest_url.get_base_dir()
+
+		if here != "" and not manifest.mirrors.has(here):
+			manifest.mirrors.append(here)
+
 	return DotResult.success(manifest)
 
 
