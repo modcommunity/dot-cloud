@@ -673,6 +673,28 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 		if not read.ok:
 			return read.wrap("Could not read the content manifest.")
 		bytes = read.value
+	elif not manifest_url.contains("://"):
+		# [b]A local search directory that does not hold this pack.[/b]
+		# `manifest_urls_for` builds a candidate from every local dir AND every http
+		# base, and `is_local_manifest_url` answers false for a bare path whose file is
+		# not there -- correctly, it is not a local manifest. It is not a URL either,
+		# and handing it to HTTPRequest produced
+		#
+		#     ERROR: Invalid URL scheme: ''.  at: _parse_url (http_request.cpp:66)
+		#
+		# an engine error naming nothing an operator configured, followed by "Could not
+		# download the content manifest" about a path that was never a download. On a
+		# server with no `http_base_urls` at all -- which is every deployment that has
+		# not been told where its content lives -- that is the ONLY thing it prints.
+		#
+		# Refused cleanly instead, so `ensure` moves to the next candidate and the error
+		# that survives is the one that names the real problem: nowhere to fetch from.
+		return DotResult.fail(
+			DotError.CODE_STATE,
+			"No manifest at '%s'." % manifest_url,
+			"a local search directory does not hold this content, and the path is "
+			+ "not a URL; set http_base_urls to fetch it"
+		)
 	else:
 		var res := await _http.get_bytes(manifest_url)
 		if not res.ok:
