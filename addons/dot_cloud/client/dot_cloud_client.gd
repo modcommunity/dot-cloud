@@ -142,6 +142,21 @@ var sources: Array[DotCloudSource] = []
 
 var _phase: Phase = Phase.IDLE
 var _http: DotHttp = null
+
+## The client OBJECTS are downloaded through, separate from the manifest's.
+##
+## [b]They need opposite settings, and sharing one node capped the CDN at 8 MiB.[/b]
+## A manifest is small, arrives before anything has been verified, and comes from a host
+## that may be hostile -- so `ManifestHttp` caps the response, and should. An object is
+## the opposite case on every count: its size is declared in a manifest we have ALREADY
+## verified the signature of, and its bytes are hash-checked after they land, so the
+## integrity guarantee never came from the size limit. Capping it only means content
+## larger than the cap cannot be delivered at all.
+##
+## surf_mesa.bin is 11.7 MiB. Against the shared node it failed with "The response was
+## too large", which the downloader reported as "Some required content could not be
+## downloaded" -- a map that publishes perfectly and can never be fetched.
+var _object_http: DotHttp = null
 var _started: bool = false
 var _registered_name: StringName = &""
 
@@ -203,6 +218,14 @@ func start() -> DotResult:
 	# into memory before we notice it is not JSON.
 	_http.max_response_bytes = 8 * 1024 * 1024
 	add_child(_http)
+
+	# Objects: no response cap, and a longer timeout. A game pack is tens or hundreds of
+	# megabytes and thirty seconds is a small map on a slow line. See `_object_http`.
+	_object_http = DotHttp.new()
+	_object_http.name = "ObjectHttp"
+	_object_http.timeout_sec = config.file_timeout_sec
+	_object_http.max_response_bytes = 0
+	add_child(_object_http)
 
 	store = DotCloudStore.new(config)
 	var opened := await store.open()
@@ -279,7 +302,7 @@ func _build_sources() -> void:
 	var http_source := DotCloudSourceHttp.new()
 	http_source.base_urls = http_base_urls
 	http_source.priority = 50
-	http_source.http = _http
+	http_source.http = _object_http
 	sources.append(http_source)
 
 	if allow_netchan_fallback:
