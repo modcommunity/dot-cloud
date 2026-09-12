@@ -446,6 +446,26 @@ func ensure(
 			DotError.CODE_INVALID, "No content id to ensure."
 		)
 
+	# [b]Start first, exactly as [method acquire] does.[/b] This did not, and the way it
+	# failed is the reason the line is here rather than the reason it is obvious.
+	#
+	# [member config_file] is applied in [method start] — that is the only place it is
+	# read. A caller that reached content through `ensure` alone therefore verified the
+	# manifest against a config that had never seen its own file, so
+	# `config.trusted_keys` was empty and the answer came back "No trusted signing keys
+	# are configured", naming the one thing the caller had definitely configured. Every
+	# minute spent on that is spent reading a JSON file that is correct.
+	#
+	# It stayed hidden because the two entry points are used by different callers:
+	# dot-server has a manifest URL and calls `acquire`, which starts; dot-map and
+	# dot-user-avatar have an id and call `ensure`, which did not — and both of those
+	# reach content that also ships in the build, so the failure was somebody else's
+	# fallback path.
+	if not _started:
+		var started := await start()
+		if not started.ok:
+			return started
+
 	var effective_version := version if version != "" else "0.0.0"
 
 	if is_mounted(content_id, effective_version):
