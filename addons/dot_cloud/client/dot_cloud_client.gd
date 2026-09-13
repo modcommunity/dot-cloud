@@ -359,6 +359,21 @@ func acquire(
 	if not fetched.ok:
 		return _fail(fetched.error)
 
+	# [b]A manifest read off the disk is a pack that is ON the disk, and every object
+	# beside it was still being asked for over HTTP.[/b] [method ensure] adopts the
+	# directory it built a candidate URL from; this path takes the URL from the caller and
+	# adopted nothing, so a server whose `game.yml` names `dist/<id>/manifest.json` --
+	# which is exactly where `./server pack` writes, and what the local-first design tells
+	# an operator to do -- verified the manifest from a file and then reported
+	#
+	#     140 missing, first: game/arena_npc_brain.gd — [forbidden] … Not allowed.
+	#
+	# an error about the network, naming a file it was standing on top of. On a box with
+	# no `content_urls` at all there is no source for it to fail over TO, so the whole
+	# pack is unreachable while it sits in the next directory.
+	if is_local_manifest_url(manifest_url):
+		_adopt_local_dir(_local_manifest_path(manifest_url).get_base_dir())
+
 	var manifest: DotCloudManifest = fetched.value
 	return await acquire_manifest(manifest, groups)
 

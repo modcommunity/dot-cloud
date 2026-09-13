@@ -95,14 +95,25 @@ script = ExtResource("1")
 	cloud.config.cache_dir = WORK.path_join("cache")
 	cloud.config.trusted_keys = {"test": str(pair["public"])}
 	cloud.config_file = ""
-	# The published directory holds the manifest AND its objects, so it is both the
-	# place the manifest is read from and the source the files come out of.
-	cloud.local_search_dirs = PackedStringArray([out])
+	# [b]Deliberately NOT told where the content is.[/b] The published directory holds the
+	# manifest AND its objects, so naming the manifest names the objects too -- and this
+	# demo used to hand the directory over in `local_search_dirs`, which meant it passed
+	# whether or not the client could work that out for itself. It could not: a server
+	# whose `game.yml` pointed at `dist/<id>/manifest.json` read the manifest off the disk
+	# and then asked the network for all 140 files beside it, failing with "140 missing"
+	# on a box that had every one of them. Left empty here so this suite is the thing that
+	# says so.
 	add_child(cloud)
 
 	var got: Variant = await cloud.acquire(out.path_join("manifest.json"))
 	_check(got is DotResult and (got as DotResult).ok, "the client acquires and mounts it",
 		"" if got is DotResult and (got as DotResult).ok else str((got as DotResult).error))
+
+	_check(
+		cloud.local_search_dirs.has(out),
+		"having worked out for itself that the objects are beside the manifest",
+		"local_search_dirs=%s" % str(cloud.local_search_dirs)
+	)
 
 	# --- the whole point
 	var scene_path := "res://dot_cloud/delivered_scene/1.0.0/scenes/world.tscn"
