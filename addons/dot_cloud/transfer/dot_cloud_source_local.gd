@@ -59,7 +59,17 @@ func fetch(
 
 	var found := _locate(file)
 	if found == "":
-		note_failure()
+		# [b]"Not here" is not "failing", and counting it as one is how a healthy
+		# deployment warns at itself.[/b] The backoff exists for a source that is
+		# BROKEN -- a disk erroring, a network share gone -- so that failover stops
+		# paying for it. A local directory that does not hold delivered content is
+		# working perfectly and simply does not have the file, which is the ordinary
+		# case for every pack that is meant to come off the network.
+		#
+		# Counting it tripped `source is failing; backing off cooldown=60.0
+		# source=local` on the first map a server downloaded, in the middle of a
+		# download that was going fine, with a warning naming a source nobody had
+		# configured wrong. Failover already moves on without being told twice.
 		return DotResult.fail(
 			DotError.CODE_IO,
 			"Content is not in any local source directory.",

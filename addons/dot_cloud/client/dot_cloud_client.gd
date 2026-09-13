@@ -55,6 +55,11 @@ signal content_released(content_key: String)
 
 signal failed(error: DotError)
 
+## Emitted when an acquisition finishes, so a second caller for the same content can
+## wait for the first rather than starting a sync that is refused. Internal: a consumer
+## wants [signal content_ready], which says a mount is usable.
+signal _acquire_finished(content_key: String, result: DotResult)
+
 @export_group("Configuration")
 
 ## Content-delivery settings. A default [DotCloudConfig] is created if unset.
@@ -359,6 +364,39 @@ func acquire(
 ##
 ## dot-server pushes manifests down the game connection rather than making every
 ## client fetch the same document over HTTP, so this is the path it uses.
+## Content being acquired right now, by key.
+##
+## [b]Two callers wanting the same content at the same time is normal, and it used to
+## fail.[/b] `DotCloudDownloader.sync` refuses a second sync with "This downloader is
+## already syncing" -- correctly, one downloader runs one sync -- and `acquire_manifest`
+## turned that into a failed acquisition for the caller who arrived second. On a server
+## that is a race between the host applying `sv_map` and the game fetching its own
+## initial map: whichever lost reported "no delivered content for this map", the map
+## then missed the catalogue, and the server started on nothing while the download it
+## was waiting for completed seconds later.
+##
+## So the second caller waits for the first and gets its answer, which is what it wanted
+## in the first place.
+var _inflight: Dictionary = {}
+
+
+## Wait for an acquisition already running for [param key].
+func _await_inflight(key: String) -> DotResult:
+	while _inflight.has(key):
+		var payload: Array = await _acquire_finished
+
+		if payload.size() == 2 and String(payload[0]) == key:
+			return payload[1]
+
+	# The set emptied without our key being announced -- the owner died, or the client
+	# was torn down mid-sync. Answering "not there" is honest; the caller retries or
+	# falls back, which is what it does for any other failure.
+	return DotResult.fail(
+		DotError.CODE_STATE,
+		"The acquisition of '%s' ended without an answer." % key
+	)
+
+
 func acquire_manifest(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray()
@@ -374,6 +412,29 @@ func acquire_manifest(
 		_set_phase(Phase.READY, "Ready.")
 		return _ready_result(manifest)
 
+	if _inflight.has(key):
+		DotLog.debug(CHANNEL, "joining an acquisition already running", {"content": key})
+		return await _await_inflight(key)
+
+	# [b]Released on every path, including a failure, by wrapping rather than by
+	# remembering.[/b] There are four returns below and a leaked entry would make every
+	# later caller wait for an acquisition that is not running -- a deadlock that only
+	# appears after something else has already gone wrong.
+	_inflight[key] = true
+
+	var outcome := await _acquire_inner(manifest, groups, key)
+
+	_inflight.erase(key)
+	_acquire_finished.emit(key, outcome)
+
+	return outcome
+
+
+func _acquire_inner(
+	manifest: DotCloudManifest,
+	groups: PackedStringArray,
+	key: String
+) -> DotResult:
 	_set_phase(Phase.PLANNING, "Checking what needs downloading…")
 
 	var plan := plan_for(manifest, groups)
