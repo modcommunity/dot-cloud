@@ -305,7 +305,10 @@ func _build_sources() -> void:
 		sources.append(local)
 
 	var http_source := DotCloudSourceHttp.new()
-	http_source.base_urls = http_base_urls
+	# Resolved, not raw: the objects come from the same origin as the manifest, and a
+	# manifest that downloaded from a base this turned into a URL must not be followed
+	# by file requests to a path that is still not one.
+	http_source.base_urls = resolved_http_base_urls()
 	http_source.priority = 50
 	http_source.http = _object_http
 	sources.append(http_source)
@@ -669,9 +672,50 @@ func manifest_urls_for(
 	for base in local_search_dirs:
 		out.append(_expand_manifest_url(base, content_id, version))
 
-	for base in http_base_urls:
+	for base in resolved_http_base_urls():
 		out.append(_expand_manifest_url(base, content_id, version))
 
+	return out
+
+
+## Puts the page's origin on a root-relative base, so it becomes a URL.
+##
+## [b]`/content` is not something Godot can fetch, on any platform, and the comment
+## that said otherwise was here for months.[/b] The deployment it describes is right --
+## content served from the page's own origin is the one layout with no CORS to
+## configure at all -- but the resolution it assumed never happens. [HTTPRequest]
+## parses the string ITSELF, in C++, before the browser sees anything:
+##
+##     ERROR: Error parsing URL: '/content/surf_mesa/manifest.json'
+##        at: _parse_url (scene/main/http_request.cpp:61)
+##
+## and then the fetch fails with an engine message naming no setting anybody wrote.
+## [method DotWeb.origin] has existed the whole time, documented as "needed to build
+## same-origin content URLs", and nothing called it. This is the call.
+##
+## Only ever applied to HTTP bases. A local search directory beginning with `/` is an
+## absolute path on a real filesystem and must stay one.
+static func resolve_base_url(base: String) -> String:
+	return join_origin(DotWeb.origin(), base)
+
+
+## The pure half of [method resolve_base_url], so it can be tested off-web.
+##
+## Off-web [method DotWeb.origin] returns "" and this returns the base untouched --
+## which keeps a native client's absolute path working, and leaves a genuinely
+## misconfigured root-relative base to be refused by name further down rather than
+## turned into something that looks like a URL and is not.
+static func join_origin(origin: String, base: String) -> String:
+	if origin == "" or base == "" or base.contains("://") or not base.begins_with("/"):
+		return base
+	return origin.trim_suffix("/") + base
+
+
+## Every HTTP base, made absolute where a page origin can do it.
+func resolved_http_base_urls() -> PackedStringArray:
+	var out := PackedStringArray()
+	for base in http_base_urls:
+		out.append(resolve_base_url(base))
 	return out
 
 

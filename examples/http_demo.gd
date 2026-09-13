@@ -122,6 +122,7 @@ func _run() -> void:
 	_line("  serving          %s -> %s" % [publish_dir, base])
 	_line("")
 
+	await _test_base_url_resolution()
 	await _test_probe(base, key_pair)
 	await _test_failover(base, key_pair, manifest)
 	await _test_resume(base, key_pair, manifest)
@@ -149,6 +150,75 @@ func _run() -> void:
 
 
 ## The reachability probe, which is the call meant to run before a large sync.
+## The one content layout that needs no CORS headers, and it could not fetch anything.
+##
+## `/content` is what a page serves its own content from, and [HTTPRequest] parses a
+## URL in C++ before any of the browser sees it: a root-relative string is not a URL
+## and comes back as "Error parsing URL", naming no setting an operator wrote. The
+## origin has to go on before the request is made.
+##
+## Tested through [method DotCloudClient.join_origin] rather than through
+## [method DotCloudClient.resolve_base_url], because the second asks
+## [method DotWeb.origin], which off-web is empty and on-web cannot be reached from a
+## headless run. Splitting the pure half out is what makes the rule testable at all.
+func _test_base_url_resolution() -> void:
+	_sections_entered += 1
+	_line("[b]same-origin base URLs[/b]")
+
+	_check(
+		"a root-relative base becomes a URL",
+		DotCloudClient.join_origin("https://games.example.net", "/content")
+			== "https://games.example.net/content"
+	)
+	_check(
+		"a trailing slash on the origin does not double",
+		DotCloudClient.join_origin("https://games.example.net/", "/content")
+			== "https://games.example.net/content"
+	)
+	_check(
+		"an absolute URL is left alone",
+		DotCloudClient.join_origin("https://cdn.example.net", "https://other.example/c")
+			== "https://other.example/c"
+	)
+	_check(
+		"res:// is left alone",
+		DotCloudClient.join_origin("https://games.example.net", "res://content")
+			== "res://content"
+	)
+	_check(
+		"an absolute filesystem path is left alone",
+		DotCloudClient.join_origin("", "/srv/tmc/content") == "/srv/tmc/content",
+		"off-web there is no origin and this is a directory"
+	)
+	_check(
+		"and so is a relative directory name",
+		DotCloudClient.join_origin("https://games.example.net", "content") == "content"
+	)
+
+	# The end of it: the URL the client would actually ask for.
+	var client := DotCloudClient.new()
+	client.http_base_urls = PackedStringArray(["/content"])
+	client.manifest_url_template = "{base}/{id}/manifest.json"
+	_check(
+		"off-web the root-relative base is still refused rather than mangled",
+		Array(client.manifest_urls_for(&"surf_mesa")) == ["/content/surf_mesa/manifest.json"],
+		"DotWeb.origin() is empty here"
+	)
+	var absolute := DotCloudClient.new()
+	absolute.http_base_urls = PackedStringArray(["https://games.example.net/content"])
+	absolute.manifest_url_template = "{base}/{id}/manifest.json"
+	_check(
+		"and an absolute base builds the manifest URL it always did",
+		Array(absolute.manifest_urls_for(&"surf_mesa"))
+			== ["https://games.example.net/content/surf_mesa/manifest.json"]
+	)
+
+	client.free()
+	absolute.free()
+
+	_sections_completed += 1
+
+
 func _test_probe(base: String, key_pair: Dictionary) -> void:
 	_sections_entered += 1
 	_line("[section] probe")
