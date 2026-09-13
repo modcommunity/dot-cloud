@@ -149,6 +149,16 @@ func in_groups(selected: PackedStringArray) -> bool:
 ## Sharded by the first two hex characters: a flat directory with 50,000 entries
 ## is slow to enumerate on every filesystem in the target set, and on some of
 ## them slow to open a single file in.
+## What to call this file in front of a player.
+##
+## [member path] is a project-relative path like `maps/surf_mesa/geometry.bin`, which
+## is the right thing to log and too much to put in a progress line that has to fit
+## beside a percentage. The basename is what a person recognises.
+func display_name() -> String:
+	var base := path.get_file()
+	return base if base != "" else path
+
+
 func object_path() -> String:
 	return "%s/%s" % [sha256.substr(0, 2), sha256]
 

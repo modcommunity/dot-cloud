@@ -266,10 +266,39 @@ func _test_failover(
 	if client == null:
 		return
 
+	# [b]What a progress display is actually given, over a real transfer.[/b] The
+	# payload used to carry an active COUNT, which answers "how busy" -- a question
+	# nobody watching a download has. A shell showing a filename can only show one if
+	# one arrives, and a synthetic payload in a screenshot harness proves the label and
+	# not the plumbing.
+	# [b]Both of these are containers, and the int this used to keep was not.[/b] A
+	# GDScript lambda captures by VALUE, so `seen_total = maxi(...)` inside one assigns
+	# to a copy and the outer variable is still 0 when the check reads it -- which read
+	# as "the payload carries no total_files" about a payload that carries it on every
+	# emit. An Array captured the same way shares its buffer, so appending to one is
+	# visible outside. Mutate, never assign.
+	var seen_files := PackedStringArray()
+	var totals: Array = []
+	client.progress_changed.connect(func(p: Dictionary) -> void:
+		var f := str(p.get("current_file", ""))
+		if f != "" and not seen_files.has(f):
+			seen_files.append(f)
+		totals.append(int(p.get("total_files", 0)))
+	)
+
 	# Through acquire() rather than acquire_manifest(): fetching the manifest
 	# over HTTP is itself a path sync_demo never takes — it reads the document
 	# off disk — and a manifest served as bytes has to parse and verify the same.
 	var acquired := await client.acquire(base + "/manifest.json")
+	_check(
+		"progress named the file being fetched", not seen_files.is_empty(),
+		"got %s" % str(Array(seen_files))
+	)
+	var seen_total: int = totals.max() if not totals.is_empty() else 0
+	_check(
+		"and named every file in the transfer", seen_files.size() == seen_total,
+		"%d of %d" % [seen_files.size(), seen_total]
+	)
 	_check(
 		"acquired over HTTP", acquired.ok,
 		"" if acquired.ok else str(acquired.error)

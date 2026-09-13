@@ -60,6 +60,15 @@ var sources: Array[DotCloudSource] = []
 var _http: DotHttp = null
 
 var _active: int = 0
+
+## What is in flight right now, newest first, as player-facing names.
+##
+## [b]A count answers "how busy", which nobody watching a download wants to know.[/b]
+## The number that matters to a person staring at a progress bar is WHICH file --
+## a 200 MB map and a 3 KB manifest produce the same "4 active" and very different
+## amounts of patience. Kept as an ordered list rather than a set so the newest start
+## is what a one-line display shows.
+var _active_files: PackedStringArray = PackedStringArray()
 var _cancelled: bool = false
 var _running: bool = false
 
@@ -378,8 +387,19 @@ func _worker(
 			return
 
 		_active += 1
+		_active_files.append(file.display_name())
+		# Emitted on the START of a file as well as on its bytes: a large file that has
+		# only just begun has moved no bytes yet, and a display driven by byte progress
+		# alone shows the PREVIOUS file's name for as long as the new one takes to
+		# produce its first chunk.
+		_emit_progress(true)
+
 		var res := await _fetch_with_failover(file, manifest)
+
 		_active -= 1
+		var at := _active_files.find(file.display_name())
+		if at >= 0:
+			_active_files.remove_at(at)
 
 		results[file.sha256] = res
 
@@ -589,6 +609,7 @@ func _reset_progress() -> void:
 	_first_required_failure = null
 	last_failure_causes.clear()
 	_active = 0
+	_active_files = PackedStringArray()
 	_rate_samples.clear()
 	_last_emit_ms = 0
 	_throttle_bytes_this_window = 0
@@ -642,6 +663,10 @@ func progress() -> Dictionary:
 		"bytes_per_sec": rate,
 		"eta_sec": eta,
 		"active": _active,
+		"active_files": _active_files.duplicate(),
+		# The one a single-line display should name. Empty between files, which a
+		# caller should render as "the last thing it said" rather than as blank.
+		"current_file": _active_files[_active_files.size() - 1] if not _active_files.is_empty() else "",
 	}
 
 
