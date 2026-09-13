@@ -70,6 +70,88 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 ## hand-editing the manifest.
 var group_rules: Dictionary = {}
 
+## Rewrite `res://` references inside .tscn / .tres to the mount prefix.
+##
+## On by default, because a pack whose scenes still name their authored paths mounts
+## and then fails to find its own scripts. Turn it off for content that is pure data
+## and references nothing, or for a publisher that has already done this itself.
+@export var rewrite_resource_paths: bool = true
+
+## Text resources whose `res://` references have to move with the pack.
+##
+## .tscn and .tres only. A .scn or .res is the binary form of the same thing and
+## cannot be rewritten by string substitution -- a project that saves binary scenes
+## has to publish them already namespaced, and nothing here can tell it so. Godot
+## writes text by default and this family uses text everywhere.
+static func _is_text_resource(rel: String) -> bool:
+	var e := rel.get_extension().to_lower()
+	return e == "tscn" or e == "tres"
+
+
+## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/X` for every X this pack
+## contains, and leaves every other reference exactly as it was.
+##
+## Returns the staged file's path, or "" when nothing needed changing -- so the caller
+## keeps hashing the original and no object is written twice for an identical file.
+func _rewrite_paths(abs: String, staged: String, inside: Dictionary) -> DotResult:
+	var text := FileAccess.get_file_as_string(abs)
+	if text == "" and FileAccess.get_open_error() != OK:
+		return DotResult.fail(DotError.CODE_IO, "Could not read the file.", abs)
+
+	var prefix := "res://%s/%s/%s/" % [mount_root, content_id, version]
+	var out := ""
+	var i := 0
+	var changed := false
+
+	while true:
+		var at := text.find("res://", i)
+		if at < 0:
+			out += text.substr(i)
+			break
+
+		out += text.substr(i, at - i)
+
+		# The reference ends at the first character that cannot be in a path. Scenes
+		# quote them, but .tres and a stray comment do not always, so this stops at
+		# whitespace and quotes rather than assuming a delimiter.
+		var j := at + 6
+		while j < text.length():
+			var c := text[j]
+			if c == '"' or c == "'" or c == " " or c == "\t" or c == "\n" or c == "\r" or c == ")":
+				break
+			j += 1
+
+		var path := text.substr(at + 6, j - (at + 6))
+
+		# Already namespaced: publishing a directory that was published before, or a
+		# source tree somebody has namespaced by hand. Rewriting it again would bury
+		# the content one level deeper on every republish.
+		if inside.has(path) and not path.begins_with("%s/%s/%s/" % [mount_root, content_id, version]):
+			out += prefix + path
+			changed = true
+		else:
+			out += "res://" + path
+
+		i = j
+
+	if not changed:
+		return DotResult.success("")
+
+	var parent := DotPaths.ensure_parent_dir(staged)
+	if not parent.ok:
+		return parent
+
+	var f := FileAccess.open(staged, FileAccess.WRITE)
+	if f == null:
+		return DotResult.fail(
+			DotError.CODE_IO, "Could not write the rewritten file.", staged
+		)
+	f.store_string(out)
+	f.close()
+
+	return DotResult.success(staged)
+
+
 ## Marks files optional by path prefix.
 var optional_prefixes: PackedStringArray = PackedStringArray()
 
@@ -128,10 +210,44 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	var written := 0
 	var deduped := 0
 	var total_bytes := 0
+	var rewritten := 0
 	var seen := {}
+
+	# Every path this pack will contain, so the rewrite below can tell a reference to
+	# its own content from a reference to the host build's.
+	var inside := {}
+	for rel in relatives:
+		inside[rel] = true
+
+	var staging := out_dir.path_join(".rewritten")
+	if rewrite_resource_paths:
+		DotPaths.remove_tree(staging)
 
 	for rel in relatives:
 		var abs := source_dir.path_join(rel)
+
+		# [b]A scene names its script by ABSOLUTE path, and the pack does not mount at
+		# the path it was authored at.[/b] Godot writes `res://game/thing.gd` into a
+		# .tscn, the pack mounts at `res://<mount_root>/<id>/<version>/`, and the scene
+		# then loads with its script missing -- measured:
+		#
+		#     mount: true   scene exists: true
+		#     ERROR: Attempt to open script 'res://s.gd' … 'File not found'
+		#
+		# which is the worst failure shape there is: the pack mounts, the scene loads,
+		# and nothing says a word until something tries to run one of its scripts.
+		# Rewritten here, where the id and the version are known and the bytes have not
+		# been hashed yet, so the manifest covers what will actually be mounted.
+		#
+		# Only paths this pack CONTAINS are moved. A scene referencing
+		# `res://addons/dot_core/…` means the host build's copy and must stay absolute.
+		if rewrite_resource_paths and _is_text_resource(rel):
+			var staged := _rewrite_paths(abs, staging.path_join(rel), inside)
+			if not staged.ok:
+				return staged.wrap("Could not rewrite paths in '%s'." % rel)
+			if str(staged.value) != "":
+				abs = str(staged.value)
+				rewritten += 1
 
 		var safe := DotPaths.safe_relative(rel)
 		if not safe.ok:
@@ -208,6 +324,13 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if not saved.ok:
 		return saved
 
+	# The staged rewrites have been hashed and copied into objects/ by now, and every
+	# object is named by its own hash -- so the staging tree is pure duplication and
+	# leaving it behind would double the size of a published directory somebody is
+	# about to upload.
+	if rewrite_resource_paths:
+		DotPaths.remove_tree(staging)
+
 	DotLog.info(
 		CHANNEL,
 		"published",
@@ -218,6 +341,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			"deduped": deduped,
 			"written": written,
 			"bytes": DotPaths.format_bytes(total_bytes),
+			"rewritten": rewritten,
 			"signed": manifest.signature != "",
 			"out": out_dir,
 		}
@@ -229,6 +353,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"files": manifest.files.size(),
 		"objects": seen.size(),
 		"objects_written": written,
+		"rewritten": rewritten,
 		"deduped": deduped,
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",

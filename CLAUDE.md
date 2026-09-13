@@ -337,6 +337,40 @@ The client-side pack is built at mount time by `PCKPacker`, not by the publisher
 cached objects live at hash-named paths and must appear inside the pack at
 `res://<prefix>/<manifest path>`. No export preset can express that remapping.
 
+### A scene's references move with the pack, and the publisher is what moves them
+
+Godot writes a scene's script and resource references as **absolute** `res://` paths,
+and a pack does not mount at the path its content was authored at. So a published
+scene named its script at `res://game/thing.gd`, the pack mounted at
+`res://dot_cloud/<id>/<version>/`, and the result was measured to be:
+
+```
+mount: true   scene exists: true
+ERROR: Attempt to open script 'res://s.gd' resulted in error 'File not found'.
+```
+
+The worst failure shape available: the pack mounts, the scene loads, and nothing says
+a word until something calls a method on a script that is not there. It is the same
+constraint `class_name` has — "the pack is data, the code ships in the build" — arriving
+by a second route, and it is why every game in this family had to be converted to
+relative preloads before any of them could be delivered.
+
+`DotCloudPublisher.rewrite_resource_paths` (on by default) rewrites `res://X` to
+`res://<mount_root>/<id>/<version>/X` inside `.tscn` and `.tres`, for every X **the pack
+contains**. A reference to `res://addons/dot_core/…` means the host build's copy and is
+left alone; so is one that is already namespaced, or republishing would bury the content
+one level deeper every time. The rewrite happens before hashing, so the manifest covers
+the bytes that will actually be mounted, and the staged copies are deleted once their
+objects are written.
+
+**Binary `.scn` and `.res` cannot be rewritten this way** and are not attempted. A
+project that saves binary scenes has to publish them already namespaced, and nothing
+here can tell it so — Godot writes text by default and this family uses text everywhere.
+
+`examples/delivered_scene_demo.tscn` is the assertion, and it is the only suite here
+that publishes a scene WITH a script: every other one publishes data, which is exactly
+why this went unnoticed.
+
 ## Validating changes
 
 ```bash
@@ -357,6 +391,10 @@ godot --headless --path . res://examples/http_demo.tscn
 # answers, one that never suspends, resume, silence, a mid-file drop, one that
 # over-serves, one that is merely slow, and a source with nowhere to fetch from.
 godot --headless --path . res://examples/netchan_demo.tscn
+
+# A scene delivered in a pack, with its script, actually running. The case the
+# whole delivery path exists for, and the one nothing here had ever executed.
+godot --headless --path . res://examples/delivered_scene_demo.tscn
 
 # The cache on its own: eviction under pressure, refs, LRU order, the index
 # against the directory, partial housekeeping, verify_all, clear_all.
