@@ -93,7 +93,15 @@ script = ExtResource("1")
 	cloud.name = "Cloud"
 	cloud.config = DotCloudConfig.new()
 	cloud.config.cache_dir = WORK.path_join("cache")
-	cloud.config.trusted_keys = {"test": str(pair["public"])}
+	# [b]Scoped to content ids this pack is NOT one of, first.[/b] A trusted key used to
+	# mean "trusted for everything there is", which with one key is a distinction without
+	# a difference -- and the moment a deployment adds a second publisher it is the hole
+	# that lets them sign a manifest claiming somebody else's game. The signature below is
+	# genuinely valid; what is being checked is that a valid signature from the wrong key
+	# is still refused.
+	cloud.config.trusted_keys = {
+		"test": {"key": str(pair["public"]), "content_ids": ["somebody_else_*"]}
+	}
 	cloud.config_file = ""
 	# [b]Deliberately NOT told where the content is.[/b] The published directory holds the
 	# manifest AND its objects, so naming the manifest names the objects too -- and this
@@ -104,6 +112,23 @@ script = ExtResource("1")
 	# on a box that had every one of them. Left empty here so this suite is the thing that
 	# says so.
 	add_child(cloud)
+
+	var refused: Variant = await cloud.acquire(out.path_join("manifest.json"))
+	_check(
+		refused is DotResult and not (refused as DotResult).ok,
+		"a key scoped to other content cannot vouch for this pack",
+		"it mounted anyway" if refused is DotResult and (refused as DotResult).ok else ""
+	)
+	_check(
+		not ResourceLoader.exists("res://dot_cloud/delivered_scene/1.0.0/scenes/world.tscn"),
+		"and nothing of it was mounted"
+	)
+
+	# The same key, now entitled to this id. A glob because a publisher's namespace is a
+	# prefix in every deployment that has ever had one.
+	cloud.config.trusted_keys = {
+		"test": {"key": str(pair["public"]), "content_ids": ["delivered_*"]}
+	}
 
 	var got: Variant = await cloud.acquire(out.path_join("manifest.json"))
 	_check(got is DotResult and (got as DotResult).ok, "the client acquires and mounts it",

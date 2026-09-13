@@ -185,6 +185,38 @@ exposes no bit count, and the alternative was walking the DER inside the PEM.
 A weak key is `CODE_FORBIDDEN` (not considered), never `CODE_INTEGRITY` (
 considered, bytes disagreed); the demo asserts on which.
 
+### A key says what it is trusted FOR
+
+`trusted_keys` maps a key id to a PEM, and for most of this addon's life that was the
+whole of it — which meant **every trusted key was trusted for every content id there
+is**. With one key that is a distinction without a difference. With two it is the hole:
+the second publisher signs a manifest claiming `content_id: arena`, and any client that
+has not already mounted it takes the pack — code, in that player's process, under
+somebody else's game's name.
+
+An entry may now name its namespace, and a bare PEM still means everything, because that
+is what every config written before this said:
+
+```json
+"trusted_keys": {
+    "first-party": "-----BEGIN PUBLIC KEY-----\n…",
+    "community-alice": {
+        "key": "-----BEGIN PUBLIC KEY-----\n…",
+        "content_ids": ["alice_*"]
+    }
+}
+```
+
+`verify_for` does both halves and the failure says which — `The manifest is not signed by
+any trusted key` against `'community-alice' is not trusted to publish 'arena'` — and the
+order is not cosmetic: **verification first, entitlement second**, because a scope check
+on an unverified manifest is a check on a claim the attacker wrote.
+
+`DotCloudConfig.validate()` warns about several keys with at least one unscoped, and says
+nothing about a single unscoped key, which is every deployment today. It warns rather than
+refuses: a client that will not start is worse than one that says so, and the content
+still has to be signed by a key in the set either way.
+
 ## Content addressing
 
 Objects are stored under their SHA-256, not their path:
@@ -336,6 +368,30 @@ tell "called it wrong" from "content is bad".
 The client-side pack is built at mount time by `PCKPacker`, not by the publisher:
 cached objects live at hash-named paths and must appear inside the pack at
 `res://<prefix>/<manifest path>`. No export preset can express that remapping.
+
+### An asset the engine has to IMPORT is not shippable as its source
+
+A `.glb` or a `.png` is **not a loadable resource**. The editor imports it into
+`.godot/imported/` and the `.import` marker beside it redirects every load there;
+nothing imports at runtime, on any platform. So a pack published from a source tree,
+with `.import` in `exclude_suffixes` and `.godot` in `exclude_dirs`, ships the bytes of
+an asset that no `load()` can open — and says nothing, because the file is right there:
+
+```
+character-a.glb    exists=false  file=true   load=null
+arena.tscn         exists=true   file=true   load=PackedScene
+```
+
+`file=true` is the trap. Nothing reports a missing file, because nothing is missing.
+
+`include_imported` (on by default) ships the imported form and the markers, and
+`_is_text_resource` now covers `.import` so the rewrite moves the three absolute paths
+inside each marker — the imported resource, the source file, and `dest_files` — onto the
+mount. The `.md5` companions stay behind: they exist so the *editor* can decide whether
+a reimport is needed, and nothing at runtime reads one.
+
+**The source project has to have been imported first.** A repository that has never been
+opened has no `.godot/imported/`, and there is nothing for this to ship.
 
 ### A scene's references move with the pack, and the publisher is what moves them
 

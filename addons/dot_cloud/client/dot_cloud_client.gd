@@ -866,10 +866,11 @@ func verify_manifest(manifest: DotCloudManifest) -> DotResult:
 			# Verify anyway when a signature is present: it costs nothing and a
 			# manifest that claims to be signed but is not should be refused
 			# whatever the policy says.
-			var opportunistic := DotCloudSignature.verify_any(
+			var opportunistic := DotCloudSignature.verify_for(
 				manifest.raw_bytes,
 				manifest.signature,
 				config.trusted_keys,
+				manifest.content_id,
 				manifest.signature_key_id
 			)
 			if not opportunistic.ok and not config.trusted_keys.is_empty():
@@ -886,10 +887,15 @@ func verify_manifest(manifest: DotCloudManifest) -> DotResult:
 			+ "signed bytes to check"
 		)
 
-	return DotCloudSignature.verify_any(
+	# [b]verify_for, not verify_any: a valid signature is half the question.[/b] The other
+	# half is whether the key that produced it is trusted for THIS content id. With one
+	# key in the set the two are the same question; with two they are not, and the gap is
+	# a second publisher signing a manifest that claims to be somebody else's game.
+	return DotCloudSignature.verify_for(
 		manifest.raw_bytes,
 		manifest.signature,
 		config.trusted_keys,
+		manifest.content_id,
 		manifest.signature_key_id
 	)
 

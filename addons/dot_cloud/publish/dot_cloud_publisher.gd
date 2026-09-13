@@ -64,6 +64,33 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 	".git", ".godot", ".svn", "__pycache__",
 ])
 
+## Ship the engine's imported form of assets that have one.
+##
+## [b]Without this a pack can carry a .glb or a .png and deliver nothing.[/b] Those are
+## not loadable resources: the editor imports them into [code].godot/imported/[/code] and
+## every load of the source path is redirected there by the [code].import[/code] marker
+## beside it. Nothing imports at runtime, on any platform -- so a pack built from a source
+## tree, with `.import` in [member exclude_suffixes] and `.godot` in
+## [member exclude_dirs], ships the bytes of an asset that no [method @GDScript.load] can
+## open. Measured, on a real pack:
+##
+## [codeblock]
+## character-a.glb    exists=false file=true  load=null
+## arena.tscn         exists=true  file=true  load=PackedScene
+## [/codeblock]
+##
+## `file=true` is the trap: the bytes are right there, so nothing reports a missing file.
+##
+## With this on, the markers and [code].godot/imported/[/code] come too, and the rewrite
+## moves the three absolute paths inside each marker onto the mount. The [code].md5[/code]
+## companions are left behind: they exist so the EDITOR can tell whether a reimport is
+## needed, and nothing at runtime reads one.
+##
+## Costs what the imported form costs -- for a game whose assets are 18 character meshes,
+## about the size of the meshes again. Turn it off for a pack that is all scenes and
+## scripts, where there is nothing to import.
+var include_imported: bool = true
+
 ## Assigns groups to files by path prefix, as [code]prefix -> group[/code].
 ##
 ## Lets a publisher mark [code]"hd/"[/code] as an optional download without
@@ -83,9 +110,14 @@ var group_rules: Dictionary = {}
 ## cannot be rewritten by string substitution -- a project that saves binary scenes
 ## has to publish them already namespaced, and nothing here can tell it so. Godot
 ## writes text by default and this family uses text everywhere.
+##
+## [b].import too, and that is what makes [member include_imported] work.[/b] An import
+## marker is three absolute paths -- the imported resource, the source file, and the
+## dest_files list -- and all three name the project the asset was authored in. Rewritten
+## like any other reference, they name the mount instead.
 static func _is_text_resource(rel: String) -> bool:
 	var e := rel.get_extension().to_lower()
-	return e == "tscn" or e == "tres"
+	return e == "tscn" or e == "tres" or e == "import"
 
 
 ## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/X` for every X this pack
@@ -365,6 +397,15 @@ func _collect(source_dir: String) -> PackedStringArray:
 	var out := PackedStringArray()
 
 	for rel in DotPaths.list_files_recursive(source_dir):
+		# The engine's imported form, and the markers that point at it. Decided before the
+		# exclusions rather than after, because both of the rules below would drop it:
+		# `.godot` is an excluded directory and `.import` an excluded suffix, and they are
+		# right to be for everything else in there.
+		if _is_imported_form(rel):
+			if include_imported and not rel.ends_with(".md5"):
+				out.append(rel)
+			continue
+
 		var skip := false
 
 		for dir_name in exclude_dirs:
@@ -385,6 +426,11 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 	out.sort()
 	return out
+
+
+## The engine's imported output, or a marker pointing at it.
+static func _is_imported_form(rel: String) -> bool:
+	return rel.begins_with(".godot/imported/") or rel.ends_with(".import")
 
 
 func _copy(from: String, to: String) -> DotResult:

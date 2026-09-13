@@ -32,6 +32,9 @@ extends DotCloudSource
 ## ([code]maps/dm_arena.tscn[/code]) rather than a wall of hashes. Slower — every
 ## candidate has to be hashed to confirm it is the right file — so it is for
 ## development, not production.
+##
+## The hash check is what makes it safe to point at a directory that is not a pack: a
+## same-named file in an unrelated tree is skipped rather than served.
 @export var allow_path_lookup: bool = true
 
 
@@ -111,9 +114,23 @@ func _locate(file: DotCloudFile) -> String:
 			return flat
 
 		if allow_path_lookup:
+			# [b]Confirmed by hash HERE, and the search continues when it does not
+			# match.[/b] A path lookup matches on NAME, and a search directory is not
+			# always a published pack: dot-server searches `content/` as well as `dist/`,
+			# and `content/README.md` is a different document from the `README.md` in a
+			# game's pack. The first name-match won, `fetch` hashed it, and the whole
+			# acquisition failed with
+			#
+			#     1 missing, first: README.md - [forbidden] Not allowed.
+			#
+			# naming the network, for a file whose correct copy was in the very next
+			# search directory. By-hash and flat hits need no check: those paths ARE the
+			# hash, and `put_bytes` verifies regardless.
 			var by_path := "%s/%s" % [root, file.path]
 			if FileAccess.file_exists(by_path):
-				return by_path
+				var hashed := DotHash.sha256_file(by_path)
+				if hashed.ok and String(hashed.value) == file.sha256:
+					return by_path
 
 	return ""
 

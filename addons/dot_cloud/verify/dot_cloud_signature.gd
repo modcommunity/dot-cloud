@@ -111,6 +111,122 @@ static func verify(
 	return DotResult.success(true)
 
 
+# --- Trusted keys, and what each one is trusted FOR ------------------------
+#
+# [b]A key used to be trusted for every content id there is, and with one key that is a
+# distinction without a difference.[/b] The moment a deployment adds a second publisher it
+# is not: nothing checked that the key which verified a manifest was entitled to the id
+# inside it, so a second key could sign a manifest claiming `content_id: arena` and every
+# client that had not already mounted `arena@…` would take it -- the pack's own scripts,
+# under the name of somebody else's game.
+#
+# So an entry may name what it covers:
+#
+# [codeblock]
+# "trusted_keys": {
+#     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
+#     "community-alice": {
+#         "key": "-----BEGIN PUBLIC KEY-----\n…",
+#         "content_ids": ["alice_*"]
+#     }
+# }
+# [/codeblock]
+#
+# A bare string is the old spelling and still means "anything", because every existing
+# config is written that way and silently narrowing them would break deployments that are
+# correct. [method DotCloudConfig.validate] warns when a set has more than one key and any
+# of them is unscoped, which is the arrangement this exists to prevent.
+
+
+## The PEM in a trusted-keys entry, in either spelling.
+static func key_pem(entry: Variant) -> String:
+	if entry is Dictionary:
+		return str((entry as Dictionary).get("key", ""))
+	return str(entry)
+
+
+## The content ids an entry may sign for. Empty means every id.
+static func key_scope(entry: Variant) -> PackedStringArray:
+	var out := PackedStringArray()
+
+	if not (entry is Dictionary):
+		return out
+
+	var raw: Variant = (entry as Dictionary).get("content_ids", [])
+
+	if raw is String:
+		# One id written without a list. Accepted because it is what somebody writes
+		# first, and refusing it would be a syntax lesson rather than a security control.
+		out.append(str(raw))
+		return out
+
+	if raw is Array or raw is PackedStringArray:
+		for id in raw:
+			out.append(str(id))
+
+	return out
+
+
+## Whether [param entry] is entitled to have signed content called [param content_id].
+##
+## Patterns are globs over the id -- [code]alice_*[/code] -- because a publisher's
+## namespace is a prefix in every deployment that has ever had one, and a glob says so
+## without inventing a syntax. An empty scope covers everything.
+static func scope_allows(entry: Variant, content_id: String) -> bool:
+	var scope := key_scope(entry)
+
+	if scope.is_empty():
+		return true
+
+	for pattern in scope:
+		if pattern == "" :
+			continue
+		if content_id == pattern or content_id.match(pattern):
+			return true
+
+	return false
+
+
+## [method verify_any], and then: was that key allowed to sign THIS content?
+##
+## [b]Both halves, because either alone is a hole.[/b] A valid signature from a key that
+## is not entitled to this id is exactly the attack the scope exists for, and a scope
+## check on an unverified manifest is a check on a claim the attacker wrote. Verification
+## first, then entitlement, and the failure says which.
+static func verify_for(
+	bytes: PackedByteArray,
+	signature_b64: String,
+	keys: Dictionary,
+	content_id: String,
+	preferred_key_id: String = ""
+) -> DotResult:
+	var verified := verify_any(bytes, signature_b64, keys, preferred_key_id)
+
+	if not verified.ok:
+		return verified
+
+	var key_id := str(verified.value)
+
+	if not keys.has(key_id):
+		# verify_any returns a key from the set it was handed, so this cannot happen
+		# unless somebody changes one of the two. Refusing beats trusting the impossible.
+		return DotResult.fail(
+			DotError.CODE_INTERNAL,
+			"The verifying key is not in the trusted set.",
+			key_id
+		)
+
+	if not scope_allows(keys[key_id], content_id):
+		return DotResult.fail(
+			DotError.CODE_FORBIDDEN,
+			"'%s' is not trusted to publish '%s'." % [key_id, content_id],
+			"the signature is valid; the key is scoped to %s"
+				% ", ".join(key_scope(keys[key_id]))
+		)
+
+	return DotResult.success(key_id)
+
+
 ## Verifies against any of several trusted keys.
 ##
 ## Several keys is the normal case, not an exception: rotating a signing key
@@ -144,7 +260,7 @@ static func verify_any(
 
 	var last: DotResult = null
 	for key_id in order:
-		last = verify(bytes, signature_b64, str(keys[key_id]))
+		last = verify(bytes, signature_b64, key_pem(keys[key_id]))
 		if last.ok:
 			DotLog.debug(
 				CHANNEL, "manifest signature verified", {"key": str(key_id)}

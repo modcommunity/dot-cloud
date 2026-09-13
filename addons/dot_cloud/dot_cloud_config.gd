@@ -53,6 +53,24 @@ extends DotConfig
 ##
 ## Several entries is normal: rotating a key needs a window where both are
 ## accepted. See [DotCloudSignature].
+##
+## [b]An entry can also say what it is trusted FOR[/b], which matters as soon as there is
+## more than one publisher:
+##
+## [codeblock]
+## {
+##     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
+##     "community-alice": {
+##         "key": "-----BEGIN PUBLIC KEY-----\n…",
+##         "content_ids": ["alice_*"]
+##     }
+## }
+## [/codeblock]
+##
+## A bare PEM means every content id, which is what every config written before this
+## said and still means. [method validate] warns about the combination that is actually
+## dangerous -- several keys, at least one of them unscoped -- rather than about the
+## single-key case, which is every deployment today.
 @export var trusted_keys: Dictionary = {}
 
 ## Re-hash every cached object on startup.
@@ -154,6 +172,41 @@ func validate() -> DotResult:
 			"require_signed_manifests is on but no trusted_keys are configured.",
 			"add a key, or set require_signed_manifests = false and accept that "
 			+ "any server can mount arbitrary content in this client"
+		)
+
+	var unscoped := PackedStringArray()
+
+	for key_id in trusted_keys:
+		var entry: Variant = trusted_keys[key_id]
+
+		if DotCloudSignature.key_pem(entry).strip_edges() == "":
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"trusted_keys['%s'] has no public key." % str(key_id),
+				"an entry is a PEM string, or { \"key\": PEM, \"content_ids\": [...] }"
+			)
+
+		if DotCloudSignature.key_scope(entry).is_empty():
+			unscoped.append(str(key_id))
+
+	# [b]Warned, not refused, and only for the shape that is actually a hole.[/b] One
+	# unscoped key is every deployment in existence and is fine: the only content it can
+	# vouch for is content its own holder signed. Several keys with one of them unscoped
+	# is the arrangement where a publisher can sign under another publisher's id, and the
+	# operator who added the second key is the person who can still fix it.
+	#
+	# Not fatal, because a client that refuses to start is worse than one that says so:
+	# the content still has to be signed by a key in this set either way.
+	if trusted_keys.size() > 1 and not unscoped.is_empty():
+		DotLog.warn(
+			"cloud",
+			"a trusted key is not scoped to any content id, and it is not the only key",
+			{
+				"unscoped": unscoped,
+				"keys": trusted_keys.size(),
+				"hint": "give each entry content_ids, so one publisher cannot sign "
+					+ "under another's id",
+			}
 		)
 
 	if parallel_downloads < 1:

@@ -183,10 +183,20 @@ func fetch(
 			# it served bytes that do not match what the manifest promised, and
 			# another mirror may serve the right ones.
 			note_failure()
+			# [b]With the reason.[/b] "failed verification" alone cannot tell a mirror
+			# serving the wrong bytes from a 404 body being hashed, and those are
+			# opposite problems: one is a corrupt or stale host, the other is a URL
+			# built wrong. The detail carries both hashes and the size.
 			DotLog.warn(
 				CHANNEL,
 				"content from mirror failed verification",
-				{"base": base, "file": file.path}
+				{
+					"base": base,
+					"file": file.path,
+					"url": url,
+					"expected_bytes": file.size,
+					"why": str(committed.error),
+				}
 			)
 			continue
 
