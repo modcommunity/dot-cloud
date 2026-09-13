@@ -66,6 +66,7 @@ func _run() -> void:
 	await _section_mount_and_read()
 	await _section_two_versions()
 	await _section_unmount_and_remount()
+	await _section_republished_version()
 	await _section_corrupt_object()
 	await _section_queries()
 
@@ -79,6 +80,59 @@ func _run() -> void:
 	_line("")
 	_line("[b]%d checks, %d failed[/b]" % [_checks, _failures])
 	_finish(1 if _failures > 0 else 0)
+
+
+# --- The assembled pack is cached by CONTENT, not by version ----------------
+
+## Republishing one version with different files, which is how a game gets fixed.
+##
+## [b]Measured in production.[/b] The assembled PCK was cached at
+## `packs/<id>-<version>.pck` and reused whenever that path existed, on the stated
+## assumption that a pack built for one id@version is byte-identical to any other. That
+## is true of the bytes a publisher has already shipped and false of the loop that
+## produces them: a box republished `g2gfast@0.1.0` from a corrected source, the client
+## downloaded and verified every object of the NEW manifest, and then mounted the OLD
+## pack —
+##
+##     A required file is not readable after mounting.
+##     res://dot_cloud/g2gfast/0.1.0/game/g2g_paths.gd
+##
+## a file that is in the manifest, is in the store, and is not in the pack. Caught by
+## `_check_prefix`, which is the last thing between that and a game with no behaviour.
+func _section_republished_version() -> void:
+	_sections_started += 1
+	_line("[b]6. a version republished with different files[/b]")
+
+	var first := _blob("republish-a", 512)
+	_store.put_bytes(first, DotHash.sha256_bytes(first))
+
+	var m1 := _manifest("republished", "1.0.0", [["a.txt", first, true]])
+	var r1: DotResult = await DotCloudMounter.new(_config).mount(m1, _store, _scheduler)
+	_check("the first publish mounts", r1.ok, str(r1.error) if not r1.ok else "")
+
+	# A SECOND mounter over the SAME cache: one process cannot mount a key twice, and
+	# the bug is about what the next process finds sitting in the pack cache.
+	var added := _blob("republish-b", 512)
+	_store.put_bytes(added, DotHash.sha256_bytes(added))
+
+	var m2 := _manifest("republished", "1.0.0", [
+		["a.txt", first, true],
+		["b.txt", added, true],
+	])
+
+	var r2: DotResult = await DotCloudMounter.new(_config).mount(m2, _store, _scheduler)
+	_check("and the republished one mounts", r2.ok, str(r2.error) if not r2.ok else "")
+
+	# The whole point. Before the fix this is the file the cached pack does not have,
+	# and `_check_prefix` refuses the mount above rather than this line failing.
+	_check(
+		"the file added by the republish is readable",
+		FileAccess.file_exists("res://dot_cloud/republished/1.0.0/b.txt"),
+		"the cached pack was reused for content that changed"
+	)
+
+	_line("")
+	_sections_finished += 1
 
 
 # --- 1. The version is a path component ------------------------------------

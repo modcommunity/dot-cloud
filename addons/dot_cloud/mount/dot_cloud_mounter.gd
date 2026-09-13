@@ -105,7 +105,7 @@ func mount(
 		if not verified.ok:
 			return verified
 
-	var pack_path := _pack_path(manifest)
+	var pack_path := _pack_path(manifest, wanted)
 
 	var built := _build_pack(manifest, store, wanted, pack_path)
 	if not built.ok:
@@ -172,9 +172,11 @@ func _build_pack(
 	files: Array[DotCloudFile],
 	pack_path: String
 ) -> DotResult:
-	# A pack already built for this exact content is byte-identical: both the
-	# prefix (id + version) and every object hash are fixed. Rebuilding it would
-	# be pure waste on every subsequent launch.
+	# A pack already built for this exact content is byte-identical, and now the path
+	# says so: [method _pack_path] fingerprints the file list, so reuse here means the
+	# same paths mapped to the same hashes. It used to mean only the same id and version,
+	# which is a claim about the publisher's discipline rather than about these bytes --
+	# and republishing one version from a corrected source is how a game gets fixed.
 	if FileAccess.file_exists(pack_path):
 		DotLog.debug(
 			CHANNEL, "reusing cached pack", {"pack": pack_path.get_file()}
@@ -232,16 +234,53 @@ func _build_pack(
 	return DotResult.success(pack_path)
 
 
-func _pack_path(manifest: DotCloudManifest) -> String:
+func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
 	# The version is in the filename as well as the mount prefix, so publishing a
 	# new version never overwrites the pack a running process has open — which on
 	# Windows would fail outright, and elsewhere would corrupt it.
+	#
+	# [b]And a fingerprint of the CONTENT, because a version is not immutable in
+	# practice.[/b] This was `<id>-<version>.pck` and [method _build_pack] reuses whatever
+	# is at the path, on the stated assumption that a pack built for one id@version is
+	# byte-identical to any other. That is true of the published bytes and false of the
+	# development loop that produces them: republishing `g2gfast@0.1.0` from a corrected
+	# source is the ordinary way to fix a game, and every client that had mounted the
+	# previous one went on serving it from this cache. Measured in production — a box
+	# republished a pack whose sources had been fixed, verified every object of the NEW
+	# manifest, and then mounted the OLD pack:
+	#
+	#     A required file is not readable after mounting.
+	#     res://dot_cloud/g2gfast/0.1.0/game/g2g_paths.gd
+	#
+	# a file that is in the manifest, is in the store, and is not in the pack. The check
+	# that caught it is the last one before a game loads.
+	#
+	# It also fixes a second collision nobody had hit yet: [param files] is the WANTED
+	# set, so two different group selections of one id@version produced two different
+	# packs at one path, and whichever mounted first won.
 	return config.cache_dir.path_join(
-		"packs/%s-%s.pck" % [
+		"packs/%s-%s-%s.pck" % [
 			DotPaths.slugify(manifest.content_id),
 			DotPaths.slugify(manifest.version),
+			_pack_fingerprint(files),
 		]
 	)
+
+
+## What the assembled pack will contain, as a short stable digest.
+##
+## Path AND hash, so a file that moved and a file that changed are both a different
+## pack. Sorted, because the manifest's order is the publisher's and two publishes of
+## identical content must agree.
+func _pack_fingerprint(files: Array[DotCloudFile]) -> String:
+	var lines := PackedStringArray()
+
+	for f in files:
+		lines.append("%s:%s" % [f.path, f.sha256])
+
+	lines.sort()
+
+	return DotHash.sha256_text("\n".join(lines)).substr(0, 16)
 
 
 func _verify_objects(
