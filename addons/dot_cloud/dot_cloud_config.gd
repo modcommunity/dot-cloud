@@ -189,25 +189,42 @@ func validate() -> DotResult:
 		if DotCloudSignature.key_scope(entry).is_empty():
 			unscoped.append(str(key_id))
 
-	# [b]Warned, not refused, and only for the shape that is actually a hole.[/b] One
-	# unscoped key is every deployment in existence and is fine: the only content it can
-	# vouch for is content its own holder signed. Several keys with one of them unscoped
-	# is the arrangement where a publisher can sign under another publisher's id, and the
-	# operator who added the second key is the person who can still fix it.
+	# [b]Two different situations, and only one of them is a mistake.[/b] The first
+	# version warned about every set with more than one key and anything unscoped, which
+	# is what a self-hosted server looks like the moment it publishes its own packs
+	# alongside ours -- a warning on a correct stock configuration, which is how a warning
+	# stops being read in the one place it has earned its keep. That lesson is written
+	# down elsewhere in this tree at the cost of a map.
 	#
-	# Not fatal, because a client that refuses to start is worse than one that says so:
+	# Nothing scoped is the model this addon shipped with and is a coherent one: every
+	# publisher in the set is trusted for everything, which is exactly what an operator
+	# means by adding their own key beside ours on their own box. Said once, at info.
+	#
+	# SOME scoped and some not is the inconsistent one. Somebody meant to restrict a
+	# publisher -- that is what a `content_ids` entry is -- and left another key that can
+	# sign anything, including the ids they just restricted. The restriction is
+	# decorative, and the person who wrote it is the person who can still fix it.
+	#
+	# Neither is fatal. A client that refuses to start is worse than one that says so, and
 	# the content still has to be signed by a key in this set either way.
 	if trusted_keys.size() > 1 and not unscoped.is_empty():
-		DotLog.warn(
-			"cloud",
-			"a trusted key is not scoped to any content id, and it is not the only key",
-			{
-				"unscoped": unscoped,
-				"keys": trusted_keys.size(),
-				"hint": "give each entry content_ids, so one publisher cannot sign "
-					+ "under another's id",
-			}
-		)
+		if unscoped.size() == trusted_keys.size():
+			DotLog.info(
+				"cloud",
+				"every trusted key may sign any content",
+				{"keys": trusted_keys.size()}
+			)
+		else:
+			DotLog.warn(
+				"cloud",
+				"a trusted key is unscoped while others are scoped, so the scopes "
+				+ "restrict nothing",
+				{
+					"unscoped": unscoped,
+					"keys": trusted_keys.size(),
+					"hint": "give every entry content_ids, or none of them",
+				}
+			)
 
 	if parallel_downloads < 1:
 		return DotResult.fail(
