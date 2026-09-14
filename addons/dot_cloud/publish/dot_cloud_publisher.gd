@@ -232,6 +232,29 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	manifest.metadata = metadata
 
 	var relatives := _collect(source_dir)
+
+	# [b]An imported asset's OUTPUT lives at the project root, which is not always inside
+	# the directory being published.[/b] `_collect` walks the source, so publishing a
+	# whole project picks up `.godot/imported/` for free -- and publishing a SUBDIRECTORY
+	# of one, which is how every imported map is published
+	# (`--content ../game-g2gfast/maps/imported`), picks up the `.import` markers and
+	# none of the files they point at. The marker then names
+	# `res://.godot/imported/<name>.ctex`, the pack does not contain it, and the host
+	# does not have it either:
+	#
+	#     ERROR: Unable to open file: res://.godot/imported/nature_sand_wavey_1.png-….ctex
+	#     WARNING: Loaded resource as image file, this will not work on export.
+	#
+	# The warning is Godot falling back to reading the PNG directly, which works on a
+	# dedicated server and does not work in an export -- so this failed loudly on the
+	# machine that could survive it and would have failed silently on the ones that
+	# could not.
+	var extra := _imported_outputs_for(source_dir, relatives)
+
+	for rel in extra:
+		if not relatives.has(rel):
+			relatives.append(rel)
+
 	if relatives.is_empty():
 		return DotResult.fail(
 			DotError.CODE_INVALID,
@@ -256,7 +279,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		DotPaths.remove_tree(staging)
 
 	for rel in relatives:
-		var abs := source_dir.path_join(rel)
+		# `extra` entries come from the project root; everything else from the source.
+		var abs: String = extra.get(rel, source_dir.path_join(rel))
 
 		# [b]A scene names its script by ABSOLUTE path, and the pack does not mount at
 		# the path it was authored at.[/b] Godot writes `res://game/thing.gd` into a
@@ -426,6 +450,81 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 	out.sort()
 	return out
+
+
+## Imported outputs an `.import` marker in this pack points at, as `rel -> absolute`.
+##
+## Empty when the source IS a project root -- `_collect` has already found them -- and
+## when the source is not inside a Godot project at all, which is a legitimate thing to
+## publish and simply has no imported anything.
+func _imported_outputs_for(
+	source_dir: String, relatives: PackedStringArray
+) -> Dictionary:
+	var out := {}
+
+	if not include_imported:
+		return out
+
+	var root := _project_root_of(source_dir)
+
+	if root == "" or root.simplify_path() == source_dir.simplify_path():
+		return out
+
+	for rel in relatives:
+		if not rel.ends_with(".import"):
+			continue
+
+		var text := FileAccess.get_file_as_string(source_dir.path_join(rel))
+
+		# `path=` for a single output, `dest_files=[…]` for the general case. Both are
+		# read: an importer may write either, and a marker naming an output this misses
+		# is an asset that silently does not load.
+		for hit in _res_paths_in(text):
+			if not hit.begins_with(".godot/"):
+				continue
+			if FileAccess.file_exists(root.path_join(hit)):
+				out[hit] = root.path_join(hit)
+
+	return out
+
+
+## Every `res://…` path in a text blob, as paths relative to the project root.
+func _res_paths_in(text: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var i := 0
+
+	while true:
+		var at := text.find("res://", i)
+		if at < 0:
+			break
+
+		var j := at + 6
+		while j < text.length() and not (text[j] in ['"', "'", " ", "\t", "\n", "\r", ",", "]", ")"]):
+			j += 1
+
+		var path := text.substr(at + 6, j - (at + 6))
+		if path != "" and not out.has(path):
+			out.append(path)
+
+		i = j
+
+	return out
+
+
+## The Godot project [param dir] sits in, or "" when it is not inside one.
+func _project_root_of(dir: String) -> String:
+	var at := dir.simplify_path().rstrip("/")
+
+	# Bounded rather than `while true`: a path that never yields a parent would spin, and
+	# no project in this family is twelve directories deep.
+	for _i in range(12):
+		if at == "" or at == "/" or at == "res:/" or at == "user:/":
+			return ""
+		if FileAccess.file_exists(at.path_join("project.godot")):
+			return at
+		at = at.get_base_dir()
+
+	return ""
 
 
 ## The engine's imported output, or a marker pointing at it.
