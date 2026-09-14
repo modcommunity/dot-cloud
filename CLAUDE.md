@@ -423,6 +423,38 @@ objects are written.
 project that saves binary scenes has to publish them already namespaced, and nothing
 here can tell it so — Godot writes text by default and this family uses text everywhere.
 
+### …and the binary form an IMPORT produces is exactly that case, so the mount fixes it instead
+
+The paragraph above was written about a project that chooses to save binary scenes, and it
+turned out to describe every project with art in it. **An imported `.glb` becomes a binary
+`.scn` under `.godot/imported/`, and its reference to its own texture is recorded as a UID
+with the authored absolute path as the fallback.** Neither survives being mounted
+somewhere else: the UID is not registered in the host, so the loader falls back to the
+path, and the path names the project the asset was authored in.
+
+```
+invalid UID: 'uid://reboanwombd2' - using text path instead:
+    'res://assets/kenney/survival/Textures/colormap.png'
+Resource file not found: res://assets/kenney/survival/Textures/colormap.png
+```
+
+Measured in game-buses-from-hell, the first game in this family to vendor art: the crates'
+meshes loaded, their atlas did not, and the scene node the model was instanced under
+"vanished" — a game that plays perfectly and appears to have shipped with no art at all.
+**Both of those lines are warnings.** The pack verified, mounted and loaded; nothing failed.
+
+The fix is not a rewrite, because these bytes cannot be rewritten: `ResourceUID` is
+writable at runtime, and every `.import` marker in the pack names a UID and the file it
+belongs to — with its paths already moved onto the mount by the rewrite above. So
+`DotCloudMounter._register_uids` walks the markers after the pack is mounted and points
+each id at the mounted copy, and the binary form's own reference resolves with nothing
+touched. The count is in the mount's log line (`uids=5`), because "the art is white" and
+"the art is missing" are the same picture and different causes.
+
+`set_id` when the host already knows an id and `add_id` when it does not — they are
+separate calls and the wrong one is an error rather than an update, which a host that has
+mounted an earlier version of the same pack will hit.
+
 `examples/delivered_scene_demo.tscn` is the assertion, and it is the only suite here
 that publishes a scene WITH a script: every other one publishes data, which is exactly
 why this went unnoticed.

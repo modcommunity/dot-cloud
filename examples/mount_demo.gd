@@ -69,6 +69,7 @@ func _run() -> void:
 	await _section_republished_version()
 	await _section_corrupt_object()
 	await _section_queries()
+	await _section_uids()
 
 	_line("")
 	_check(
@@ -544,6 +545,100 @@ func _section_queries() -> void:
 # --- Helpers ----------------------------------------------------------------
 
 ## A manifest built in memory. [param entries] are [path, bytes, required].
+## The UIDs a pack declares, and the one it may not take.
+##
+## [b]An imported asset's reference to its own sibling is a UID, and a pack carries its
+## own.[/b] Registering them is what makes a delivered `.glb` find its texture — see
+## [method DotCloudMounter._register_uids]. Registering one the HOST already owns would
+## re-point every `load("uid://…")` in the build at a file inside downloaded content, which
+## is the mount prefix escaped by another route.
+func _section_uids() -> void:
+	_sections_started += 1
+	_line("[b]9. the uids a pack declares[/b]")
+
+	var mounter := DotCloudMounter.new(_config)
+
+	# An id nothing in this project has ever used, which a pack is entitled to claim.
+	var mine := ResourceUID.create_id()
+	var mine_text := ResourceUID.id_to_text(mine)
+
+	# And one the HOST owns: a real file in this build, registered here the way the
+	# editor's own cache would have.
+	var stolen := ResourceUID.create_id()
+	var host_file := "res://addons/dot_cloud/mount/dot_cloud_mounter.gd"
+	ResourceUID.add_id(stolen, host_file)
+
+	var texture := _blob("atlas", 256)
+	_store.put_bytes(texture, DotHash.sha256_bytes(texture))
+
+	var marker := (
+		"[remap]\n\nimporter=\"texture\"\ntype=\"CompressedTexture2D\"\n"
+		+ "uid=\"%s\"\n" % mine_text
+	).to_utf8_buffer()
+	_store.put_bytes(marker, DotHash.sha256_bytes(marker))
+
+	var thief := (
+		"[remap]\n\nimporter=\"texture\"\ntype=\"CompressedTexture2D\"\n"
+		+ "uid=\"%s\"\n" % ResourceUID.id_to_text(stolen)
+	).to_utf8_buffer()
+	_store.put_bytes(thief, DotHash.sha256_bytes(thief))
+
+	var m := _manifest("uidpack", "1.0.0", [
+		["atlas.png", texture, true],
+		["atlas.png.import", marker, true],
+		["stolen.png", texture, true],
+		["stolen.png.import", thief, true],
+	])
+
+	var res: DotResult = await mounter.mount(m, _store, _scheduler)
+	_check("mounted", res.ok, str(res.error) if not res.ok else "")
+
+	if not res.ok:
+		_line("")
+		_sections_finished += 1
+		return
+
+	_check(
+		"a uid the pack declares points into the mount",
+		ResourceUID.has_id(mine)
+			and ResourceUID.get_id_path(mine) == m.mount_prefix().path_join("atlas.png"),
+		ResourceUID.get_id_path(mine) if ResourceUID.has_id(mine) else "unregistered"
+	)
+
+	# The whole point of the section.
+	_check(
+		"and a uid the HOST owns is left exactly where it was",
+		ResourceUID.get_id_path(stolen) == host_file,
+		ResourceUID.get_id_path(stolen)
+	)
+
+	var described := mounter.describe()
+	_check(
+		"one registered, one refused, and the mount says which",
+		int(_mount_row(described, m.key()).get("uids", -1)) == 1,
+		str(_mount_row(described, m.key()).get("uids", -1))
+	)
+
+	ResourceUID.remove_id(stolen)
+	_line("")
+	_sections_finished += 1
+
+
+## The mounter's own row for one content key, however `describe` happens to shape it.
+func _mount_row(described: Dictionary, key: String) -> Dictionary:
+	var mounts: Variant = described.get("mounted")
+
+	if mounts is Array:
+		for row in mounts:
+			if row is Dictionary and str((row as Dictionary).get("content", "")) == key:
+				return row
+
+	if mounts is Dictionary and (mounts as Dictionary).has(key):
+		return (mounts as Dictionary)[key]
+
+	return {}
+
+
 func _manifest(id: String, version: String, entries: Array) -> DotCloudManifest:
 	var m := DotCloudManifest.new()
 	m.content_id = id
