@@ -425,7 +425,16 @@ func _collect(source_dir: String) -> PackedStringArray:
 		# exclusions rather than after, because both of the rules below would drop it:
 		# `.godot` is an excluded directory and `.import` an excluded suffix, and they are
 		# right to be for everything else in there.
-		if _is_imported_form(rel):
+		# [b]An output is kept whatever directory it is in; a MARKER is not.[/b] The
+		# output's directory is `.godot/`, which is excluded and has to be -- that is the
+		# whole reason for this branch. A marker's directory is the asset's own, so a
+		# marker under `screenshots/` or `maps/imported/` belongs to a file this pack is
+		# not shipping, and keeping it shipped 241 `.import` files naming content that is
+		# not in the pack -- along with, once `_imported_outputs_for` follows them, every
+		# texture behind the exclusion the publisher was asked for.
+		var is_output := rel.begins_with(".godot/imported/")
+
+		if is_output:
 			if include_imported and not rel.ends_with(".md5"):
 				out.append(rel)
 			continue
@@ -438,6 +447,14 @@ func _collect(source_dir: String) -> PackedStringArray:
 				break
 
 		if skip:
+			continue
+
+		# The suffix rules below would drop a marker, and they are right to for
+		# everything else: `.import` is in `exclude_suffixes` because a pack that is all
+		# scenes and scripts has no use for one. Decided here, after the directory rules
+		# rather than before them.
+		if include_imported and rel.ends_with(".import"):
+			out.append(rel)
 			continue
 
 		for suffix in exclude_suffixes:
@@ -454,9 +471,29 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 ## Imported outputs an `.import` marker in this pack points at, as `rel -> absolute`.
 ##
-## Empty when the source IS a project root -- `_collect` has already found them -- and
-## when the source is not inside a Godot project at all, which is a legitimate thing to
-## publish and simply has no imported anything.
+## Empty only when the source is not inside a Godot project at all, which is a legitimate
+## thing to publish and simply has no imported anything.
+##
+## [b]It used to return empty for a source that IS a project root, on the grounds that
+## `_collect` had already found them. `_collect` never found one.[/b]
+## [method DotPaths.list_files_recursive] lists through [method DirAccess.list_dir_begin],
+## which skips hidden entries unless asked otherwise -- and `.godot` is hidden. So a pack
+## published from a project root carried the `.import` markers and not one of the
+## `.ctex`, `.mesh` or `.scn` files they point at, which is the exact failure
+## [member include_imported] exists to prevent:
+##
+##     ERROR: Unable to open file: res://.godot/imported/floor.png-6c859f4….ctex
+##      at: _load_data (scene/resources/compressed_texture.cpp:45)
+##
+## Every delivered game was published that way. It survived unnoticed because the ONE
+## shape that was tested -- an imported map, published from a subdirectory -- is the one
+## shape this function already handled, and because a dedicated server does not draw
+## anything: the textures it could not load cost it nothing, and the client that could
+## not draw them is a different process reading a different log.
+##
+## Resolving from the markers rather than by listing `.godot/imported/` wholesale is also
+## the smaller pack: a project's imported directory holds an output for every asset it
+## has ever imported, including the ones this pack excludes and the ones it deleted.
 func _imported_outputs_for(
 	source_dir: String, relatives: PackedStringArray
 ) -> Dictionary:
@@ -467,7 +504,7 @@ func _imported_outputs_for(
 
 	var root := _project_root_of(source_dir)
 
-	if root == "" or root.simplify_path() == source_dir.simplify_path():
+	if root == "":
 		return out
 
 	for rel in relatives:

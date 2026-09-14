@@ -154,7 +154,106 @@ script = ExtResource("1")
 			_check(node.call("who") == "DELIVERED", "and the script actually runs")
 		node.free()
 
+	_check_imported_outputs(str(pair["private"]))
+
 	_done()
+
+
+## [b]A pack published from a project ROOT carried no imported outputs at all.[/b]
+##
+## [member DotCloudPublisher.include_imported] exists because a `.png` or a `.glb` is not
+## a loadable resource -- the editor imports it into `.godot/imported/` and the `.import`
+## marker beside it redirects every load there. The publisher handled the case it was
+## written against (an imported map, published from a SUBDIRECTORY of a project) and
+## returned empty for a source that IS the project root, on the grounds that the file
+## walk had already found them. It never had:
+## [method DotPaths.list_files_recursive] goes through [method DirAccess.list_dir_begin],
+## which skips hidden entries, and `.godot` is hidden.
+##
+## So every delivered game shipped its markers and none of its textures or meshes, and
+## said nothing until a CLIENT tried to draw one -- a different process, a different log,
+## and a dedicated server that neither drew anything nor cared.
+##
+## Built by hand rather than by importing something, because the trap is in the file
+## WALK: a fixture the engine imported would be a fixture this suite could only find the
+## same way the publisher does.
+func _check_imported_outputs(key_pem: String) -> void:
+	_line("")
+	_line("[b]a pack carries the imported form of its assets[/b]")
+
+	var root := WORK.path_join("project")
+	var ctex := ".godot/imported/tile.png-abc123.ctex"
+
+	DotPaths.ensure_dir(root.path_join("textures"))
+	DotPaths.ensure_dir(root.path_join(".godot/imported"))
+	DotPaths.ensure_dir(root.path_join("screenshots"))
+
+	DotPaths.write_text(root.path_join("project.godot"), "config_version=5\n")
+	DotPaths.write_text(root.path_join("textures/tile.png"), "not really a png")
+	DotPaths.write_text(root.path_join("textures/tile.png.import"),
+		"[remap]\n\npath=\"res://%s\"\n" % ctex)
+	DotPaths.write_text(root.path_join(ctex), "the imported form")
+
+	# An asset in a directory the publisher was told to skip. Its marker used to be kept
+	# whatever the exclusions said -- markers were decided before them -- and once a marker
+	# is in the pack the output it names follows it in.
+	DotPaths.write_text(root.path_join("screenshots/shot.png"), "not really a png")
+	DotPaths.write_text(root.path_join("screenshots/shot.png.import"),
+		"[remap]\n\npath=\"res://.godot/imported/shot.png-def456.ctex\"\n")
+	DotPaths.write_text(root.path_join(".godot/imported/shot.png-def456.ctex"), "excluded")
+
+	var from_root := _publish_paths(root, WORK.path_join("pub_root"), "from_root", key_pem)
+
+	_check(from_root.has(ctex),
+		"published from the project root, the pack carries the .ctex the marker names",
+		", ".join(PackedStringArray(from_root.keys())))
+	_check(from_root.has("textures/tile.png.import"),
+		"and the marker that redirects the load to it")
+	_check(not from_root.has(".godot/imported/shot.png-def456.ctex"),
+		"and nothing from a directory the publisher was told to skip")
+	_check(not from_root.has("screenshots/shot.png.import"),
+		"including that directory's markers, which used to be kept regardless")
+
+	# The shape that was already working, kept working: every imported map is published
+	# this way and it is the only shape the publisher was ever exercised in.
+	var from_sub := _publish_paths(
+		root.path_join("textures"), WORK.path_join("pub_sub"), "from_sub", key_pem
+	)
+
+	_check(from_sub.has(ctex),
+		"published from a subdirectory, the output still comes with it",
+		", ".join(PackedStringArray(from_sub.keys())))
+
+
+## Publish [param source] and return the manifest's file paths as a set.
+func _publish_paths(
+	source: String, out: String, id: String, key_pem: String
+) -> Dictionary:
+	var pub := DotCloudPublisher.new()
+	pub.content_id = id
+	pub.version = "1.0.0"
+	pub.signing_key_pem = key_pem
+	pub.exclude_dirs.append("screenshots")
+
+	var res := pub.publish(source, out)
+	if not res.ok:
+		_check(false, "%s publishes" % id, str(res.error))
+		return {}
+
+	var bytes := DotPaths.read_bytes(out.path_join("manifest.json"))
+	if not bytes.ok:
+		_check(false, "%s's manifest reads back" % id, str(bytes.error))
+		return {}
+
+	var manifest := DotCloudManifest.from_json_bytes(bytes.value)
+	if not manifest.ok:
+		_check(false, "%s's manifest parses" % id, str(manifest.error))
+		return {}
+
+	var paths := {}
+	for entry in (manifest.value as DotCloudManifest).files:
+		paths[entry.path] = true
+	return paths
 
 
 func _check(ok: bool, what: String, detail: String = "") -> void:
