@@ -202,13 +202,33 @@ func _check_imported_outputs(key_pem: String) -> void:
 		"[remap]\n\npath=\"res://.godot/imported/shot.png-def456.ctex\"\n")
 	DotPaths.write_text(root.path_join(".godot/imported/shot.png-def456.ctex"), "excluded")
 
+	var landed := "_imported/tile.png-abc123.ctex"
 	var from_root := _publish_paths(root, WORK.path_join("pub_root"), "from_root", key_pem)
 
-	_check(from_root.has(ctex),
+	_check(from_root.has(landed),
 		"published from the project root, the pack carries the .ctex the marker names",
 		", ".join(PackedStringArray(from_root.keys())))
+	_check(not from_root.has(ctex),
+		"under a plain directory, because a web export cannot read `.godot/` out of a pack")
 	_check(from_root.has("textures/tile.png.import"),
 		"and the marker that redirects the load to it")
+
+	# The marker has to point at where the output LANDED. Rewriting it to
+	# `<mount>/.godot/imported/…` would name a file the pack does not contain, which is a
+	# texture that silently does not load -- the exact failure include_imported exists to
+	# prevent, reintroduced by the fix for it.
+	#
+	# Read out of the published OBJECT rather than off the staging tree: staging is
+	# deleted on the way out, and reading what was actually published is the better
+	# question anyway.
+	var marker := _published_text(
+		WORK.path_join("pub_root"), from_root.get("textures/tile.png.import", "")
+	)
+	_check(
+		marker.contains("res://dot_cloud/from_root/1.0.0/" + landed),
+		"and the marker points at where the output landed, not at where it came from",
+		marker.strip_edges()
+	)
 	_check(not from_root.has(".godot/imported/shot.png-def456.ctex"),
 		"and nothing from a directory the publisher was told to skip")
 	_check(not from_root.has("screenshots/shot.png.import"),
@@ -220,7 +240,7 @@ func _check_imported_outputs(key_pem: String) -> void:
 		root.path_join("textures"), WORK.path_join("pub_sub"), "from_sub", key_pem
 	)
 
-	_check(from_sub.has(ctex),
+	_check(from_sub.has(landed),
 		"published from a subdirectory, the output still comes with it",
 		", ".join(PackedStringArray(from_sub.keys())))
 
@@ -252,8 +272,17 @@ func _publish_paths(
 
 	var paths := {}
 	for entry in (manifest.value as DotCloudManifest).files:
-		paths[entry.path] = true
+		paths[entry.path] = entry.sha256
 	return paths
+
+
+## The bytes a published pack actually holds for one file, as text.
+func _published_text(out: String, sha: String) -> String:
+	if sha == "":
+		return ""
+	return FileAccess.get_file_as_string(
+		out.path_join("objects").path_join(sha.substr(0, 2)).path_join(sha)
+	)
 
 
 func _check(ok: bool, what: String, detail: String = "") -> void:

@@ -64,6 +64,25 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 	".git", ".godot", ".svn", "__pycache__",
 ])
 
+## Where an imported output lives inside a pack.
+##
+## [b]Not `.godot/imported/`, which is where it lives in the project.[/b] Shipping it at
+## its real path put the engine's own reserved directory name inside delivered content,
+## and a web export cannot read it back:
+##
+##     ERR cloud  A required file is not readable after mounting.
+##     res://dot_cloud/g2gfast/0.1.0/.godot/imported/character-m.glb-ceef4a4….scn
+##
+## Linux reads it perfectly, which is the trap -- a headless mount of the same pack lists
+## the directory and loads every file in it, so the one check that could have caught this
+## passes on the platform that does not matter and the game will not start on the one
+## that does.
+##
+## The name is arbitrary as far as the loader is concerned: a `.import` marker names its
+## output by absolute path, so the output can live anywhere as long as the marker says
+## where. [method _rewrite_paths] moves both, together.
+const IMPORTED_DIR := "_imported"
+
 ## Ship the engine's imported form of assets that have one.
 ##
 ## [b]Without this a pack can carry a .glb or a .png and deliver nothing.[/b] Those are
@@ -120,8 +139,12 @@ static func _is_text_resource(rel: String) -> bool:
 	return e == "tscn" or e == "tres" or e == "import"
 
 
-## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/X` for every X this pack
-## contains, and leaves every other reference exactly as it was.
+## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/<where this pack put X>` for
+## every X this pack contains, and leaves every other reference exactly as it was.
+##
+## [param inside] maps a reference's path to its path in the pack. Those differ only for
+## an imported output, which moves to [constant IMPORTED_DIR]; for everything else the
+## map is the identity and this is the plain prefixing it always was.
 ##
 ## Returns the staged file's path, or "" when nothing needed changing -- so the caller
 ## keeps hashing the original and no object is written twice for an identical file.
@@ -159,7 +182,7 @@ func _rewrite_paths(abs: String, staged: String, inside: Dictionary) -> DotResul
 		# source tree somebody has namespaced by hand. Rewriting it again would bury
 		# the content one level deeper on every republish.
 		if inside.has(path) and not path.begins_with("%s/%s/%s/" % [mount_root, content_id, version]):
-			out += prefix + path
+			out += prefix + str(inside[path])
 			changed = true
 		else:
 			out += "res://" + path
@@ -249,9 +272,11 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	# dedicated server and does not work in an export -- so this failed loudly on the
 	# machine that could survive it and would have failed silently on the ones that
 	# could not.
-	var extra := _imported_outputs_for(source_dir, relatives)
+	var imported := _imported_outputs_for(source_dir, relatives)
+	var extra: Dictionary = imported["files"]
+	var remap: Dictionary = imported["remap"]
 
-	for rel in extra:
+	for rel: String in extra:
 		if not relatives.has(rel):
 			relatives.append(rel)
 
@@ -270,9 +295,17 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 
 	# Every path this pack will contain, so the rewrite below can tell a reference to
 	# its own content from a reference to the host build's.
+	# [b]A MAP, from where a reference says the file is to where this pack actually put
+	# it.[/b] It was a set, because those two were always the same thing -- and they stop
+	# being the same the moment an imported output is relocated out of `.godot/`. A
+	# `.import` marker still names `res://.godot/imported/tile.png-abc.ctex`, which is
+	# true of the project and false of the pack, so the marker has to be pointed at
+	# [constant IMPORTED_DIR] rather than merely prefixed.
 	var inside := {}
 	for rel in relatives:
-		inside[rel] = true
+		inside[rel] = rel
+	for project_rel: String in remap:
+		inside[project_rel] = remap[project_rel]
 
 	var staging := out_dir.path_join(".rewritten")
 	if rewrite_resource_paths:
@@ -432,11 +465,12 @@ func _collect(source_dir: String) -> PackedStringArray:
 		# not shipping, and keeping it shipped 241 `.import` files naming content that is
 		# not in the pack -- along with, once `_imported_outputs_for` follows them, every
 		# texture behind the exclusion the publisher was asked for.
-		var is_output := rel.begins_with(".godot/imported/")
-
-		if is_output:
-			if include_imported and not rel.ends_with(".md5"):
-				out.append(rel)
+		# [b]Never from the walk, whatever the platform lists.[/b] An imported output
+		# reaches a pack only through `_imported_outputs_for`, which puts it under
+		# [constant IMPORTED_DIR] -- so there is exactly one route in, and it is the one
+		# that also rewrites the marker pointing at it. This branch used to be that route
+		# and shipped the path verbatim.
+		if rel.begins_with(".godot/"):
 			continue
 
 		var skip := false
@@ -469,7 +503,11 @@ func _collect(source_dir: String) -> PackedStringArray:
 	return out
 
 
-## Imported outputs an `.import` marker in this pack points at, as `rel -> absolute`.
+## Imported outputs an `.import` marker in this pack points at.
+##
+## Returns `{"files": {pack_rel: absolute}, "remap": {project_rel: pack_rel}}` — the
+## second is what lets [method _rewrite_paths] send a marker to where the output actually
+## landed, which is [constant IMPORTED_DIR] and not where the marker says.
 ##
 ## Empty only when the source is not inside a Godot project at all, which is a legitimate
 ## thing to publish and simply has no imported anything.
@@ -498,14 +536,16 @@ func _imported_outputs_for(
 	source_dir: String, relatives: PackedStringArray
 ) -> Dictionary:
 	var out := {}
+	var remap := {}
+	var empty := {"files": out, "remap": remap}
 
 	if not include_imported:
-		return out
+		return empty
 
 	var root := _project_root_of(source_dir)
 
 	if root == "":
-		return out
+		return empty
 
 	for rel in relatives:
 		if not rel.ends_with(".import"):
@@ -519,10 +559,13 @@ func _imported_outputs_for(
 		for hit in _res_paths_in(text):
 			if not hit.begins_with(".godot/"):
 				continue
-			if FileAccess.file_exists(root.path_join(hit)):
-				out[hit] = root.path_join(hit)
+			if not FileAccess.file_exists(root.path_join(hit)):
+				continue
+			var landed := "%s/%s" % [IMPORTED_DIR, hit.get_file()]
+			out[landed] = root.path_join(hit)
+			remap[hit] = landed
 
-	return out
+	return {"files": out, "remap": remap}
 
 
 ## Every `res://…` path in a text blob, as paths relative to the project root.
