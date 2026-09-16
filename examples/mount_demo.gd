@@ -70,6 +70,8 @@ func _run() -> void:
 	await _section_corrupt_object()
 	await _section_queries()
 	await _section_uids()
+	await _section_two_publishers()
+	await _section_namespaced_ids()
 
 	_line("")
 	_check(
@@ -131,6 +133,145 @@ func _section_republished_version() -> void:
 		FileAccess.file_exists("res://dot_cloud/republished/1.0.0/b.txt"),
 		"the cached pack was reused for content that changed"
 	)
+
+	_line("")
+	_sections_finished += 1
+
+
+# --- 10. One id and version, two publishers --------------------------------
+
+## Two parties claiming one `content_id@version`, in ONE process.
+##
+## The sibling of section 6, and the half that section cannot reach: there the two
+## publishes are two processes and the pack cache is what carries the mistake across,
+## so each mount sees an empty mount table. Here one client joins Alice's server and
+## then Mallory's, which is one [DotCloudMounter] meeting two manifests that agree
+## about their id and version and about nothing else.
+##
+## `key()` is `content_id@version` and derives nothing from the bytes, so the second
+## one used to be indistinguishable from a re-mount of the first: it returned the
+## first's prefix, ok, and the player ran Alice's scripts on Mallory's server. It is
+## refused now, because a pack cannot be unmounted and there is no repair available
+## after the fact -- only a refusal the caller can act on.
+func _section_two_publishers() -> void:
+	_sections_started += 1
+	_line("[b]10. one id and version, two publishers[/b]")
+
+	var alice := _blob("alice-build", 512)
+	var mallory := _blob("mallory-build", 512)
+	_store.put_bytes(alice, DotHash.sha256_bytes(alice))
+	_store.put_bytes(mallory, DotHash.sha256_bytes(mallory))
+
+	# ONE mounter for the whole section. Two would be section 6.
+	var mounter := DotCloudMounter.new(_config)
+
+	var m_alice := _manifest("contested", "1.0.0", [["level.txt", alice, true]])
+	var first: DotResult = await mounter.mount(m_alice, _store, _scheduler)
+	_check("the first publisher mounts", first.ok, str(first.error) if not first.ok else "")
+
+	# Same id, same version, same FILE NAME, different bytes.
+	var m_mallory := _manifest("contested", "1.0.0", [["level.txt", mallory, true]])
+	var second: DotResult = await mounter.mount(m_mallory, _store, _scheduler)
+
+	_check(
+		"the second is refused",
+		not second.ok,
+		"mounted at %s" % str(second.value) if second.ok else ""
+	)
+	_check(
+		"as a conflict, not as a state or integrity failure",
+		not second.ok and second.error.code == DotError.CODE_CONFLICT,
+		second.error.code if not second.ok else ""
+	)
+
+	# The refusal is only worth having if the first publisher's content survived it.
+	var read := DotPaths.read_bytes("res://dot_cloud/contested/1.0.0/level.txt")
+	_check("the first publisher's bytes are still what is mounted",
+		read.ok and (read.value as PackedByteArray) == alice)
+	_check("and there is still one mount", mounter.mounted_keys().size() == 1)
+
+	# [b]Identity is the content, not the object.[/b] A second manifest that happens to
+	# describe the same files must still be the cheap no-op section 3 asserts -- a
+	# client that re-reads a manifest off the wire holds a different DotCloudManifest
+	# every time, and refusing those would refuse every legitimate reconnect.
+	var m_again := _manifest("contested", "1.0.0", [["level.txt", alice, true]])
+	var again: DotResult = await mounter.mount(m_again, _store, _scheduler)
+	_check(
+		"an equal manifest from a different object is still a no-op",
+		again.ok and str(again.value) == m_alice.mount_prefix(),
+		str(again.error) if not again.ok else str(again.value)
+	)
+
+	_line("")
+	_sections_finished += 1
+
+
+# --- 11. <owner>/<name> content ids ----------------------------------------
+
+## An id that names who owns it, and the forms that must still be refused.
+##
+## The id is a path component, so "/" in it is a second directory level in the mount
+## prefix -- which is exactly what makes it safe to hand out to members. A flattened
+## `owner_name` would not be: "_" is legal inside an owner and inside a name, so
+## `alice_bob` + `x` and `alice` + `bob_x` collide, and a key scoped `alice_*` would
+## cover the member called `alice_bob`. "/" cannot occur inside either half, so
+## `alice/*` is exact.
+##
+## Everything that made the id a *safe* path component still has to hold, which is the
+## other half of this section: two segments at most, no empty one, no traversal, and
+## each segment still a slug on its own.
+func _section_namespaced_ids() -> void:
+	_sections_started += 1
+	_line("[b]11. <owner>/<name> content ids[/b]")
+
+	var body := _blob("namespaced", 256)
+	_store.put_bytes(body, DotHash.sha256_bytes(body))
+
+	var m := _manifest("alice/dot-controller", "1.0.0", [["a.txt", body, true]])
+
+	_check("a two-segment id validates", m.validate().ok,
+		str(m.validate().error) if not m.validate().ok else "")
+	_check(
+		"and its mount prefix nests",
+		m.mount_prefix() == "res://dot_cloud/alice/dot-controller/1.0.0",
+		m.mount_prefix()
+	)
+
+	var mounted: DotResult = await DotCloudMounter.new(_config).mount(m, _store, _scheduler)
+	_check("it mounts", mounted.ok, str(mounted.error) if not mounted.ok else "")
+	_check(
+		"and its file is readable at the nested path",
+		FileAccess.file_exists("res://dot_cloud/alice/dot-controller/1.0.0/a.txt")
+	)
+
+	# A bare id is what every first-party pack already is, and must not have become
+	# invalid by adding the two-segment form beside it.
+	_check("a one-segment id still validates",
+		_manifest("arena", "1.0.0", [["a.txt", body, true]]).validate().ok)
+
+	# [b]The separator is the point, so the flattened spelling must stay distinct.[/b]
+	# If these two ever compared equal, the ambiguity this whole form exists to remove
+	# would be back.
+	_check(
+		"owner/name and owner_name are different ids",
+		_manifest("alice/x", "1.0.0", []).key()
+			!= _manifest("alice_x", "1.0.0", []).key()
+	)
+
+	for bad in ["a/b/c", "alice/", "/alice", "alice//x", "../etc", "alice/../x", "Alice/x"]:
+		var r := _manifest(bad, "1.0.0", [["a.txt", body, true]]).validate()
+		_check("'%s' is refused" % bad, not r.ok,
+			"ACCEPTED" if r.ok else r.error.code)
+
+	# The scope glob has to select on the real separator, or the control that stops
+	# one member publishing as another is decorative.
+	var scoped := {"key": "-----BEGIN PUBLIC KEY-----", "content_ids": ["alice/*"]}
+	_check("alice/* covers alice's own id",
+		DotCloudSignature.scope_allows(scoped, "alice/dot-controller"))
+	_check("and does not cover another member's",
+		not DotCloudSignature.scope_allows(scoped, "alicebob/x"))
+	_check("nor the flattened lookalike",
+		not DotCloudSignature.scope_allows(scoped, "alice_bob/x"))
 
 	_line("")
 	_sections_finished += 1

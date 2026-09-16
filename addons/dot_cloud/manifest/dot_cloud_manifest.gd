@@ -194,21 +194,55 @@ static func from_dict(d: Dictionary) -> DotResult:
 	return DotResult.success(m)
 
 
-func validate() -> DotResult:
+func validate_shape() -> DotResult:
 	if content_id == "":
 		return DotResult.fail(
 			DotError.CODE_INVALID, "The manifest has no content_id."
 		)
 
-	# content_id and version are path components, so they get the same treatment
-	# as any other server-supplied path segment.
-	var id_slug := DotPaths.slugify(content_id)
-	if id_slug != content_id:
+	# [b]One segment, or two separated by a "/".[/b] A bare id is what every
+	# first-party pack has always been and still validates unchanged; the two-segment
+	# form is `<owner>/<name>`, which is what makes an id ownable.
+	#
+	# It is a real separator rather than a flattened one on purpose. Flattening owner
+	# and name into `owner_name` looks equivalent and is not: `_` is legal inside both
+	# halves, so `alice_bob` + `x` and `alice` + `bob_x` produce one id, and a key
+	# scoped to `alice_*` is then entitled to sign for the member called `alice_bob`.
+	# A separator that cannot occur inside either half is the only version of this with
+	# no ambiguity, and "/" is the one every forge already uses. Doubling a legal
+	# character does not work either -- [method DotPaths.slugify] collapses `__` to `_`.
+	#
+	# The id is still a path component, so it gets the traversal treatment every
+	# server-supplied path gets, and each segment must independently be a slug: that is
+	# what keeps "/" the only separator in it and keeps ".." out.
+	var id_safe := DotPaths.safe_relative(content_id)
+	if not id_safe.ok:
+		return id_safe.wrap("The manifest's content_id is unsafe.")
+
+	var id_parts := content_id.split("/", false)
+
+	if id_parts.size() != content_id.count("/") + 1:
 		return DotResult.fail(
 			DotError.CODE_INVALID,
-			"content_id must be lowercase alphanumeric with - or _.",
-			"got '%s', expected something like '%s'" % [content_id, id_slug]
+			"content_id must not have an empty segment.",
+			"got '%s'" % content_id
 		)
+
+	if id_parts.size() > 2:
+		return DotResult.fail(
+			DotError.CODE_INVALID,
+			"content_id is at most <owner>/<name>.",
+			"got '%s', which has %d segments" % [content_id, id_parts.size()]
+		)
+
+	for part in id_parts:
+		if DotPaths.slugify(part) != part:
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"Each part of a content_id must be lowercase alphanumeric with - or _.",
+				"'%s' in '%s' should look like '%s'"
+					% [part, content_id, DotPaths.slugify(part)]
+			)
 
 	# The version is not slug-checked the way content_id is, because a slug of
 	# "1.0.0" is "1_0_0" and requiring equality would refuse every semver ever
@@ -243,6 +277,23 @@ func validate() -> DotResult:
 		var entry_safe := DotPaths.safe_relative(entry_scene)
 		if not entry_safe.ok:
 			return entry_safe.wrap("The manifest's entry_scene is unsafe.")
+
+	return DotResult.success(true)
+
+
+## [method validate_shape], and then: can THIS engine run it?
+##
+## [b]Split because the two questions have different right answers in different
+## places.[/b] The shape of a manifest is intrinsic -- an id with two slashes in it is
+## malformed on every machine, forever. [member min_engine_version] is not: it compares
+## against the engine that happens to be running, so it is a mount-time question, and a
+## publisher that asked it would refuse to build content targeting a newer Godot than
+## the box doing the building. [DotCloudPublisher] used to carry its own copy of the id
+## rule to avoid exactly that, and the copy went stale the moment the rule changed.
+func validate() -> DotResult:
+	var shape := validate_shape()
+	if not shape.ok:
+		return shape
 
 	if min_engine_version != "":
 		var need := DotSemVer.parse(min_engine_version)

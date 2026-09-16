@@ -73,17 +73,39 @@ func mount(
 	store: DotCloudStore,
 	scheduler: DotScheduler = null
 ) -> DotResult:
-	var key := manifest.key()
-
-	if _mounts.has(key):
-		DotLog.debug(CHANNEL, "already mounted", {"content": key})
-		return DotResult.success(manifest.mount_prefix())
-
 	var engine_check := manifest.validate()
 	if not engine_check.ok:
 		return engine_check
 
+	var key := manifest.key()
 	var wanted := manifest.wanted_files()
+	var identity := _mount_identity(manifest, wanted)
+
+	# [b]The key is not proof that the content is the same.[/b] `key()` is
+	# `content_id@version` and nothing in it is derived from the bytes, so two
+	# manifests from two publishers -- or one publisher who re-used a version
+	# number -- arrive here indistinguishable. Returning the mounted prefix for
+	# whichever got here first means the caller asked for one content set and
+	# quietly got another, and since a pack can contain scripts, "another" is
+	# somebody else's code.
+	#
+	# It cannot be repaired after the fact either: the first pack is already
+	# merged into the virtual filesystem and there is no unmount, so the only
+	# honest answer is to refuse the second and let the caller decide.
+	if _mounts.has(key):
+		var held: Dictionary = _mounts[key]
+
+		if str(held.get("identity", "")) != identity:
+			return DotResult.fail(
+				DotError.CODE_CONFLICT,
+				"Different content is already mounted under this id and version.",
+				("mounted %s, asked for %s -- bump the version, or namespace the "
+					+ "content_id, because this one is taken for the life of the "
+					+ "process") % [str(held.get("identity", "")), identity]
+			)
+
+		DotLog.debug(CHANNEL, "already mounted", {"content": key})
+		return DotResult.success(str(held["prefix"]))
 
 	# Everything required must be present before a single file is mounted. A
 	# half-mounted game is worse than an unmounted one: it loads, and then fails
@@ -144,6 +166,7 @@ func mount(
 
 	_mounts[key] = {
 		"manifest": manifest,
+		"identity": identity,
 		"prefix": prefix,
 		"pack": pack_path,
 		"mounted_at": Time.get_ticks_msec(),
@@ -377,7 +400,7 @@ func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> Strin
 		"packs/%s-%s-%s.pck" % [
 			DotPaths.slugify(manifest.content_id),
 			DotPaths.slugify(manifest.version),
-			_pack_fingerprint(files),
+			_pack_fingerprint(manifest, files),
 		]
 	)
 
@@ -387,7 +410,23 @@ func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> Strin
 ## Path AND hash, so a file that moved and a file that changed are both a different
 ## pack. Sorted, because the manifest's order is the publisher's and two publishes of
 ## identical content must agree.
-func _pack_fingerprint(files: Array[DotCloudFile]) -> String:
+## What has to match for an already-mounted key to be the same content.
+##
+## The file set is the bulk of it, and [method _pack_fingerprint] already answers
+## that. [member DotCloudManifest.entry_scene] and
+## [member DotCloudManifest.mount_root] are in here as well because neither is a
+## file: two manifests can agree about every byte and still disagree about what
+## loads and where it lands, and the caller would be handed the first one's answer
+## for both.
+func _mount_identity(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
+	return "%s|%s|%s" % [
+		_pack_fingerprint(manifest, files),
+		manifest.entry_scene,
+		manifest.mount_root,
+	]
+
+
+func _pack_fingerprint(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
 	var lines := PackedStringArray()
 
 	for f in files:
@@ -395,7 +434,16 @@ func _pack_fingerprint(files: Array[DotCloudFile]) -> String:
 
 	lines.sort()
 
-	return DotHash.sha256_text("\n".join(lines)).substr(0, 16)
+	# [b]The id and the version are part of the fingerprint, not just of the name.[/b]
+	# A built pack holds its files at `res://<mount_root>/<id>/<version>/...`, so it is
+	# only ever valid for the identity it was built for -- and the filename alone stopped
+	# saying which as soon as a content_id could contain "/", because the name slugifies
+	# it and `alice/x` and `alice_x` slugify alike. Two different packs would then agree
+	# about their path and the wrong one would be mounted, which is section 6's bug
+	# arriving through a different door.
+	return DotHash.sha256_text(
+		"%s\n%s\n%s" % [manifest.content_id, manifest.version, "\n".join(lines)]
+	).substr(0, 16)
 
 
 func _verify_objects(

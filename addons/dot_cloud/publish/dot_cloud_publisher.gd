@@ -226,14 +226,6 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			DotError.CODE_INVALID, "publish() needs a content_id."
 		)
 
-	var slug := DotPaths.slugify(content_id)
-	if slug != content_id:
-		return DotResult.fail(
-			DotError.CODE_INVALID,
-			"content_id must be lowercase alphanumeric with - or _.",
-			"try '%s'" % slug
-		)
-
 	if not DirAccess.dir_exists_absolute(source_dir):
 		return DotResult.fail(
 			DotError.CODE_IO, "Source directory not found.", source_dir
@@ -253,6 +245,16 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	manifest.min_engine_version = min_engine_version
 	manifest.mirrors = mirrors
 	manifest.metadata = metadata
+
+	# [b]The id and version rules are the manifest's, and are not restated here.[/b]
+	# They were, and the copy was already wrong the day `content_id` learned about
+	# `<owner>/<name>`: this refused a namespaced id that [method DotCloudManifest.validate]
+	# accepts, so a publisher could not produce content a client would happily mount.
+	# One rule, in the class whose field it is. `validate()` also checks the version,
+	# which this never did.
+	var shape := manifest.validate_shape()
+	if not shape.ok:
+		return shape
 
 	var relatives := _collect(source_dir)
 

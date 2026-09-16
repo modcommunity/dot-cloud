@@ -325,7 +325,7 @@ Commands
   publish   Build a manifest and object tree from a directory.
     --source DIR         content to publish                        (required)
     --out DIR            output directory                          (required)
-    --id NAME            content id, lowercase [a-z0-9_-]          (required)
+    --id NAME            content id, <name> or <owner>/<name>      (required)
     --version V          content version                           (0.0.0)
     --name TEXT          display name
     --entry PATH         entry scene, relative to the content root
