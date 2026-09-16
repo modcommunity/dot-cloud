@@ -543,6 +543,8 @@ addons/dot_cloud/
                                  ensure() by id and version — see 1b.
   publish/
     dot_cloud_publisher.gd       Directory -> manifest + objects.
+    dot_cloud_registry.gd        claim -> complete/fail against the backbone.
+                                 BUILT AHEAD OF ITS CONSUMER -- see below.
     dot_cloud_cli.gd             Headless CLI. Extends SceneTree.
 ```
 
@@ -593,3 +595,11 @@ in dot-core, which was out of scope for the run that found this.
 - **An editor dock.** Publishing is CLI-only. A dock calling `DotCloudPublisher`
   would be straightforward.
 - **Ed25519 signatures.** Blocked on Godot's `Crypto`. See above.
+
+## `DotCloudRegistry` is written and nothing calls it
+
+Two hundred and thirty-three lines, a full class doc with a worked example, and **no consumer anywhere in the tree** — not `DotCloudPublisher`, not the CLI, not `dot-server-deploy`, not an example. That is on purpose and it is written down here because a reader who greps for callers and finds none has no way to tell "built ahead of its consumer" from "somebody forgot to wire this", and this family has shipped both.
+
+What it is: the registry's half of a publish, against the backbone rather than against the filesystem. `claim` reserves `<owner>/<name>@<version>` *before* the bytes move, because hashing and uploading a pack is minutes of work and the version has to be ours for all of it; then `complete` or `fail`. The rules it enforces — one owner per namespace, one publish per version, a failed publish keeps its number — are enforced *there* rather than here, because a check that lives only in a publishing tool protects an honest publisher from an accident and nobody else.
+
+**What has to happen before anything calls it:** the endpoint at `DEFAULT_PATH` has to exist on the website-city side, and `./server pack` has to grow a token. Until then, wiring it would mean a publish that fails against a 404 — which is strictly worse than a publish that does not ask. The class is tested by hand against a real server and by nothing that is committed, so it is the one file in this addon whose suite coverage is zero and that is not a gap to be closed by writing a fixture; it is closed by the endpoint existing.
