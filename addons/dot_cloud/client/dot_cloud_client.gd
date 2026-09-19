@@ -98,6 +98,19 @@ signal _acquire_finished(content_key: String, result: DotResult)
 ## same [code]id/version[/code] namespacing a mount uses.
 @export var manifest_url_template: String = "{base}/{id}/{version}/manifest.json"
 
+## Other shapes to try when [member manifest_url_template] does not answer.
+##
+## [b]An origin does not always hold one layout, and a client cannot make it.[/b] The
+## same base can serve content published under the versioned scheme above beside content
+## published before there was one — a map set uploaded as [code]{base}/{id}/manifest.json[/code]
+## is still the map a game asks for by name, and re-publishing every pack in existence is
+## not something a client gets to require in order to start.
+##
+## Each entry is expanded exactly as the main template is and appended after it, per base,
+## so the primary shape is always asked first and a fallback costs one 404 on content that
+## does not need it. Empty is the ordinary case: an origin with one layout should say so.
+@export var manifest_url_fallbacks: PackedStringArray = PackedStringArray()
+
 ## Allow content to arrive over the game connection when no HTTP source works.
 ##
 ## Needs a delegate; dot-server supplies one. See [DotCloudSourceNetchan].
@@ -684,11 +697,37 @@ func manifest_urls_for(
 ) -> PackedStringArray:
 	var out := PackedStringArray()
 
+	# Every shape of every LOCAL base before any network base, rather than every base of
+	# every shape: the disk is cheaper than a request whatever layout it is in, and a
+	# fallback that reached the network before checking the rest of this machine would
+	# make an offline install depend on the layout it happened to be published under.
 	for base in local_search_dirs:
-		out.append(_expand_manifest_url(base, content_id, version))
+		for url in _expand_all(base, content_id, version):
+			out.append(url)
 
 	for base in resolved_http_base_urls():
-		out.append(_expand_manifest_url(base, content_id, version))
+		for url in _expand_all(base, content_id, version):
+			out.append(url)
+
+	return out
+
+
+## One base, every template, primary first.
+func _expand_all(
+	base: String, content_id: StringName, version: String
+) -> PackedStringArray:
+	var out := PackedStringArray([_expand_manifest_url(base, content_id, version)])
+
+	for template in manifest_url_fallbacks:
+		if template.strip_edges() == "":
+			continue
+
+		var url := _expand_with(template, base, content_id, version)
+
+		# A fallback that expands to the primary is a duplicate request and a duplicate
+		# line in the log, which reads as a retry that is not happening.
+		if not url in out:
+			out.append(url)
 
 	return out
 
@@ -737,7 +776,14 @@ func resolved_http_base_urls() -> PackedStringArray:
 func _expand_manifest_url(
 	base: String, content_id: StringName, version: String
 ) -> String:
-	return manifest_url_template \
+	return _expand_with(manifest_url_template, base, content_id, version)
+
+
+## The substitution itself, for the primary template and every fallback alike.
+static func _expand_with(
+	template: String, base: String, content_id: StringName, version: String
+) -> String:
+	return template \
 		.replace("{base}", base.trim_suffix("/")) \
 		.replace("{id}", String(content_id)) \
 		.replace("{version}", version if version != "" else "0.0.0")
