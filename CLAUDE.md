@@ -438,7 +438,7 @@ invalid UID: 'uid://reboanwombd2' - using text path instead:
 Resource file not found: res://assets/kenney/survival/Textures/colormap.png
 ```
 
-Measured in game-buses-from-hell, the first game in this family to vendor art: the crates'
+Measured in mg-buses-from-hell, the first game in this family to vendor art: the crates'
 meshes loaded, their atlas did not, and the scene node the model was instanced under
 "vanished" — a game that plays perfectly and appears to have shipped with no art at all.
 **Both of those lines are warnings.** The pack verified, mounted and loaded; nothing failed.
