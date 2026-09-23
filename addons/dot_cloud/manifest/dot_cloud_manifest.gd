@@ -15,7 +15,8 @@ extends Resource
 ## is what makes hot-swapping content possible at all — see [DotCloudMounter] for
 ## why, and [DotCloudPacker] for the packing side that has to agree with it.
 
-const CHANNEL := "cloud"
+# No log channel: the trust boundary is a document, and a document returns DotResult.
+# DotCloudClient, which fetched it, fails the acquisition with it and logs that at ERROR.
 
 ## Manifest schema version. Bumped when the wire format changes incompatibly.
 const FORMAT_VERSION := 1

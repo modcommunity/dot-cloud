@@ -37,7 +37,9 @@ extends RefCounted
 ## [member DotCloudConfig.require_signed_manifests] policy decides whether the
 ## unsigned form is acceptable.
 
-const CHANNEL := "cloud.env"
+# No log channel: a static codec over bytes. A codec that logged a bad signature would
+# write a line per hostile document from a context with nothing to name; DotCloudClient
+# fails the acquisition with the result and logs that at ERROR.
 
 ## Marker key. Its presence is what distinguishes an envelope from a manifest.
 const MARKER := "dot_cloud_signed"
