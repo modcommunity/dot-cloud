@@ -25,6 +25,11 @@ const WORK := "user://dot_cloud_delivered_scene"
 var _failures := 0
 var _checks := 0
 
+## Every check this suite runs, including the one that compares against it. A suite that is
+## one long function has no sections to count, but a check skipped by a branch that should
+## not have been taken is still one only a total can see. See docs/testing.md.
+const CHECKS := 20
+
 
 func _ready() -> void:
 	DotLog.set_level(DotLog.Level.WARN)
@@ -296,6 +301,7 @@ func _check(ok: bool, what: String, detail: String = "") -> void:
 
 
 func _done() -> void:
+	_check(_checks + 1 == CHECKS, "every check ran", "%d of %d" % [_checks + 1, CHECKS])
 	_line("")
 	_line("%d passed, %d failed" % [_checks - _failures, _failures])
 	get_tree().quit(1 if _failures > 0 else 0)

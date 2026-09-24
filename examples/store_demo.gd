@@ -28,6 +28,18 @@ const OBJ := 1024
 
 @onready var _output: RichTextLabel = $Output
 
+## Sections entered against sections that ran to their last line, and against this. A
+## runtime error inside a section aborts that function and nothing says so; a section that
+## bailed out early after a failed guard is counted as not finished on purpose.
+const SECTIONS := 6
+
+## Every check this suite runs, including the two at the end that compare the counts. The
+## section counter cannot see a section that aborted after announcing itself — its remaining
+## checks simply never run — and a total can. See docs/testing.md.
+const CHECKS := 55
+
+var _entered := 0
+var _completed := 0
 var _failures: int = 0
 var _checks: int = 0
 var _scheduler: DotScheduler
@@ -56,6 +68,17 @@ func _run() -> void:
 	await _section_verify_and_clear()
 
 	_line("")
+	# The two guards, as the last two checks. See docs/testing.md.
+	_check(
+		"every section ran to its last line",
+		_completed == _entered and _entered == SECTIONS,
+		"%d of %d" % [_completed, SECTIONS]
+	)
+	_check(
+		"every check ran",
+		_checks + 1 == CHECKS,
+		"%d of %d" % [_checks + 1, CHECKS]
+	)
 	_line("[b]%d checks, %d failed[/b]" % [_checks, _failures])
 	_finish(1 if _failures > 0 else 0)
 
@@ -63,7 +86,7 @@ func _run() -> void:
 # --- 1. The verification chokepoint ----------------------------------------
 
 func _section_commit() -> void:
-	_line("[b]1. commit, and the one place a hash is checked[/b]")
+	_section("[b]1. commit, and the one place a hash is checked[/b]")
 
 	var store: DotCloudStore = await _open_store(WORK.path_join("basic"), 0)
 	if store == null:
@@ -111,12 +134,13 @@ func _section_commit() -> void:
 
 	store.close()
 	_line("")
+	_done()
 
 
 # --- 2. Eviction under pressure --------------------------------------------
 
 func _section_pressure() -> void:
-	_line("[b]2. a full cache, with content mounted[/b]")
+	_section("[b]2. a full cache, with content mounted[/b]")
 
 	# Four objects' worth of ceiling, so "full" is reachable in four commits.
 	var store: DotCloudStore = await _open_store(WORK.path_join("evict"), 4 * OBJ)
@@ -178,12 +202,13 @@ func _section_pressure() -> void:
 
 	store.close()
 	_line("")
+	_done()
 
 
 # --- 3. Eviction order -----------------------------------------------------
 
 func _section_lru() -> void:
-	_line("[b]3. least recently used, and what counts as used[/b]")
+	_section("[b]3. least recently used, and what counts as used[/b]")
 
 	var store: DotCloudStore = await _open_store(WORK.path_join("lru"), 4 * OBJ)
 	if store == null:
@@ -224,12 +249,13 @@ func _section_lru() -> void:
 
 	store.close()
 	_line("")
+	_done()
 
 
 # --- 4. The index, and the directory it describes --------------------------
 
 func _section_index() -> void:
-	_line("[b]4. the index is behind the directory, always[/b]")
+	_section("[b]4. the index is behind the directory, always[/b]")
 
 	var dir := WORK.path_join("index")
 	var cfg := _config(dir, 0)
@@ -324,12 +350,13 @@ func _section_index() -> void:
 	broken.close()
 
 	_line("")
+	_done()
 
 
 # --- 5. Partials -----------------------------------------------------------
 
 func _section_partials() -> void:
-	_line("[b]5. partials that will never be resumed[/b]")
+	_section("[b]5. partials that will never be resumed[/b]")
 
 	var dir := WORK.path_join("partials")
 	var store: DotCloudStore = await _open_store(dir, 0)
@@ -359,12 +386,13 @@ func _section_partials() -> void:
 
 	store.close()
 	_line("")
+	_done()
 
 
 # --- 6. Verification and clearing ------------------------------------------
 
 func _section_verify_and_clear() -> void:
-	_line("[b]6. storage that changed underneath us[/b]")
+	_section("[b]6. storage that changed underneath us[/b]")
 
 	var dir := WORK.path_join("verify")
 	var cfg := _config(dir, 0)
@@ -399,6 +427,7 @@ func _section_verify_and_clear() -> void:
 
 	store.close()
 	_line("")
+	_done()
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -481,6 +510,16 @@ func _finish(code: int = 0) -> void:
 	if DotPlatform.is_headless():
 		await get_tree().process_frame
 		get_tree().quit(code)
+
+
+func _section(title: String) -> void:
+	_entered += 1
+	_line(title)
+
+
+## A section reached its last line. See [constant SECTIONS].
+func _done() -> void:
+	_completed += 1
 
 
 func _check(label: String, passed: bool, detail: String = "") -> void:

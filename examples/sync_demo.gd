@@ -30,6 +30,12 @@ var _client: DotCloudClient
 ## the family treats each example as a smoke test, and a smoke test that always
 ## passes is worse than none, because it is believed.
 var _failures: int = 0
+var _checks: int = 0
+
+## Every check this suite runs, including the one that compares against it. A suite that is
+## one long function has no sections to count, but a check skipped by a branch that should
+## not have been taken is still one only a total can see. See docs/testing.md.
+const CHECKS := 12
 
 
 func _ready() -> void:
@@ -264,6 +270,8 @@ func _run() -> void:
 	var rogue_check := _client.verify_manifest(rogue)
 	_check("unsigned refused", not rogue_check.ok)
 
+	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
+
 	_line("")
 	if _failures > 0:
 		_line("[b]%d check(s) FAILED[/b]" % _failures)
@@ -318,6 +326,7 @@ func _finish(code: int = 0) -> void:
 
 ## Prints an assertion and records a failure, padding so the column lines up.
 func _check(label: String, passed: bool, detail: String = "") -> void:
+	_checks += 1
 	if not passed:
 		_failures += 1
 
