@@ -40,7 +40,13 @@ const DEAD_BASE := "http://127.0.0.1:1"
 
 @onready var _output: RichTextLabel = $Output
 
+## Every check this suite runs, including the one that compares against it. The section
+## counter cannot see a section that aborted after announcing itself — its remaining checks
+## simply never run — and a total can. See docs/testing.md.
+const CHECKS := 36
+
 var _failures: int = 0
+var _checks: int = 0
 var _server: Node = null
 
 ## Sections that suspend, and the ones that reported reaching their end.
@@ -135,6 +141,11 @@ func _run() -> void:
 		"every suspending section ran to completion",
 		_sections_completed == _sections_entered,
 		"%d/%d" % [_sections_completed, _sections_entered]
+	)
+	_check(
+		"every check ran",
+		_checks + 1 == CHECKS,
+		"%d of %d" % [_checks + 1, CHECKS]
 	)
 
 	_line("")
@@ -723,6 +734,7 @@ func _finish(code: int = 0) -> void:
 
 
 func _check(label: String, passed: bool, detail: String = "") -> void:
+	_checks += 1
 	if not passed:
 		_failures += 1
 
