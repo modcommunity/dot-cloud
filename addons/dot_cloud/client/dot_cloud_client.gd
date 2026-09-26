@@ -140,6 +140,16 @@ signal _acquire_finished(content_key: String, result: DotResult)
 ## displace the first.
 @export var service_scope: StringName = &""
 
+@export_group("Requirements")
+
+## Who this build is, in the sentence a player reads when a pack needs more than it has:
+## "This game needs dot-net API level 3 or newer; this [b]client[/b] has level 2."
+##
+## [code]"build"[/code] unless the host says otherwise. dot-cloud cannot tell a server from
+## a client -- both mount packs the same way -- and the person reading the refusal needs
+## to know which of the two to update.
+@export var host_role: String = "build"
+
 @export_group("Wiring")
 
 ## Where to find a [DotScheduler] for hashing work.
@@ -157,6 +167,11 @@ var scheduler: DotScheduler = null
 ## Sources in preference order. Mutable at runtime — dot-server appends a netchan
 ## source once a session exists.
 var sources: Array[DotCloudSource] = []
+
+## What this build's addons are, for checking a pack's [code]requires.json[/code] before
+## it is mounted. See [DotAddonApi]; a test that is standing in for an older build sets
+## [member DotAddonApi.overrides] here.
+var addon_api: DotAddonApi = DotAddonApi.new()
 
 var _phase: Phase = Phase.IDLE
 var _http: DotHttp = null
@@ -493,6 +508,17 @@ func _acquire_inner(
 		if not synced.ok:
 			return _fail(synced.error)
 
+	# [b]Before the mount, because after it the pack's scripts are one `load` away.[/b] A
+	# pack built against a newer addon than this build has does not fail with a sentence:
+	# its scripts fail to PARSE, mid-load, naming an identifier "not declared in the current
+	# scope". Its requirements are a file inside it, already downloaded and verified above
+	# like every other object, so they can be read from the store with nothing mounted --
+	# and a refusal here leaves nothing mounted to regret, which matters because a mounted
+	# pack can never be unmounted.
+	var fits := check_requirements(manifest)
+	if not fits.ok:
+		return _fail(fits.error)
+
 	_set_phase(Phase.MOUNTING, "Preparing content…")
 
 	var mounted := await mounter.mount(manifest, store, scheduler)
@@ -505,6 +531,38 @@ func _acquire_inner(
 	content_ready.emit(manifest, str(mounted.value))
 
 	return _ready_result(manifest)
+
+
+## Whether this build has the addon API a pack's [code]requires.json[/code] asks for.
+##
+## Read out of the store, so the pack does not have to be mounted to be asked. A pack
+## with no such file needs nothing that can be checked -- every pack published before
+## the file existed -- and so does one whose file this acquisition did not fetch.
+func check_requirements(manifest: DotCloudManifest) -> DotResult:
+	for file in manifest.files:
+		if file.path != DotAddonApi.REQUIREMENTS_FILE:
+			continue
+
+		if store == null or not store.has(file.sha256):
+			DotLog.debug(CHANNEL, "requirements not fetched; not checked", {"content": manifest.key()})
+			return DotResult.success({})
+
+		var read := store.read(file.sha256)
+		if not read.ok:
+			return read.wrap("Could not read %s's requirements." % manifest.content_id)
+
+		var checked := addon_api.check_text(
+			(read.value as PackedByteArray).get_string_from_utf8(), host_role
+		)
+		if not checked.ok:
+			DotLog.warn(CHANNEL, "content needs more than this build has", {
+				"content": manifest.key(),
+				"why": checked.error.message,
+				"detail": checked.error.detail,
+			})
+		return checked
+
+	return DotResult.success({})
 
 
 ## [method acquire] for content addressed by id and version rather than by URL.

@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 20
+const CHECKS := 26
 
 
 func _ready() -> void:
@@ -160,6 +160,7 @@ script = ExtResource("1")
 		node.free()
 
 	_check_imported_outputs(str(pair["private"]))
+	await _check_requirements(str(pair["private"]), cloud)
 
 	_done()
 
@@ -248,6 +249,57 @@ func _check_imported_outputs(key_pem: String) -> void:
 	_check(from_sub.has(landed),
 		"published from a subdirectory, the output still comes with it",
 		", ".join(PackedStringArray(from_sub.keys())))
+
+
+## [b]A pack that needs a newer addon than this build has is refused BEFORE it mounts.[/b]
+##
+## Its scripts would compile against this build's addons, and a pack using an API this
+## build lacks fails to parse with nothing a person can read -- so dot-cloud reads the
+## pack's `requires.json` out of the store between download and mount, and says it in a
+## sentence instead. "Before it mounts" is checked as well as the sentence, because a
+## mounted pack can never be unmounted: a refusal after the mount would leave its files in
+## the tree for good.
+func _check_requirements(key_pem: String, cloud: DotCloudClient) -> void:
+	var src := WORK.path_join("needs_source")
+	var out := WORK.path_join("needs_published")
+	DotPaths.ensure_dir(src.path_join("game"))
+	DotPaths.write_text(src.path_join("game/thing.gd"), "extends Node\n\nfunc who() -> String:\n\treturn \"NEWER\"\n")
+	DotPaths.write_text(src.path_join(DotAddonApi.REQUIREMENTS_FILE), DotAddonApi.encode({"dot_core": 99}))
+
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "delivered_needs"
+	pub.version = "1.0.0"
+	pub.signing_key_pem = key_pem
+	var published := pub.publish(src, out)
+	_check(published.ok, "a pack needing dot-core level 99 publishes", str(published.error) if not published.ok else "")
+	if not published.ok:
+		return
+
+	cloud.host_role = "client"
+	var refused: Variant = await cloud.acquire(out.path_join("manifest.json"))
+	var err: DotError = (refused as DotResult).error if refused is DotResult and not (refused as DotResult).ok else null
+	_check(err != null and err.code == DotError.CODE_VERSION, "this build refuses it as a version problem", str(err))
+	_check(
+		err != null and err.message == "This game needs dot-core API level 99 or newer; this client has level 1.",
+		"in a sentence naming the addon, both levels, and which side is behind",
+		err.message if err != null else ""
+	)
+	_check(
+		not FileAccess.file_exists("res://dot_cloud/delivered_needs/1.0.0/game/thing.gd"),
+		"and refuses it before mounting anything"
+	)
+
+	# The same pack on a build that has what it asks for.
+	cloud.addon_api.overrides["dot_core"] = 99
+	var got: Variant = await cloud.acquire(out.path_join("manifest.json"))
+	_check(got is DotResult and (got as DotResult).ok, "a build that has the level mounts it",
+		"" if got is DotResult and (got as DotResult).ok else str((got as DotResult).error))
+	var script := load("res://dot_cloud/delivered_needs/1.0.0/game/thing.gd") as GDScript
+	var node: Node = script.new() if script != null else null
+	_check(node != null and node.call("who") == "NEWER", "and its script runs")
+	if node != null:
+		node.free()
+	cloud.addon_api.overrides.clear()
 
 
 ## Publish [param source] and return the manifest's file paths as a set.

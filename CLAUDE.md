@@ -145,6 +145,12 @@ Both sides are simplified before comparing now, so the belt is independent of
 the braces rather than agreeing with whatever they let through.
 `mount_demo`'s section 1 is the assertion.
 
+### 3. A pack's scripts compile against this build's addons, so it says what it needs
+
+A delivered pack carries none of the dot-* addons — the client shell and the server that mount it do — so a pack written against a newer dot-net than the host has fails to **parse**, mid-load, with an identifier "not declared in the current scope", which reads as a broken pack. dot-cloud reads the pack's `requires.json` (see dot-core's `DotAddonApi`: `{"addons": {"dot_net": 3}}`, written by dot-ci's `package.sh --pack`) **out of the store, between download and mount**, and refuses with *"This game needs dot-net API level 3 or newer; this client has level 2."* as `CODE_VERSION`. Between download and mount, not after: the file is verified like every other object by then, so nothing has to be mounted to read it, and a refusal after a mount would leave the pack's files in the tree for good (constraint 1).
+
+`host_role` is the noun in that sentence — `"build"` unless the host says `"server"` or `"client"`, because dot-cloud mounts the same way on both and the person reading the refusal needs to know which one to update. `addon_api.overrides` is how a test stands in for an older build. A pack with no `requires.json` — everything published before it existed, and anything published from a checkout rather than by dot-ci — is not checked. `delivered_scene_demo` asserts the sentence, that nothing mounted, and that the same pack mounts and runs on a build that has the level; armed by moving the check after the mount.
+
 ## The signing design, and the bug that produced it
 
 **Signatures live outside the document they sign.** A published manifest is a
@@ -482,6 +488,7 @@ godot --headless --path . res://examples/netchan_demo.tscn
 
 # A scene delivered in a pack, with its script, actually running. The case the
 # whole delivery path exists for, and the one nothing here had ever executed.
+# 26 checks, including a pack needing a newer addon API refused before it mounts.
 godot --headless --path . res://examples/delivered_scene_demo.tscn
 
 # The cache on its own: eviction under pressure, refs, LRU order, the index
