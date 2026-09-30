@@ -425,6 +425,18 @@ func acquire(
 ## in the first place.
 var _inflight: Dictionary = {}
 
+## Whether [member downloader] is running a sync right now, and the signal that it
+## stopped.
+##
+## [b]Two DIFFERENT packs at once used to fail the second one.[/b] `_inflight` makes two
+## callers of the same content share one acquisition, but the downloader runs one sync
+## at a time, so a map fetched at boot and a game's prefetch of its other maps collided:
+## every prefetch while the boot map downloaded failed with "This downloader is already
+## syncing", logged at ERROR with a backtrace, and the maps were fetched again later on
+## demand. A second sync now waits its turn, which is what its caller wanted.
+var _sync_busy := false
+signal _sync_freed
+
 
 ## Wait for an acquisition already running for [param key].
 func _await_inflight(key: String) -> DotResult:
@@ -501,9 +513,18 @@ func _acquire_inner(
 			"Downloading %s…" % DotPaths.format_bytes(int(plan["missing_bytes"]))
 		)
 
+		while _sync_busy:
+			await _sync_freed
+
+		_sync_busy = true
 		scheduler.set_boost(600.0)
 		var synced := await downloader.sync(manifest, groups)
 		scheduler.clear_boost()
+		_sync_busy = false
+		# Deferred, so a waiter resumes after this frame's caller has moved on rather
+		# than inside it -- and only one of them takes the slot: the rest see it busy
+		# again and go back to waiting.
+		_sync_freed.emit.call_deferred()
 
 		if not synced.ok:
 			return _fail(synced.error)
