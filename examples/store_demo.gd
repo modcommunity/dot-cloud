@@ -36,7 +36,7 @@ const SECTIONS := 6
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 55
+const CHECKS := 56
 
 var _entered := 0
 var _completed := 0
@@ -418,7 +418,12 @@ func _section_verify_and_clear() -> void:
 	_check("accounting after verify", store.total_bytes() == OBJ,
 		"%d B" % store.total_bytes())
 
+	# A pack the mounter assembled, which is a second copy of the objects and the larger
+	# half of what a player has downloaded. clear_all used to leave it.
+	var pack := cfg.cache_dir.path_join("packs/some-pack-1_0_0-abc.pck")
+	DotPaths.write_bytes(pack, PackedByteArray([1, 2, 3]))
 	var cleared := store.clear_all()
+	_check("clear_all takes the assembled packs too", not FileAccess.file_exists(pack))
 	_check("clear_all", cleared.ok and store.object_count() == 0
 		and store.total_bytes() == 0 and not store.has(sound))
 	_check("directories survive",

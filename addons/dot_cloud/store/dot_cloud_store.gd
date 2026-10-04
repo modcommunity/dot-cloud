@@ -436,6 +436,11 @@ func prune(need_bytes: int = 0) -> DotResult:
 func clear_all() -> DotResult:
 	var removed := DotPaths.remove_tree(config.objects_dir())
 	DotPaths.remove_tree(config.partials_dir())
+	# [b]And the packs.[/b] [DotCloudMounter] assembles each mounted set of objects into
+	# a `.pck` under `<cache_dir>/packs/`, a second full copy of everything a player has
+	# played, and "everything" left it: a "clear downloaded content" freed the objects
+	# and kept the larger half. Rebuilt from the objects on the next mount.
+	DotPaths.remove_tree(config.cache_dir.path_join("packs"))
 
 	_index.clear()
 	_total_bytes = 0
