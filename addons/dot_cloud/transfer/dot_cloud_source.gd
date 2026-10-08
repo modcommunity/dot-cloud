@@ -11,8 +11,8 @@ extends Resource
 ## - [DotCloudSourceLocal] — a directory already on disk. For development, for
 ##   LAN play from a shared folder, and for content shipped with the build.
 ## - [DotCloudSourceNetchan] — the bytes come down the multiplayer connection
-##   itself. The fallback for a server with no web host, equivalent to Source's
-##   pre-FastDL behaviour: it works everywhere, including in a browser, and it
+##   itself. The fallback for a server with no web host, equivalent to how game
+##   servers delivered content before HTTP download hosts: it works everywhere, including in a browser, and it
 ##   costs the server's own bandwidth.
 ##
 ## Sources are tried in order, so listing a CDN then a netchan gives you "fast
