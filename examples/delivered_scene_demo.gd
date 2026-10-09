@@ -279,8 +279,11 @@ func _check_requirements(key_pem: String, cloud: DotCloudClient) -> void:
 	var refused: Variant = await cloud.acquire(out.path_join("manifest.json"))
 	var err: DotError = (refused as DotResult).error if refused is DotResult and not (refused as DotResult).ok else null
 	_check(err != null and err.code == DotError.CODE_VERSION, "this build refuses it as a version problem", str(err))
+	# This build's own level, read rather than written down: dot-core went from 1 to 2 on
+	# 2026-10-08, and the sentence was right while this check said it was wrong.
+	var have := int((load("res://addons/dot_core/dot_core_api.gd") as GDScript).get_script_constant_map()["LEVEL"])
 	_check(
-		err != null and err.message == "This game needs dot-core API level 99 or newer; this client has level 1.",
+		err != null and err.message == "This game needs dot-core API level 99 or newer; this client has level %d." % have,
 		"in a sentence naming the addon, both levels, and which side is behind",
 		err.message if err != null else ""
 	)
