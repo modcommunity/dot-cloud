@@ -63,7 +63,7 @@ The output is a static directory of `manifest.json` plus an `objects/` tree, whi
 
 ## Two things worth knowing before you build on it
 
-**Godot cannot unmount a resource pack.** Not slowly, and not with a workaround. The API does not exist. dot-cloud handles this by giving every content set its own versioned path so nothing ever needs replacing, and "unloading" means dropping references rather than reclaiming the file table. See [CLAUDE.md](CLAUDE.md#read-this-first-the-two-constraints-that-shaped-everything).
+**Godot cannot unmount a resource pack.** Not slowly, and not with a workaround. The API does not exist. dot-cloud handles this by giving every content set its own versioned path so nothing ever needs replacing, and "unloading" means dropping references rather than reclaiming the file table. See [docs/mounting.md](docs/mounting.md#a-mounted-resource-pack-can-never-be-unmounted).
 
 **Unsigned content is remote code execution.** `require_signed_manifests` defaults to on and the config refuses to validate without a trusted key. You can turn it off for LAN or first-party servers; it will warn every time.
 

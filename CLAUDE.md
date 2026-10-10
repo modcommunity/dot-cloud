@@ -1,643 +1,98 @@
 # dot-cloud
 
-Runtime content delivery for Godot 4: a game server hands a client a manifest,
-the client works out what it is missing, downloads it, verifies it, and mounts it
-— on desktop, mobile and in the browser.
+Runtime content delivery for Godot 4: a game server hands a client a manifest, the client works out what it is missing, downloads it, verifies it, and mounts it, on desktop, mobile and in the browser. It also lays newer addon releases over a client build at its next start (`DotCloudAddonSet`), so an addon release does not need a new build.
 
-**The distributable is `addons/dot_cloud/`.** It requires
-[dot-core](../dot-core), which is a separate repository.
+**The distributable is `addons/dot_cloud/`.** It requires [dot-core](../dot-core), which is a separate repository.
 
 ```bash
 # Local development setup — the symlink is gitignored on purpose.
 ln -s ../../dot-core/addons/dot_core addons/dot_core
 ```
 
-## Read this first: the two constraints that shaped everything
+Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is specific to content delivery. The reasoning is in [docs/](docs/README.md).
 
-### 1. A mounted resource pack can never be unmounted
+## Read before
 
-There is no `unload_resource_pack`. On any platform, in any version. Once
-`ProjectSettings.load_resource_pack()` returns, that pack's file table is merged
-into the virtual filesystem for the life of the process, and the engine does not
-track which pack contributed which entry, so there is nothing to unwind even in
-principle.
-
-The brief is "dynamically load and unload games while users are connected". The
-naive implementation — mount game A at `res://game/`, later mount game B at the
-same paths with `replace_files = true` — is broken in a way that shows up late:
-
-- files that existed in A and not in B **still resolve**, to A's bytes;
-- the resource cache may hand back A's instance for a path B also defines;
-- nothing errors — the game behaves as a blend of two content sets.
-
-**So dot-cloud never reuses a path.** Content mounts at
-`res://<mount_root>/<content_id>/<version>/`, with the version *in the path*.
-Mounting B cannot shadow A because they do not overlap. "Unloading" means: tear
-down the scene tree, release the store's refs so the objects become evictable,
-and never look at those paths again.
-
-**Tearing down the scene tree is what frees the resources**, and nothing else
-can. Godot's resource cache holds no reference of its own — a `Resource`
-registers itself on load and unregisters in its destructor — so a path leaves
-the cache exactly when the last real reference to it drops. There is no
-script-exposed eviction, and `DotCloudMounter.purge_resources` used to pretend
-otherwise: it called `load(path, "", CACHE_MODE_IGNORE)` on every path under the
-prefix and counted the successes, which returns a *new* instance and leaves the
-cached one untouched. `unmount` logged `purged=4` having purged nothing, after
-re-reading the whole content set from disk to say it. It now reports what is
-still referenced — a leak count, and a real one: a non-zero value means the
-caller did not free its nodes, which is the one thing that breaks re-entering
-this version later. `mount_demo`'s section 5 asserts it is zero.
-
-The file-table entries linger — a few kilobytes per mount, against content
-measured in megabytes. `DotCloudMounter.restart_process()` is the only true
-unmount and exists for cases where even that is unacceptable. Needing it means
-content is being mounted at colliding paths, which the namespacing exists to
-prevent.
-
-### 1a. Nothing can use a client it cannot find
-
-`DotCloudClient` publishes itself in `DotRegistry` under `SERVICE`
-(`dot_cloud_client`), and that one line is load-bearing for three other addons that
-deliberately do not import this one:
-
-| Who | For what | Without the registration |
-| --- | --- | --- |
-| `DotClientLink._begin_content_sync` | downloading a game's content | a client can never fetch anything |
-| `DotGameManager._unload_current` | releasing the previous game's | content is never released on a map change |
-| `DotBuiltinCommands` | the `content` console command | reports nothing |
-| `DotAvatarCatalogue` | a cosmetic's content id → a path | cloud-delivered cosmetics are unreachable |
-
-All four are duck-typed and all four look under the same name. Until the registration
-existed they all found `null` — and **none of them errored**, because every one of them
-treats an absent cloud as "this deployment ships its content in the build", which is a
-legitimate configuration and therefore indistinguishable from the bug. Found by
-`dot-2d-hungry`, which is the first project to deliver cosmetics through the cloud and
-noticed that its catalogue never asked.
-
-It registers in `_ready`, not in `start()`: `start()` awaits — the browser reports its
-storage quota asynchronously — and a consumer resolving the service in between would get
-null from a client that was about to work. Nothing found this way has to be started;
-`acquire()` starts itself.
-
-### 1b. Two ways to name content, and only one of them existed
-
-`acquire(manifest_url, groups)` is the URL form, and it is what dot-server uses: an
-operator wrote the URL in a game's configuration, so the server has one to hand.
-
-**Half the family does not.** dot-map addresses a map by `content_id` and
-`content_version` out of a catalogue, because a catalogue of two hundred maps should not
-repeat the same CDN hostname two hundred times. `DotMapLoader` has called
-`ensure(content_id, version)` and `is_mounted(content_id, version)` on whatever it found
-under `dot_cloud_client` since the day it was written, and **this client offered neither**
-— so every delivered map failed with "the registered cloud client does not speak the
-content interface", and dot-map's only loader test runs with *no* cloud client, which is
-the branch that falls back to the disk and passes. Nobody had read the two sides side by
-side, which is this family's cheapest bug-finding technique and the one that also caught
-the leaderboard and stats reporters sending their file formats as the wire.
-
-So `ensure()` and `is_mounted()` are here now. `ensure` resolves a manifest URL from
-`manifest_url_template` against `local_search_dirs` first and `http_base_urls` second,
-tries each in order, and checks that the manifest it gets back agrees about its own id
-and version before mounting anything — a mirror serving the wrong document would
-otherwise mount somebody else's content under the id the caller asked for.
-
-Two details that are load-bearing:
-
-- **A local manifest is read, not requested.** `HTTPRequest` cannot fetch `res://` or
-  `user://` at all, so a deployment serving content off the disk — which is exactly what
-  `local_search_dirs` is for — could reach every object in a pack and not the one
-  document naming them.
-- **A scheme-less string is not automatically a path.** The obvious rule breaks the one
-  CORS-free browser configuration there is: a page served from its content's origin uses
-  a root-relative URL like `/content/x/1.0.0/manifest.json`. So the three file schemes are
-  local outright, anything else with a scheme is not, and a bare path is local only if
-  the file is actually there.
-- **A published directory holds the manifest *and* its objects**, so `ensure` adopts the
-  directory a local manifest came from into the local source. Without it the id-and-version
-  form found a manifest it could not fetch a single file for, failing with "Content is not
-  in any local source directory" while the bytes sat next to the document naming them.
-
-### 2. The manifest is the entire trust boundary
-
-Everything downstream trusts it: the hashes decide what counts as a valid
-download, and the paths decide what gets mounted. Godot packs can contain
-scripts, so **a client that mounts content from an unsigned manifest runs
-whatever the server sent.** Per-file hashes do not help — they prove a file
-matches what the manifest said, and the manifest is the thing under attack.
-
-`DotCloudConfig.require_signed_manifests` defaults to `true` and `validate()`
-refuses to boot without a trusted key. Turning it off is legitimate for LAN play,
-first-party servers and development, and logs a warning every time.
-
-**Both path components of the mount prefix are server-supplied, and both need
-checking.** `content_id` was always required to equal its own slug. `version` was
-not — it cannot be, because `slugify("1.0.0")` is `1_0_0` and equality would
-refuse every semver ever published — and for a long time the only check on it
-was that it slugified to something non-empty. `slugify("../evil")` is `"evil"`,
-non-empty, and `mount_prefix()` interpolates the *raw* string, so a manifest
-declaring `version: "../.."` validated cleanly and mounted at `res://` — exactly
-the shadowing `mount_root` exists to prevent. It now gets `safe_relative` plus a
-separator check, because a version is one path *component*, not a path.
-`DotCloudMounter._check_prefix` was no help: it compared with a raw
-`begins_with()`, and `"res://a/b/../../evil"` does begin with `"res://a/b/"`.
-Both sides are simplified before comparing now, so the belt is independent of
-the braces rather than agreeing with whatever they let through.
-`mount_demo`'s section 1 is the assertion.
-
-### 3. A pack's scripts compile against this build's addons, so it says what it needs
-
-A delivered pack carries none of the dot-* addons — the client shell and the server that mount it do — so a pack written against a newer dot-net than the host has fails to **parse**, mid-load, with an identifier "not declared in the current scope", which reads as a broken pack. dot-cloud reads the pack's `requires.json` (see dot-core's `DotAddonApi`: `{"addons": {"dot_net": 3}}`, written by dot-ci's `package.sh --pack`) **out of the store, between download and mount**, and refuses with *"This game needs dot-net API level 3 or newer; this client has level 2."* as `CODE_VERSION`. Between download and mount, not after: the file is verified like every other object by then, so nothing has to be mounted to read it, and a refusal after a mount would leave the pack's files in the tree for good (constraint 1).
-
-`host_role` is the noun in that sentence — `"build"` unless the host says `"server"` or `"client"`, because dot-cloud mounts the same way on both and the person reading the refusal needs to know which one to update. `addon_api.overrides` is how a test stands in for an older build. A pack with no `requires.json` — everything published before it existed, and anything published from a checkout rather than by dot-ci — is not checked. `delivered_scene_demo` asserts the sentence, that nothing mounted, and that the same pack mounts and runs on a build that has the level; armed by moving the check after the mount.
-
-## Addons as packs: a newer addon without a new build (`DotCloudAddonSet`, 2026-10-10)
-
-**The point is that an addon release should not need a new client build.** Every addon tag is already published by the site as a signed pack (`modcommunity/dot-ui@0.1.5`, the addon's directory at the pack root). A server announces the addon versions it runs (dot-server's `addon_set`, in the signon challenge); a client whose build is older fetches those packs, assembles ONE overlay pack that lays them over its own `res://addons/<dir>/`, writes a plan, and restarts — a page reload in a browser, a relaunch on desktop. `addon_set/dot_cloud_addon_set.gd` decides and builds; `boot/dot_cloud_boot.gd` mounts.
-
-**Three engine facts it rests on, each measured on an exported build, each silent when ignored:**
-
-- **A script compiled in this process keeps its code.** Mount a newer file over it and the old code runs on: `load`, `CACHE_MODE_REPLACE` and `Script.reload()` all hand back the old one. So the overlay is mounted by a main scene that names NO addon class (`dot_cloud_boot.gd` — not even dot-cloud's own; its paths and plan fields are written out again on purpose), before anything else loads. That is why this is a restart and never an in-game swap.
-- **An export stores `x.gd` as `x.gdc` behind `x.gd.remap`, and `x.tscn` as a binary `.scn` behind `x.tscn.remap`.** The loader follows the build's remap to the build's bytes, so a newer `x.gd` mounted beside it is never read. Every resource in the overlay gets a `.remap` pointing at itself (`REMAPPED`). Without them: old code, new class list, no error.
-- **`ProjectSettings.load_resource_pack` re-reads `res://.godot/global_script_class_cache.cfg`.** So a pack mounted at the root that carries that file can ADD `class_name`s — a script naming the new class as a type compiles after the mount. Without it: "Identifier not declared". The file is one list for the whole project, so the overlay carries the build's own list (saved by the boot before any overlay replaced it, `shell_classes.cfg`) with the overlaid addons' entries swapped in. `DotCloudScriptClass` writes those entries from each script's header, and `addon_set_demo` checks that against the list the editor wrote for this project, every field of every class (52); it was also checked against dot-server-deploy's whole cache when written (811 of 811). **This corrects the family's old claim that "a mounted pack's `class_name` globals are not registered":** true for a pack at a mount prefix that carries no class list, which is every GAME pack, and the reason games still reference their files by path.
-
-**What keeps it from doing harm.** Only upward: a version not newer than the build's (`res://addons.lock`, which every export now carries) or than the running overlay's is never taken, so a server cannot pin its players to an old addon. Only from `namespaces` (an owner ending in `/`, or one exact id — `alice/x` does not admit `alice/x-evil`), only signed (`resolve_manifest` verifies), only a repository that is the pack's own name, only into a directory that is one plain name, and only into a directory that either does not exist in the build or already holds the plugin script the pack's `plugin.cfg` names (`_is_that_addon`) — so a list saying `dir: dot_ui` with the dot-net pack is refused before anything is written. An overlay names the build it was made for and is ignored by any other build. The plan says `booting` before the mount and the shell says `ok` with `confirm_boot()` once it has built itself; two starts that never arrived mark the overlay `failed` and the build comes up on its own addons (`failed_before` then stops the shell building that set again). In an exported build `confirm_boot()` also loads one script per overlaid addon (`probes`, its `_api.gd` when it has one) and requires its source text: a `.gdc` has none, so "the build's compiled copy is still the one running" is caught and the overlay turned off.
-
-**The overlay is named by its contents** (every file's path and hash, plus the build), so the same set is the same file and is reused rather than rewritten — required, because the file of that name may be mounted in this very process. `download_manifest()` and `resolve_manifest()` on `DotCloudClient` are the download-without-mount halves `ensure()` is now built from: an addon pack must never also be mounted at its own `res://dot_cloud/<id>/<version>/`.
-
-**In a browser the files are the weak point, and the guard has to live elsewhere.** `user://` reaches IndexedDB only through `FS.syncfs`, and the engine DROPS a sync requested while one runs — dot-cloud asks after every object, so the request after the last write was routinely the one dropped, and a reload lost the plan and the overlay: a page that came back, saw the same newer addons, and reloaded again (six reloads in seventy seconds, measured). The shell now asks for the sync four times, 0.75 s apart, before it reloads, and counts restarts per server and set in `sessionStorage` (synchronous, survives a reload of the tab) so a loop stops at two.
-
-`examples/addon_set_demo.tscn` (47 checks) publishes `modcommunity/dot-probe@0.2.0` with a run key, builds the overlay through a real client, and starts this project AGAIN as separate processes through `addon_boot_probe.tscn` — a boot, a start whose two predecessors never arrived, an overlay for another build, no plan — reading back what each found (`addon_boot_check.gd`). It writes `res://addons.lock` for the run (gitignored). Armed: without the class list five checks fail; without the boot-loop guard four. The end-to-end proof — an old exported shell meeting a newer server, fetching the real site-signed `modcommunity/dot-ui@0.1.5` and `dot-audio@0.1.3`, relaunching and spawning in a match — is written up in dot-server-deploy's CLAUDE.md.
-
-## The signing design, and the bug that produced it
-
-**Signatures live outside the document they sign.** A published manifest is a
-`DotCloudEnvelope`:
-
-```json
-{ "dot_cloud_signed": 1, "algorithm": "RS256", "key_id": "default",
-  "signature": "<base64>", "payload": "<base64url of the manifest JSON>" }
-```
-
-The first version put a `signature` field inside the manifest and signed a
-canonical re-serialisation. **Every signature it produced failed to verify**,
-because the file written to disk was pretty-printed and the signed bytes were
-not. `examples/sync_demo.tscn` caught it; no parse check could have.
-
-Canonical JSON is a whole specification (RFC 8785). Implementing it to work
-around a self-inflicted problem would be the wrong fix. An opaque base64url
-payload means the verifier checks the exact bytes it received with no
-reformatting anywhere in the path — the same reason JWS is shaped this way.
-
-`DotCloudManifest.from_json_bytes()` is the single entry point and unwraps the
-envelope transparently, so no caller can verify against the wrong bytes.
-
-**RSA, not Ed25519.** Godot's `Crypto` exposes RSA sign/verify via mbedTLS and no
-EdDSA. Ed25519 would be better and needs a GDExtension.
-
-**A key floor, enforced on verify.** `MIN_KEY_BITS` is 2048, and for a long time
-it was checked only in `generate_keypair` — so a 1024-bit key never made here
-verified without complaint. That is not hypothetical: the demo generates one
-through `Crypto` directly and, before the check existed, `verify()` accepted its
-signature. It only had to reach `trusted_keys`, which is layered config and can
-arrive from a JSON file or the environment.
-
-The check is on the *signature length*, not the key: an RSA signature is exactly
-as long as the modulus, so 128 bytes means a 1024-bit key and cannot be padded to
-claim otherwise — a longer signature just fails `Crypto.verify`. `CryptoKey`
-exposes no bit count, and the alternative was walking the DER inside the PEM.
-A weak key is `CODE_FORBIDDEN` (not considered), never `CODE_INTEGRITY` (
-considered, bytes disagreed); the demo asserts on which.
-
-### A key says what it is trusted FOR
-
-`trusted_keys` maps a key id to a PEM, and for most of this addon's life that was the
-whole of it — which meant **every trusted key was trusted for every content id there
-is**. With one key that is a distinction without a difference. With two it is the hole:
-the second publisher signs a manifest claiming `content_id: arena`, and any client that
-has not already mounted it takes the pack — code, in that player's process, under
-somebody else's game's name.
-
-An entry may now name its namespace, and a bare PEM still means everything, because that
-is what every config written before this said:
-
-```json
-"trusted_keys": {
-    "first-party": "-----BEGIN PUBLIC KEY-----\n…",
-    "community-alice": {
-        "key": "-----BEGIN PUBLIC KEY-----\n…",
-        "content_ids": ["alice_*"]
-    }
-}
-```
-
-`verify_for` does both halves and the failure says which — `The manifest is not signed by
-any trusted key` against `'community-alice' is not trusted to publish 'arena'` — and the
-order is not cosmetic: **verification first, entitlement second**, because a scope check
-on an unverified manifest is a check on a claim the attacker wrote.
-
-`DotCloudConfig.validate()` warns about several keys with at least one unscoped, and says
-nothing about a single unscoped key, which is every deployment today. It warns rather than
-refuses: a client that will not start is worse than one that says so, and the content
-still has to be signed by a key in the set either way.
-
-## Content addressing
-
-Objects are stored under their SHA-256, not their path:
-`<cache>/objects/<aa>/<full-hash>`. This is what makes the rest affordable:
-
-- two games sharing a texture pack download it once;
-- republishing re-downloads only what changed;
-- a partial download cannot be confused with a different file at the same path,
-  which is what makes HTTP range resume safe;
-- verification is a property of the object, done once, in one place.
-
-**`DotCloudStore.commit_partial()` is that one place.** It hashes the partial,
-requires a match, and only then moves it into `objects/`. Nothing unverified is
-ever written there, which is why `has()` can be a cheap existence check. Never
-write to the object directory from anywhere else.
-
-Partials live in a separate directory keyed by hash. The index
-(`<cache>/index.json`) holds size, last-use and refs, and is disposable — it can
-always be rebuilt from the directory, because the filenames *are* the hashes.
-
-**The index is always behind the directory, and `open()` reconciles the two.**
-Objects are flushed to storage the moment they commit — a tab closed mid-download
-has to keep what already finished — while the index is only written at the end of
-a sync, at mount and at prune. So every run that ends without `close()` leaves a
-valid, parseable index that is missing whatever was in flight, and *because* it
-parses, `_rebuild_index()` never gets a chance to notice. An untracked object is
-worse than a missing one: `has()` finds it so it is never re-downloaded, `touch()`
-cannot stamp it, `_total_bytes` omits it so `shortfall()` under-reports, and
-`prune()` iterates the index, so **it can never be evicted**. The ceiling stops
-being a ceiling by exactly the amount the last crash had in flight, permanently —
-and on mobile that ceiling is what keeps the app from being killed for disk use.
-`_reconcile_with_disk()` adopts what it finds, drops entries whose file is gone,
-and costs one directory walk, which is what a rebuild costs anyway and what
-`sweep_partials()` already spends on the sibling directory. `store_demo`'s
-section 4 is the assertion; removing the call turns five checks red, including
-one that reports the cache as exactly at its 1 KiB limit with 3 KiB on disk.
-
-**A partial is dead once its object exists.** Resume only ever runs for content
-that is *missing*, so an object arriving by another route — the in-band source
-after HTTP failed part-way, or another manifest that shares it — strands the
-partial. `put_bytes()` discards it, and `sweep_partials()` drops any partial whose
-object is present regardless of age, rather than holding the largest files in the
-cache twice over for a day. Disk pressure is usually what caused the failover.
-
-## Platform notes
-
-| | |
+| Read | Before |
 | --- | --- |
-| **Web filesystem** | `user://` is an IndexedDB mirror. `DotWeb.sync_filesystem()` is called after every committed object, not once at the end — a tab closed mid-download must keep what already finished. |
-| **Web quota** | `DotCloudStore._resolve_limit()` awaits `navigator.storage.estimate()` and uses `web_quota_fraction` of it. An unavailable estimate falls back to the configured ceiling; never assume unlimited. |
-| **Web CORS** | Every fetch is subject to it and `fetch()` will not say why it failed. A content host must send `Access-Control-Allow-Origin`, `Access-Control-Allow-Headers: Range`, and `Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, ETag`. Without the `Range` header, resume is impossible; without the exposed headers, undetectable. Same-origin content avoids all of it. |
-| **No threads on web** | Hashing goes through `DotHashJob` on a `DotScheduler`, sliced against a frame budget when there is no worker. |
-| **Mobile** | `mobile_cache_bytes` (1 GiB) replaces `cache_bytes` (4 GiB). Filling a phone's storage gets the app killed. |
-
-## Sources
-
-Tried in priority order, with per-source circuit breaking (`failure_threshold`,
-`cooldown_sec`, half-open retry).
-
-| Source | Priority | Use |
-| --- | --- | --- |
-| `DotCloudSourceLocal` | 10 | Development, LAN shares, content bundled in the build. Verifies hashes like everything else — a dev source is being edited, so it is not automatically trustworthy. |
-| `DotCloudSourceHttp` | 50 | The normal case. Content-addressed URLs, mirror failover with a sticky preference, range resume. |
-| `DotCloudSourceNetchan` | 900 | Bytes over the game connection. Needs no web host, no CORS, no certificate; costs the server's bandwidth. The pre-FastDL fallback. Bounded three ways — see below. |
-
-**The in-band source needs all three of its bounds.** `max_chunks_per_file` caps
-round trips, `chunk_timeout_sec` caps one wait, and `file_timeout_sec` caps their
-product. Without the third, a peer that answers every chunk correctly, in full,
-just slowly, is bounded only by 16384 × 30 s — over 130 hours holding the game
-connection, with no failure for the circuit breaker to count, because every
-individual wait was legitimate. The per-chunk wait is clamped to whatever is left
-of the file budget, and when that is what expired the failure says
-`"The in-band transfer took too long."` rather than blaming the peer's latency.
-Both timeouts keep the partial: a stalled transfer is a reason to come back, not a
-reason to discard what arrived.
-
-**A source is skipped for three different reasons, and they are not the same.**
-`is_supported()` answers "on this platform, at all"; `is_available()` answers "not
-in circuit-breaker cooldown"; `can_serve(manifest)` answers "with a way to reach
-*this* content". The third exists because `DotCloudClient` always builds an HTTP
-source whether or not it was given base URLs — a manifest may carry its own
-mirrors — so in a netchan-only or local-only deployment that source is healthy,
-permanently "available", and completely unable to fetch a byte. It sat at priority
-50 ahead of the in-band fallback, spent one of `max_attempts_per_file` per file on
-a guaranteed failure, and once netchan tripped its own breaker it was the only
-candidate left, so every download failed with *its* complaint: `"No content URL is
-configured."` `netchan_demo`'s last section is the assertion, and removing the
-`can_serve` filter turns it red with `3 requests for 4 attempts` and that exact
-message.
-
-**A failed sync says why, not only which file.** `DotCloudDownloader` keeps the
-first required file's failure and puts it in the summary's detail; the summary's
-*code* stays `CODE_NETWORK` regardless, because callers branch on codes and the
-first failure to lose the race should not change what `acquire_manifest` returns.
-
-**`DotCloudSourceNetchan` does not know how to send a packet.** dot-cloud must not
-depend on dot-server, so it calls a duck-typed delegate:
-
-```gdscript
-func cloud_chunk_size() -> int
-func cloud_request_chunk(sha256: String, offset: int, length: int) -> DotResult
-```
-
-The delegate owns rate limiting and must refuse hashes the client has no business
-requesting — otherwise it is a way to read the server's cache.
-
-## The GDScript fan-out trap
-
-`DotCloudDownloader.sync()` runs a worker pool. Both obvious spellings are wrong,
-and the comment there is longer than the code for good reason:
-
-1. `workers.append(_worker(...))` is a **parse error** — GDScript has no task
-   handle, and a `void` coroutine's call expression has no value.
-2. Firing workers off and then `while remaining > 0: await _worker_done` **hangs**
-   when a source resolves synchronously (local source, warm HTTP cache). Those
-   workers run to completion *inside the call*, emitting every signal before the
-   await exists.
-
-The working pattern is bare statement calls plus a **member counter**:
-
-```gdscript
-_workers_finished = 0
-for _i in range(worker_count):
-    _worker(todo, results, manifest)
-while _workers_finished < worker_count:
-    await _worker_done
-```
-
-Every return path in `_worker` must increment the counter *and* emit. This is
-general to GDScript, not specific to downloads — the same trap applies anywhere in
-these repos that fans out coroutines.
-
-## Publishing
-
-```bash
-godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
-    keygen --private keys/content.key --public keys/content.pub
-
-godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
-    publish --source content/dm_arena --out dist/dm_arena \
-    --id dm_arena --version 1.2.0 --entry arena.tscn \
-    --key keys/content.key --mirror https://cdn.example.com/dm_arena
-```
-
-Output is a static directory (`manifest.json` + `objects/`) you can drop behind
-any web server. Exit codes: 0 ok, 1 usage error, 2 operation failed — CI needs to
-tell "called it wrong" from "content is bad".
-
-The client-side pack is built at mount time by `PCKPacker`, not by the publisher:
-cached objects live at hash-named paths and must appear inside the pack at
-`res://<prefix>/<manifest path>`. No export preset can express that remapping.
-
-### An asset the engine has to IMPORT is not shippable as its source
-
-A `.glb` or a `.png` is **not a loadable resource**. The editor imports it into
-`.godot/imported/` and the `.import` marker beside it redirects every load there;
-nothing imports at runtime, on any platform. So a pack published from a source tree,
-with `.import` in `exclude_suffixes` and `.godot` in `exclude_dirs`, ships the bytes of
-an asset that no `load()` can open — and says nothing, because the file is right there:
-
-```
-character-a.glb    exists=false  file=true   load=null
-arena.tscn         exists=true   file=true   load=PackedScene
-```
-
-`file=true` is the trap. Nothing reports a missing file, because nothing is missing.
-
-`include_imported` (on by default) ships the imported form and the markers, and
-`_is_text_resource` now covers `.import` so the rewrite moves the three absolute paths
-inside each marker — the imported resource, the source file, and `dest_files` — onto the
-mount. The `.md5` companions stay behind: they exist so the *editor* can decide whether
-a reimport is needed, and nothing at runtime reads one.
-
-**The source project has to have been imported first.** A repository that has never been
-opened has no `.godot/imported/`, and there is nothing for this to ship.
-
-### A scene's references move with the pack, and the publisher is what moves them
-
-Godot writes a scene's script and resource references as **absolute** `res://` paths,
-and a pack does not mount at the path its content was authored at. So a published
-scene named its script at `res://game/thing.gd`, the pack mounted at
-`res://dot_cloud/<id>/<version>/`, and the result was measured to be:
-
-```
-mount: true   scene exists: true
-ERROR: Attempt to open script 'res://s.gd' resulted in error 'File not found'.
-```
-
-The worst failure shape available: the pack mounts, the scene loads, and nothing says
-a word until something calls a method on a script that is not there. It is the same
-constraint `class_name` has — "the pack is data, the code ships in the build" — arriving
-by a second route, and it is why every game in this family had to be converted to
-relative preloads before any of them could be delivered.
-
-`DotCloudPublisher.rewrite_resource_paths` (on by default) rewrites `res://X` to
-`res://<mount_root>/<id>/<version>/X` inside `.tscn` and `.tres`, for every X **the pack
-contains**. A reference to `res://addons/dot_core/…` means the host build's copy and is
-left alone; so is one that is already namespaced, or republishing would bury the content
-one level deeper every time. The rewrite happens before hashing, so the manifest covers
-the bytes that will actually be mounted, and the staged copies are deleted once their
-objects are written.
-
-**Binary `.scn` and `.res` cannot be rewritten this way** and are not attempted. A
-project that saves binary scenes has to publish them already namespaced, and nothing
-here can tell it so — Godot writes text by default and this family uses text everywhere.
-
-### …and the binary form an IMPORT produces is exactly that case, so the mount fixes it instead
-
-The paragraph above was written about a project that chooses to save binary scenes, and it
-turned out to describe every project with art in it. **An imported `.glb` becomes a binary
-`.scn` under `.godot/imported/`, and its reference to its own texture is recorded as a UID
-with the authored absolute path as the fallback.** Neither survives being mounted
-somewhere else: the UID is not registered in the host, so the loader falls back to the
-path, and the path names the project the asset was authored in.
-
-```
-invalid UID: 'uid://reboanwombd2' - using text path instead:
-    'res://assets/kenney/survival/Textures/colormap.png'
-Resource file not found: res://assets/kenney/survival/Textures/colormap.png
-```
-
-Measured in mg-buses-from-hell, the first game in this family to vendor art: the crates'
-meshes loaded, their atlas did not, and the scene node the model was instanced under
-"vanished" — a game that plays perfectly and appears to have shipped with no art at all.
-**Both of those lines are warnings.** The pack verified, mounted and loaded; nothing failed.
-
-The fix is not a rewrite, because these bytes cannot be rewritten: `ResourceUID` is
-writable at runtime, and every `.import` marker in the pack names a UID and the file it
-belongs to — with its paths already moved onto the mount by the rewrite above. So
-`DotCloudMounter._register_uids` walks the markers after the pack is mounted and points
-each id at the mounted copy, and the binary form's own reference resolves with nothing
-touched. The count is in the mount's log line (`uids=5`), because "the art is white" and
-"the art is missing" are the same picture and different causes.
-
-`set_id` when the host already knows an id and `add_id` when it does not — they are
-separate calls and the wrong one is an error rather than an update, which a host that has
-mounted an earlier version of the same pack will hit.
-
-`examples/delivered_scene_demo.tscn` is the assertion, and it is the only suite here
-that publishes a scene WITH a script: every other one publishes data, which is exactly
-why this went unnoticed.
-
-## Validating changes
-
-```bash
-# Parse every script (the --import pass registers class_name globals).
-godot --headless --path . --import
-find . -name '*.gd' -not -path './.godot/*' | while read f; do
-    godot --headless --path . --check-only --script "res://${f#./}"
-done
-
-# End-to-end: keygen, publish, sign, sync, mount, read back, release, re-acquire.
-godot --headless --path . res://examples/sync_demo.tscn
-
-# The same pipeline over a real socket: mirror failover, the content-addressed
-# URL layout, range resume, a host that refuses ranges, a corrupt mirror.
-godot --headless --path . res://examples/http_demo.tscn
-
-# The in-band fallback, against a stand-in for dot-server's delegate: a peer that
-# answers, one that never suspends, resume, silence, a mid-file drop, one that
-# over-serves, one that is merely slow, and a source with nowhere to fetch from.
-godot --headless --path . res://examples/netchan_demo.tscn
-
-# A scene delivered in a pack, with its script, actually running. The case the
-# whole delivery path exists for, and the one nothing here had ever executed.
-# 26 checks, including a pack needing a newer addon API refused before it mounts.
-godot --headless --path . res://examples/delivered_scene_demo.tscn
-
-# The cache on its own: eviction under pressure, refs, LRU order, the index
-# against the directory, partial housekeeping, verify_all, clear_all.
-godot --headless --path . res://examples/store_demo.tscn
-
-# The mounter on its own: version traversal, half-downloaded content, two
-# versions of one content set mounted at once, unmount and re-entry, a cached
-# object that rotted, and the queries.
-godot --headless --path . res://examples/mount_demo.tscn
-
-# Newer addons as packs over the build: the policy, an overlay built through a
-# real client, and four fresh processes started through the boot scene.
-godot --headless --path . res://examples/addon_set_demo.tscn
-```
-
-**Both demos, not just the first.** `sync_demo` routes every byte through
-`DotCloudSourceLocal`, which resolves synchronously, builds no URL, parses no
-response and resumes nothing — so for a long time the source every shipped game
-actually uses had no executable coverage at all. `http_demo` serves the published
-directory over HTTP from `examples/http_test_server.gd` (a ~260-line static file
-server in GDScript, so it runs offline and headless with nothing installed) and
-drives a real client through it. It found the resume bug described below on its
-first run.
-
-**Run the demo.** It found all three real bugs in this addon (the signature
-mismatch, the fan-out hang, and the unenforced key floor), and it asserts things
-a reader would otherwise have to trust: that dedup happens, that tampering is
-refused, that a weak key and an empty body are refused, that content lands inside
-its namespace, that optional groups are skipped, that a re-acquire is warm.
-
-**It exits non-zero when one of those fails**, which for a long time it did not:
-every boolean printed `"NO — this is a bug"` and then exited 0, so the file read
-like a smoke test and could not fail. `_check()` counts, and `_finish()` carries
-the count out as the exit code. A test that always passes is worse than no test,
-because it gets believed.
-
-## File map
-
-```
-addons/dot_cloud/
-  dot_cloud_config.gd            Layered config. validate() refuses unsigned-by-default.
-  manifest/
-    dot_cloud_file.gd            One entry. validate() refuses traversal + bad hashes.
-    dot_cloud_manifest.gd        The content set. from_json_bytes() is the only parser.
-    dot_cloud_envelope.gd        Signed wrapper. Read the class doc.
-  store/
-    dot_cloud_store.gd           Content-addressed cache, LRU eviction, refs, index.
-                                 open() reconciles the index against the directory.
-  transfer/
-    dot_cloud_source.gd          Base + circuit breaker + can_serve().
-    dot_cloud_source_http.gd     Mirrors, range resume, CORS notes. See "Resume" below.
-    dot_cloud_source_local.gd    Directories. Still verifies hashes.
-    dot_cloud_source_netchan.gd  In-band over the game connection, via a delegate.
-    dot_cloud_downloader.gd      Worker pool, failover, throttle, progress.
-  verify/
-    dot_cloud_signature.gd       RSA-SHA256 sign/verify, constant-time paths.
-  mount/
-    dot_cloud_mounter.gd         PCK building + the unmount problem. Read the class doc.
-                                 purge_resources reports leaks; it cannot evict.
-  client/
-    dot_cloud_client.gd          The one node a game needs. acquire() by URL,
-                                 ensure() by id and version — see 1b.
-                                 resolve_manifest() / download_manifest():
-                                 the same without a mount.
-  addon_set/
-    dot_cloud_addon_set.gd       Newer addons as packs, over the build, at the
-                                 next start. Read "Addons as packs".
-    dot_cloud_script_class.gd    The global class list, rebuilt from headers.
-  boot/
-    dot_cloud_boot.gd            The main scene that mounts the overlay. Names
-                                 no addon class, and must not.
-  publish/
-    dot_cloud_publisher.gd       Directory -> manifest + objects.
-    dot_cloud_registry.gd        claim -> complete/fail against the backbone.
-                                 BUILT AHEAD OF ITS CONSUMER -- see below.
-    dot_cloud_cli.gd             Headless CLI. Extends SceneTree.
-```
-
-## Resume, and why a failed hash after one is not the mirror's fault
-
-`DotCloudSourceHttp` resumes an interrupted transfer by asking the host for
-`bytes=N-`, where N is whatever is already in `<cache>/partial/<hash>.part`.
-
-Those N bytes have been verified by **nothing**. `commit_partial` is the only
-place a hash is ever checked, and it only runs once the whole object is on disk.
-So a partial can be wrong for reasons that have no connection to the mirror
-currently serving: a process killed mid-write, a bad sector, a caching proxy that
-answered a range with the wrong window, or an HTTP layer whose resume does not
-append.
-
-That matters because the obvious reading of a post-resume hash failure — "this
-mirror served bad bytes" — is usually wrong, and acting on it is worse than
-useless. `commit_partial` has already discarded the partial by then, so the retry
-that would have succeeded is exactly the one the mirror loop skips. On a
-single-mirror host, which is the normal deployment, a bad partial turned into
-content that could never be acquired: every attempt resumed onto the same bad
-bytes, failed the same hash, and moved on to a mirror list with nothing else in
-it.
-
-The source now restarts that one transfer from zero against the same mirror
-before writing it off. `http_demo`'s "poisoned partial" section is the assertion
-— it plants 64 KiB of garbage as the partial and requires the acquire to succeed
-anyway — and stubbing the restart out turns five checks red.
-
-**Known upstream defect (2026-08-18): `DotHttp.download_to_file` does not
-append.** Given an existing partial of N bytes it sends the right `Range: bytes=N-`,
-receives the right response, and then writes it at offset 0 over the top of the
-partial — leaving a file the size of the *remainder* and returning `ok`. Resume
-therefore never actually saves bandwidth today; it costs an extra round trip and
-is rescued by the restart path above. `http_demo` prints the byte count each run
-(`transferred N B for M B of objects`) rather than asserting on it, so a fix
-upstream shows up as that number dropping below the content size. The fix belongs
-in dot-core, which was out of scope for the run that found this.
-
-## Things deliberately not here
-
-- **Delta patching.** Content addressing already avoids re-downloading unchanged
-  *files*; bsdiff-style patching of changed files would help for large binaries
-  that change slightly. Real work, clear payoff, not started.
-- **Compression.** Objects are stored and transferred as-is; `Accept-Encoding:
-  gzip` covers the wire for compressible content. Storing compressed would
-  complicate the "filename is the hash of the content" invariant.
-- **An editor dock.** Publishing is CLI-only. A dock calling `DotCloudPublisher`
-  would be straightforward.
-- **Ed25519 signatures.** Blocked on Godot's `Crypto`. See above.
-
-## `DotCloudRegistry` is written and nothing calls it
-
-Two hundred and thirty-three lines, a full class doc with a worked example, and **no consumer anywhere in the tree** — not `DotCloudPublisher`, not the CLI, not `dot-server-deploy`, not an example. That is on purpose and it is written down here because a reader who greps for callers and finds none has no way to tell "built ahead of its consumer" from "somebody forgot to wire this", and this family has shipped both.
-
-What it is: the registry's half of a publish, against the backbone rather than against the filesystem. `claim` reserves `<owner>/<name>@<version>` *before* the bytes move, because hashing and uploading a pack is minutes of work and the version has to be ours for all of it; then `complete` or `fail`. The rules it enforces — one owner per namespace, one publish per version, a failed publish keeps its number — are enforced *there* rather than here, because a check that lives only in a publishing tool protects an honest publisher from an accident and nobody else.
-
-**What has to happen before anything calls it:** the endpoint at `DEFAULT_PATH` has to exist on the website-city side, and `./server pack` has to grow a token. Until then, wiring it would mean a publish that fails against a 404 — which is strictly worse than a publish that does not ask. The class is tested by hand against a real server and by nothing that is committed, so it is the one file in this addon whose suite coverage is zero and that is not a gap to be closed by writing a fixture; it is closed by the endpoint existing.
+| [docs/README.md](docs/README.md) | the index |
+| [docs/mounting.md](docs/mounting.md) | `DotCloudMounter`, mount paths, unloading, the addon-API check, UIDs at mount |
+| [docs/trust.md](docs/trust.md) | manifests, signatures, envelopes, trusted keys, anything a server or publisher supplies |
+| [docs/client.md](docs/client.md) | `DotCloudClient`: the registry name, `acquire` by URL, `ensure` by id and version |
+| [docs/store.md](docs/store.md) | `DotCloudStore`: content addressing, the index, partials, the web and mobile limits |
+| [docs/sources.md](docs/sources.md) | local, HTTP and in-band sources, failover, resume, the downloader |
+| [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
+| [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
+| [docs/testing.md](docs/testing.md) | the seven demos, the fan-out trap, adding a check |
+| [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `addons/dot_cloud/dot_cloud_config.gd` | layered config; `validate()` refuses unsigned by default |
+| `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper) |
+| `addons/dot_cloud/store/` | the content-addressed cache: LRU eviction, refs, the index |
+| `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; the downloader (worker pool, failover, throttle, progress) |
+| `addons/dot_cloud/verify/` | RSA-SHA256 sign/verify |
+| `addons/dot_cloud/mount/` | `DotCloudMounter`: PCK building and the unmount problem |
+| `addons/dot_cloud/client/` | `DotCloudClient`, the one node a game needs |
+| `addons/dot_cloud/addon_set/`, `boot/` | newer addons as packs; the boot scene that mounts the overlay (names no addon class, and must not) |
+| `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
+| `examples/` | the seven demos, `http_test_server.gd`, the addon boot probe |
+
+## Running and testing
+
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
+- `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
+- A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
+
+## Rules that bite
+
+Short forms; the reasoning is in the linked file.
+
+**Mounting**
+
+- A mounted pack can never be unmounted. Content mounts at `res://<mount_root>/<content_id>/<version>/` and a path is never reused. [mounting](docs/mounting.md#a-mounted-resource-pack-can-never-be-unmounted)
+- Unloading is freeing the nodes; `purge_resources` reports a leak count and cannot evict. A non-zero count is a caller that did not free its nodes. [mounting](docs/mounting.md#unloading-is-freeing-the-nodes)
+- A pack's `requires.json` is checked between download and mount, never after. [mounting](docs/mounting.md#a-pack-says-which-addon-api-it-needs)
+- A delivered game references its own files by path (no `class_name` in a game pack). [mounting](docs/mounting.md#a-pack-says-which-addon-api-it-needs)
+
+**Trust**
+
+- The manifest is the whole trust boundary; packs carry scripts. `require_signed_manifests` stays true outside LAN and development. [trust](docs/trust.md#the-manifest-is-the-entire-trust-boundary)
+- Both `content_id` and `version` are server-supplied path components: `version` goes through `safe_relative` plus a separator check, and `_check_prefix` simplifies both sides. [trust](docs/trust.md#both-path-components-are-checked)
+- Signatures live outside the signed bytes (`DotCloudEnvelope`); `DotCloudManifest.from_json_bytes()` is the only parser. Never sign a re-serialisation. [trust](docs/trust.md#the-envelope)
+- `MIN_KEY_BITS` (2048) is enforced on verify, by signature length; a weak key is `CODE_FORBIDDEN`, never `CODE_INTEGRITY`. [trust](docs/trust.md#a-key-floor-enforced-on-verify)
+- `verify_for`: verification first, entitlement (`content_ids`) second. [trust](docs/trust.md#a-key-says-what-it-is-trusted-for)
+- The in-band delegate must refuse hashes the client has no business asking for. [sources](docs/sources.md#the-in-band-source)
+
+**Client**
+
+- `DotCloudClient` registers as `dot_cloud_client` in `_ready`, not `start()`: four addons find it there and treat its absence as "content ships in the build". [client](docs/client.md#the-registry-name)
+- `ensure(id, version)` checks the fetched manifest's own id and version before mounting; a local manifest is read, not requested. [client](docs/client.md#acquire-and-ensure)
+
+**Store and sources**
+
+- Nothing unverified is written to `objects/`: `commit_partial()` and `put_bytes()` are the only writers. [store](docs/store.md#content-addressing)
+- `open()` reconciles the index against the directory; never trust the index alone. [store](docs/store.md#the-index-is-always-behind-the-directory)
+- On web, sync the filesystem after every committed object; await the quota estimate; never assume unlimited. [store](docs/store.md#platform-notes)
+- A source is skipped by `is_supported`, `is_available` or `can_serve`, three different questions. [sources](docs/sources.md#three-reasons-to-skip-a-source)
+- The in-band source needs all three bounds (chunks, chunk timeout, file timeout). [sources](docs/sources.md#the-in-band-source)
+- A hash failure after a resume restarts that transfer from zero on the same mirror before blaming it. [sources](docs/sources.md#resume)
+- Fan out coroutines with bare calls plus a member counter; every return path increments and emits. [testing](docs/testing.md#the-fan-out-trap)
+
+**Publishing**
+
+- Ship the imported form (`include_imported`, on by default); the source project must have been imported first. [publishing](docs/publishing.md#an-imported-asset-is-not-shippable-as-its-source)
+- The publisher rewrites `res://` paths in `.tscn`/`.tres` onto the mount; binary `.scn`/`.res` it cannot, and the mount registers UIDs instead. [publishing](docs/publishing.md#a-scenes-references-move-with-the-pack)
+- `DotCloudRegistry` has no caller on purpose: it waits for its site endpoint. [publishing](docs/publishing.md#dotcloudregistry-is-written-and-nothing-calls-it)
+
+**Addon packs**
+
+- A script compiled in this process keeps its code: an overlay takes effect only at the next start, mounted by a boot scene that names no addon class. [addon-packs](docs/addon-packs.md#three-engine-facts)
+- Only upward, only signed, only from `namespaces`, only into the addon's own directory; two unconfirmed starts turn the overlay off. [addon-packs](docs/addon-packs.md#what-keeps-it-from-doing-harm)
+
+## Deliberately not here
+
+Delta patching (real work, clear payoff, not started), stored compression (it would break "the filename is the hash of the content"; `Accept-Encoding: gzip` covers the wire), an editor dock (publishing is CLI-only), and Ed25519 (Godot's `Crypto` has no EdDSA; it needs a GDExtension).

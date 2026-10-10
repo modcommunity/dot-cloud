@@ -1,0 +1,58 @@
+# Publishing
+
+## The CLI
+
+```bash
+godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
+    keygen --private keys/content.key --public keys/content.pub
+
+godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
+    publish --source content/dm_arena --out dist/dm_arena \
+    --id dm_arena --version 1.2.0 --entry arena.tscn \
+    --key keys/content.key --mirror https://cdn.example.com/dm_arena
+```
+
+Output is a static directory (`manifest.json` + `objects/`) to drop behind any web server. Exit codes: 0 ok, 1 usage error, 2 operation failed, so CI can tell "called it wrong" from "content is bad".
+
+The client-side pack is built at mount time by `PCKPacker`, not by the publisher: cached objects live at hash-named paths and must appear inside the pack at `res://<prefix>/<manifest path>`, which no export preset can express.
+
+## An imported asset is not shippable as its source
+
+A `.glb` or a `.png` is **not a loadable resource**. The editor imports it into `.godot/imported/` and the `.import` marker beside it redirects every load there; nothing imports at runtime, on any platform. A pack that ships the source bytes without the imported form ships an asset no `load()` can open, and says nothing, because the file is right there:
+
+```
+character-a.glb    exists=false  file=true   load=null
+arena.tscn         exists=true   file=true   load=PackedScene
+```
+
+`file=true` is the trap. `include_imported` (on by default) ships the imported form and the markers, and `_is_text_resource` covers `.import` so the rewrite below moves the three absolute paths inside each marker (the imported resource, the source file, `dest_files`) onto the mount. The `.md5` companions stay behind: only the editor reads them.
+
+**The source project has to have been imported first.** A repository that has never been opened has no `.godot/imported/`, and there is nothing to ship.
+
+## A scene's references move with the pack
+
+Godot writes a scene's script and resource references as **absolute** `res://` paths, and a pack does not mount where its content was authored. A published scene naming `res://game/thing.gd`, mounted at `res://dot_cloud/<id>/<version>/`, mounts, loads, and fails only when something calls a method on a script that is not there. It is the same constraint `class_name` has ("the pack is data, the code ships in the build") by a second route, and why every game here uses relative preloads.
+
+`DotCloudPublisher.rewrite_resource_paths` (on by default) rewrites `res://X` to `res://<mount_root>/<id>/<version>/X` inside `.tscn` and `.tres`, for every X **the pack contains**. A reference to `res://addons/dot_core/...` means the host build's copy and is left alone; so is one already namespaced, or republishing would bury the content a level deeper every time. The rewrite happens before hashing, so the manifest covers the bytes that will be mounted. A path already rewritten must not be rebased a second time by a game's own path helper (the form of this bug mg-smash-copter found).
+
+**Binary `.scn` and `.res` cannot be rewritten this way** and are not attempted. Godot writes text by default and the family uses text everywhere, except for the case below.
+
+## Binary imports are fixed at mount
+
+An imported `.glb` becomes a binary `.scn` under `.godot/imported/`, and its reference to its own texture is a UID with the authored absolute path as the fallback. Mounted elsewhere, the UID is not registered and the path names the authoring project:
+
+```
+invalid UID: 'uid://reboanwombd2' - using text path instead:
+    'res://assets/kenney/survival/Textures/colormap.png'
+Resource file not found: res://assets/kenney/survival/Textures/colormap.png
+```
+
+Both lines are **warnings**: the pack verified, mounted and loaded, the meshes appeared, and the art did not. `ResourceUID` is writable at runtime and every `.import` marker names a UID and its file (already moved onto the mount), so `DotCloudMounter._register_uids` points each id at the mounted copy and the binary reference resolves untouched. "The art is white" and "the art is missing" are the same picture and different causes; the `uids=N` in the mount's log line tells them apart.
+
+`examples/delivered_scene_demo.tscn` is the only suite here that publishes a scene **with a script**; every other publishes data.
+
+## DotCloudRegistry is written and nothing calls it
+
+`publish/dot_cloud_registry.gd` has a full class doc, a worked example, and **no consumer anywhere in the tree**, on purpose. It is the registry's half of a publish, against the backbone rather than the filesystem: `claim` reserves `<owner>/<name>@<version>` before the bytes move (hashing and uploading is minutes, and the version has to be ours for all of it), then `complete` or `fail`. The rules (one owner per namespace, one publish per version, a failed publish keeps its number) are enforced by the site, because a check that lives only in a publishing tool protects an honest publisher from an accident and nobody else.
+
+Before anything calls it, the endpoint at `DEFAULT_PATH` has to exist on the website-city side and `./server pack` has to grow a token; until then a publish would fail against a 404. Its suite coverage is zero, and that gap is closed by the endpoint existing, not by a fixture.
