@@ -493,41 +493,9 @@ func _acquire_inner(
 	groups: PackedStringArray,
 	key: String
 ) -> DotResult:
-	_set_phase(Phase.PLANNING, "Checking what needs downloading…")
-
-	var plan := plan_for(manifest, groups)
-
-	DotLog.info(
-		CHANNEL,
-		"acquiring content",
-		{
-			"content": key,
-			"need": plan["missing_files"],
-			"bytes": DotPaths.format_bytes(int(plan["missing_bytes"])),
-		}
-	)
-
-	if int(plan["missing_files"]) > 0:
-		_set_phase(
-			Phase.DOWNLOADING,
-			"Downloading %s…" % DotPaths.format_bytes(int(plan["missing_bytes"]))
-		)
-
-		while _sync_busy:
-			await _sync_freed
-
-		_sync_busy = true
-		scheduler.set_boost(600.0)
-		var synced := await downloader.sync(manifest, groups)
-		scheduler.clear_boost()
-		_sync_busy = false
-		# Deferred, so a waiter resumes after this frame's caller has moved on rather
-		# than inside it -- and only one of them takes the slot: the rest see it busy
-		# again and go back to waiting.
-		_sync_freed.emit.call_deferred()
-
-		if not synced.ok:
-			return _fail(synced.error)
+	var downloaded := await _download(manifest, groups, key)
+	if not downloaded.ok:
+		return _fail(downloaded.error)
 
 	# [b]Before the mount, because after it the pack's scripts are one `load` away.[/b] A
 	# pack built against a newer addon than this build has does not fail with a sentence:
@@ -552,6 +520,79 @@ func _acquire_inner(
 	content_ready.emit(manifest, str(mounted.value))
 
 	return _ready_result(manifest)
+
+
+## Puts every object [param manifest] names into the store, and mounts nothing.
+##
+## [b]Not every pack is mounted where its manifest says.[/b] An addon pack replaces the
+## build's own copy of that addon at the next boot (see [DotCloudAddonSet]): its files
+## have to land at `res://addons/<addon>/`, in an overlay assembled from the store, and
+## mounting it at its own `res://dot_cloud/<id>/<version>/` first would register nothing
+## useful and leave a second copy of the addon in the tree for the life of the process.
+##
+## The manifest must already be verified -- [method resolve_manifest] and
+## [method fetch_manifest] both do it. No requirements check either: that question is
+## about a pack's scripts compiling against this build, and an addon pack IS the build.
+func download_manifest(
+	manifest: DotCloudManifest,
+	groups: PackedStringArray = PackedStringArray()
+) -> DotResult:
+	if not _started:
+		var started := await start()
+		if not started.ok:
+			return started
+
+	var downloaded := await _download(manifest, groups, manifest.key())
+	if not downloaded.ok:
+		return downloaded
+
+	_set_phase(Phase.READY, "Ready.")
+	return DotResult.success(manifest)
+
+
+## The download half of an acquisition, shared by [method acquire_manifest] and
+## [method download_manifest].
+func _download(
+	manifest: DotCloudManifest,
+	groups: PackedStringArray,
+	key: String
+) -> DotResult:
+	_set_phase(Phase.PLANNING, "Checking what needs downloading…")
+
+	var plan := plan_for(manifest, groups)
+
+	DotLog.info(
+		CHANNEL,
+		"acquiring content",
+		{
+			"content": key,
+			"need": plan["missing_files"],
+			"bytes": DotPaths.format_bytes(int(plan["missing_bytes"])),
+		}
+	)
+
+	if int(plan["missing_files"]) == 0:
+		return DotResult.success(true)
+
+	_set_phase(
+		Phase.DOWNLOADING,
+		"Downloading %s…" % DotPaths.format_bytes(int(plan["missing_bytes"]))
+	)
+
+	while _sync_busy:
+		await _sync_freed
+
+	_sync_busy = true
+	scheduler.set_boost(600.0)
+	var synced := await downloader.sync(manifest, groups)
+	scheduler.clear_boost()
+	_sync_busy = false
+	# Deferred, so a waiter resumes after this frame's caller has moved on rather
+	# than inside it -- and only one of them takes the slot: the rest see it busy
+	# again and go back to waiting.
+	_sync_freed.emit.call_deferred()
+
+	return synced
 
 
 ## Whether this build has the addon API a pack's [code]requires.json[/code] asks for.
@@ -650,6 +691,36 @@ func ensure(
 		# gone. The paths are there and resolvable, which is all a caller needs.
 		return DotResult.success(mount_prefix_for(content_id, effective_version))
 
+	var resolved := await resolve_manifest(content_id, version, manifest_url)
+	if not resolved.ok:
+		return resolved
+
+	return await acquire_manifest(resolved.value, groups)
+
+
+## The verified manifest for [param content_id] at [param version], fetched the way
+## [method ensure] fetches one, and nothing downloaded or mounted.
+##
+## Every candidate is asked in order -- [member local_search_dirs] first, then
+## [member http_base_urls] -- and the first one whose manifest verifies AND agrees about
+## its own id and version wins. Empty [param version] is `0.0.0`, as in [method ensure].
+func resolve_manifest(
+	content_id: StringName,
+	version: String = "",
+	manifest_url: String = ""
+) -> DotResult:
+	var id := String(content_id)
+
+	if id == "":
+		return DotResult.fail(DotError.CODE_INVALID, "No content id to resolve.")
+
+	if not _started:
+		var started := await start()
+		if not started.ok:
+			return started
+
+	var effective_version := version if version != "" else "0.0.0"
+
 	var candidates := (
 		PackedStringArray([manifest_url]) if manifest_url != ""
 		else manifest_urls_for(content_id, effective_version)
@@ -708,7 +779,7 @@ func ensure(
 		if is_local_manifest_url(candidate):
 			_adopt_local_dir(_local_manifest_path(candidate).get_base_dir())
 
-		return await acquire_manifest(manifest, groups)
+		return DotResult.success(manifest)
 
 	return (
 		last if last != null

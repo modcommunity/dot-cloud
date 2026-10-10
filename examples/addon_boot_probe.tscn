@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/dot_cloud/boot/dot_cloud_boot.gd" id="1"]
+
+[node name="Boot" type="Node"]
+script = ExtResource("1")
+next_scene = "res://examples/addon_boot_check.tscn"

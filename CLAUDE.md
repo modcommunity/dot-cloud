@@ -151,6 +151,24 @@ A delivered pack carries none of the dot-* addons — the client shell and the s
 
 `host_role` is the noun in that sentence — `"build"` unless the host says `"server"` or `"client"`, because dot-cloud mounts the same way on both and the person reading the refusal needs to know which one to update. `addon_api.overrides` is how a test stands in for an older build. A pack with no `requires.json` — everything published before it existed, and anything published from a checkout rather than by dot-ci — is not checked. `delivered_scene_demo` asserts the sentence, that nothing mounted, and that the same pack mounts and runs on a build that has the level; armed by moving the check after the mount.
 
+## Addons as packs: a newer addon without a new build (`DotCloudAddonSet`, 2026-10-10)
+
+**The point is that an addon release should not need a new client build.** Every addon tag is already published by the site as a signed pack (`modcommunity/dot-ui@0.1.5`, the addon's directory at the pack root). A server announces the addon versions it runs (dot-server's `addon_set`, in the signon challenge); a client whose build is older fetches those packs, assembles ONE overlay pack that lays them over its own `res://addons/<dir>/`, writes a plan, and restarts — a page reload in a browser, a relaunch on desktop. `addon_set/dot_cloud_addon_set.gd` decides and builds; `boot/dot_cloud_boot.gd` mounts.
+
+**Three engine facts it rests on, each measured on an exported build, each silent when ignored:**
+
+- **A script compiled in this process keeps its code.** Mount a newer file over it and the old code runs on: `load`, `CACHE_MODE_REPLACE` and `Script.reload()` all hand back the old one. So the overlay is mounted by a main scene that names NO addon class (`dot_cloud_boot.gd` — not even dot-cloud's own; its paths and plan fields are written out again on purpose), before anything else loads. That is why this is a restart and never an in-game swap.
+- **An export stores `x.gd` as `x.gdc` behind `x.gd.remap`, and `x.tscn` as a binary `.scn` behind `x.tscn.remap`.** The loader follows the build's remap to the build's bytes, so a newer `x.gd` mounted beside it is never read. Every resource in the overlay gets a `.remap` pointing at itself (`REMAPPED`). Without them: old code, new class list, no error.
+- **`ProjectSettings.load_resource_pack` re-reads `res://.godot/global_script_class_cache.cfg`.** So a pack mounted at the root that carries that file can ADD `class_name`s — a script naming the new class as a type compiles after the mount. Without it: "Identifier not declared". The file is one list for the whole project, so the overlay carries the build's own list (saved by the boot before any overlay replaced it, `shell_classes.cfg`) with the overlaid addons' entries swapped in. `DotCloudScriptClass` writes those entries from each script's header, and `addon_set_demo` checks that against the list the editor wrote for this project, every field of every class (52); it was also checked against dot-server-deploy's whole cache when written (811 of 811). **This corrects the family's old claim that "a mounted pack's `class_name` globals are not registered":** true for a pack at a mount prefix that carries no class list, which is every GAME pack, and the reason games still reference their files by path.
+
+**What keeps it from doing harm.** Only upward: a version not newer than the build's (`res://addons.lock`, which every export now carries) or than the running overlay's is never taken, so a server cannot pin its players to an old addon. Only from `namespaces` (an owner ending in `/`, or one exact id — `alice/x` does not admit `alice/x-evil`), only signed (`resolve_manifest` verifies), only a repository that is the pack's own name, only into a directory that is one plain name, and only into a directory that either does not exist in the build or already holds the plugin script the pack's `plugin.cfg` names (`_is_that_addon`) — so a list saying `dir: dot_ui` with the dot-net pack is refused before anything is written. An overlay names the build it was made for and is ignored by any other build. The plan says `booting` before the mount and the shell says `ok` with `confirm_boot()` once it has built itself; two starts that never arrived mark the overlay `failed` and the build comes up on its own addons (`failed_before` then stops the shell building that set again). In an exported build `confirm_boot()` also loads one script per overlaid addon (`probes`, its `_api.gd` when it has one) and requires its source text: a `.gdc` has none, so "the build's compiled copy is still the one running" is caught and the overlay turned off.
+
+**The overlay is named by its contents** (every file's path and hash, plus the build), so the same set is the same file and is reused rather than rewritten — required, because the file of that name may be mounted in this very process. `download_manifest()` and `resolve_manifest()` on `DotCloudClient` are the download-without-mount halves `ensure()` is now built from: an addon pack must never also be mounted at its own `res://dot_cloud/<id>/<version>/`.
+
+**In a browser the files are the weak point, and the guard has to live elsewhere.** `user://` reaches IndexedDB only through `FS.syncfs`, and the engine DROPS a sync requested while one runs — dot-cloud asks after every object, so the request after the last write was routinely the one dropped, and a reload lost the plan and the overlay: a page that came back, saw the same newer addons, and reloaded again (six reloads in seventy seconds, measured). The shell now asks for the sync four times, 0.75 s apart, before it reloads, and counts restarts per server and set in `sessionStorage` (synchronous, survives a reload of the tab) so a loop stops at two.
+
+`examples/addon_set_demo.tscn` (47 checks) publishes `modcommunity/dot-probe@0.2.0` with a run key, builds the overlay through a real client, and starts this project AGAIN as separate processes through `addon_boot_probe.tscn` — a boot, a start whose two predecessors never arrived, an overlay for another build, no plan — reading back what each found (`addon_boot_check.gd`). It writes `res://addons.lock` for the run (gitignored). Armed: without the class list five checks fail; without the boot-loop guard four. The end-to-end proof — an old exported shell meeting a newer server, fetching the real site-signed `modcommunity/dot-ui@0.1.5` and `dot-audio@0.1.3`, relaunching and spawning in a match — is written up in dot-server-deploy's CLAUDE.md.
+
 ## The signing design, and the bug that produced it
 
 **Signatures live outside the document they sign.** A published manifest is a
@@ -499,6 +517,10 @@ godot --headless --path . res://examples/store_demo.tscn
 # versions of one content set mounted at once, unmount and re-entry, a cached
 # object that rotted, and the queries.
 godot --headless --path . res://examples/mount_demo.tscn
+
+# Newer addons as packs over the build: the policy, an overlay built through a
+# real client, and four fresh processes started through the boot scene.
+godot --headless --path . res://examples/addon_set_demo.tscn
 ```
 
 **Both demos, not just the first.** `sync_demo` routes every byte through
@@ -548,6 +570,15 @@ addons/dot_cloud/
   client/
     dot_cloud_client.gd          The one node a game needs. acquire() by URL,
                                  ensure() by id and version — see 1b.
+                                 resolve_manifest() / download_manifest():
+                                 the same without a mount.
+  addon_set/
+    dot_cloud_addon_set.gd       Newer addons as packs, over the build, at the
+                                 next start. Read "Addons as packs".
+    dot_cloud_script_class.gd    The global class list, rebuilt from headers.
+  boot/
+    dot_cloud_boot.gd            The main scene that mounts the overlay. Names
+                                 no addon class, and must not.
   publish/
     dot_cloud_publisher.gd       Directory -> manifest + objects.
     dot_cloud_registry.gd        claim -> complete/fail against the backbone.

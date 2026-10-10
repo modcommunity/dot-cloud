@@ -19,3 +19,6 @@ keys/
 # OS
 .DS_Store
 Thumbs.db
+
+# Written by examples/addon_set_demo for the length of a run.
+/addons.lock
