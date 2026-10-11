@@ -57,6 +57,9 @@ var metadata: Dictionary = {}
 ## as content — harmless but wasteful, and confusing to anyone reading a manifest.
 var exclude_suffixes: PackedStringArray = PackedStringArray([
 	".import", ".gd.uid", ".tmp", ".DS_Store", "Thumbs.db",
+	# Documentation: a repository's README, CLAUDE.md and docs/*.md are loaded by
+	# nothing at runtime, and dot-ci's package.sh drops them too.
+	".md",
 ])
 
 ## Directory names skipped entirely.
