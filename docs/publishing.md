@@ -29,6 +29,10 @@ arena.tscn         exists=true   file=true   load=PackedScene
 
 **The source project has to have been imported first.** A repository that has never been opened has no `.godot/imported/`, and there is nothing to ship.
 
+## A file that is not under the source: `extra_files`
+
+`DotCloudPublisher.extra_files` maps a pack path to a file anywhere (`{"requires.json": "/tmp/build/requires.json"}`). It exists for a file a build step derives when the source is somebody's checkout: writing it into the tree for the length of a publish leaves an untracked file there whenever the run is killed. Each entry goes through the same path as an imported output (hashed, copied, listed, rewritten if it is a text resource), replaces a source file at the same pack path, and ignores the exclusions because it was named on purpose. A missing file or an unsafe pack path fails the publish, because a pack that ships without its derived file fails later on somebody else's machine. dot-server-deploy's packer adds its derived `requires.json` this way; before the hook it overrode the private `_imported_outputs_for`, which no subclass should touch. Added at dot-cloud API level 2 (`addons/dot_cloud/dot_cloud_api.gd`).
+
 ## A scene's references move with the pack
 
 Godot writes a scene's script and resource references as **absolute** `res://` paths, and a pack does not mount where its content was authored. A published scene naming `res://game/thing.gd`, mounted at `res://dot_cloud/<id>/<version>/`, mounts, loads, and fails only when something calls a method on a script that is not there. It is the same constraint `class_name` has ("the pack is data, the code ships in the build") by a second route, and why every game here uses relative preloads.

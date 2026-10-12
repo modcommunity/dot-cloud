@@ -113,6 +113,25 @@ const IMPORTED_DIR := "_imported"
 ## scripts, where there is nothing to import.
 var include_imported: bool = true
 
+## Files the pack carries that are not under the source directory, as
+## [code]pack path -> file[/code] (an absolute OS path, or `res://` / `user://`).
+##
+## [b]For a file a build step derives and the source tree must not be written to.[/b] The
+## source of a publish is often somebody's checkout; a derived file written into it for the
+## length of a publish is an untracked file in their tree whenever the run is killed.
+## dot-server-deploy's packer adds the `requires.json` it derives this way.
+##
+## Each entry is added exactly like an imported output: hashed, copied into `objects/`,
+## listed in the manifest, and path-rewritten if it is a text resource. A pack path that
+## the source also has is replaced by the extra file. The exclusions do not apply -- the
+## file was named on purpose. A missing file or an unsafe pack path (`..`, absolute)
+## fails the publish rather than shipping a pack without it.
+##
+## [codeblock]
+## pub.extra_files = {"requires.json": "/tmp/build/requires.json"}
+## [/codeblock]
+var extra_files: Dictionary = {}
+
 ## Assigns groups to files by path prefix, as [code]prefix -> group[/code].
 ##
 ## Lets a publisher mark [code]"hd/"[/code] as an optional download without
@@ -281,6 +300,20 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	var extra: Dictionary = imported["files"]
 	var remap: Dictionary = imported["remap"]
 
+	# After the imported outputs, so a file named on purpose wins a collision.
+	for named: Variant in extra_files:
+		var from := str(extra_files[named])
+		var safe_named := DotPaths.safe_relative(str(named))
+		if not safe_named.ok:
+			return safe_named.wrap("Cannot publish the extra file '%s'." % named)
+		if not FileAccess.file_exists(from):
+			return DotResult.fail(
+				DotError.CODE_IO,
+				"An extra file for the pack does not exist.",
+				"%s -> %s" % [named, from]
+			)
+		extra[str(safe_named.value)] = from
+
 	for rel: String in extra:
 		if not relatives.has(rel):
 			relatives.append(rel)
@@ -317,7 +350,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		DotPaths.remove_tree(staging)
 
 	for rel in relatives:
-		# `extra` entries come from the project root; everything else from the source.
+		# `extra` entries come from the project root or [member extra_files]; everything
+		# else from the source.
 		var abs: String = extra.get(rel, source_dir.path_join(rel))
 
 		# [b]A scene names its script by ABSOLUTE path, and the pack does not mount at

@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 26
+const CHECKS := 31
 
 
 func _ready() -> void:
@@ -160,6 +160,7 @@ script = ExtResource("1")
 		node.free()
 
 	_check_imported_outputs(str(pair["private"]))
+	_check_extra_files(str(pair["private"]))
 	await _check_requirements(str(pair["private"]), cloud)
 
 	_done()
@@ -303,6 +304,67 @@ func _check_requirements(key_pem: String, cloud: DotCloudClient) -> void:
 	if node != null:
 		node.free()
 	cloud.addon_api.overrides.clear()
+
+
+## [b]A file in the pack that is not under the source: [member DotCloudPublisher.extra_files].[/b]
+##
+## dot-server-deploy's packer derives `requires.json` outside the game's checkout and used
+## to reach the pack by overriding the private `_imported_outputs_for`. This is the public
+## seam that replaces it, so each half of its contract is checked: the file lands at the
+## pack path with its own bytes, it replaces a source file at the same path, and a missing
+## file or a path out of the pack fails the publish instead of shipping without it.
+func _check_extra_files(key_pem: String) -> void:
+	_line("")
+	_line("[b]extra files: in the pack, not under the source[/b]")
+
+	var src := WORK.path_join("extra_source")
+	var outside := WORK.path_join("extra_outside")
+	DotPaths.ensure_dir(src)
+	DotPaths.ensure_dir(outside)
+	DotPaths.write_text(src.path_join("data.txt"), "from the source")
+	DotPaths.write_text(src.path_join("replaced.txt"), "the source's copy")
+	DotPaths.write_text(outside.path_join("derived.json"), "{\"derived\": true}")
+	DotPaths.write_text(outside.path_join("winner.txt"), "the extra file's copy")
+
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "extra_files"
+	pub.version = "1.0.0"
+	pub.signing_key_pem = key_pem
+	pub.extra_files = {
+		"meta/derived.json": ProjectSettings.globalize_path(outside.path_join("derived.json")),
+		"replaced.txt": outside.path_join("winner.txt"),
+	}
+	var out := WORK.path_join("extra_published")
+	var res := pub.publish(src, out)
+	_check(res.ok, "a pack with extra files publishes", str(res.error) if not res.ok else "")
+
+	var paths := {}
+	var bytes := DotPaths.read_bytes(out.path_join("manifest.json"))
+	if res.ok and bytes.ok:
+		var manifest := DotCloudManifest.from_json_bytes(bytes.value)
+		if manifest.ok:
+			for entry in (manifest.value as DotCloudManifest).files:
+				paths[entry.path] = entry.sha256
+
+	_check(
+		_published_text(out, paths.get("meta/derived.json", "")) == "{\"derived\": true}",
+		"the extra file is in the pack at its pack path, with its own bytes",
+		", ".join(PackedStringArray(paths.keys()))
+	)
+	_check(
+		_published_text(out, paths.get("replaced.txt", "")) == "the extra file's copy"
+			and paths.has("data.txt"),
+		"it replaces a source file at the same path, and the source's other files stay"
+	)
+
+	pub.extra_files = {"requires.json": outside.path_join("not_there.json")}
+	var missing := pub.publish(src, WORK.path_join("extra_missing"))
+	_check(not missing.ok and missing.error.code == DotError.CODE_IO,
+		"a missing extra file fails the publish", str(missing.error))
+
+	pub.extra_files = {"../escape.txt": outside.path_join("winner.txt")}
+	var escaping := pub.publish(src, WORK.path_join("extra_escape"))
+	_check(not escaping.ok, "and so does a pack path out of the pack", str(escaping.error))
 
 
 ## Publish [param source] and return the manifest's file paths as a set.
