@@ -127,7 +127,7 @@ static func verify(
 #     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
 #     "community-alice": {
 #         "key": "-----BEGIN PUBLIC KEY-----\n…",
-#         "content_ids": ["alice_*"]
+#         "content_ids": ["alice/*"]
 #     }
 # }
 # [/codeblock]
@@ -169,7 +169,7 @@ static func key_scope(entry: Variant) -> PackedStringArray:
 
 ## Whether [param entry] is entitled to have signed content called [param content_id].
 ##
-## Patterns are globs over the id -- [code]alice_*[/code] -- because a publisher's
+## Patterns are globs over the id -- [code]alice/*[/code] -- because a publisher's
 ## namespace is a prefix in every deployment that has ever had one, and a glob says so
 ## without inventing a syntax. An empty scope covers everything.
 static func scope_allows(entry: Variant, content_id: String) -> bool:

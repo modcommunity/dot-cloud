@@ -62,7 +62,7 @@ extends DotConfig
 ##     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
 ##     "community-alice": {
 ##         "key": "-----BEGIN PUBLIC KEY-----\n…",
-##         "content_ids": ["alice_*"]
+##         "content_ids": ["alice/*"]
 ##     }
 ## }
 ## [/codeblock]
