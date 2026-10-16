@@ -29,6 +29,12 @@ arena.tscn         exists=true   file=true   load=PackedScene
 
 **The source project has to have been imported first.** A repository that has never been opened has no `.godot/imported/`, and there is nothing to ship.
 
+## The source of an imported asset stays behind
+
+The reverse is also true: once the imported form ships, the source is bytes nothing opens. A load follows the marker, `ResourceLoader.exists` asks for the marker, and an exported build carries no sources at all, so a game that works exported works without them. They were about half of every game pack: the reference deathmatch shipped 3.5 MB of `.glb` and 0.5 MB of `.png` beside the `.scn` and `.ctex` it actually loaded (7.7 MB and 543 files became 3.6 MB and 412 files; the largest game, 21.9 MB, became 8.1 MB).
+
+So `ship_import_sources` is off (API level 4): a file is left out when its marker named an output this pack ships. An asset imported as `keep` or `skip` has no output, its file is the asset, and it stays. The left-out path is still in the rewrite's map, so a scene naming `res://assets/crate.glb` is rebased onto the mount, where the marker that resolves it is. Content that reads its own files raw (`Image.load_from_file`, `GLTFDocument`) turns it on, or passes `--with-sources` to the CLI. A map loader that tries `ResourceLoader` first and falls back to the raw file (both BSP loaders do) is fine either way.
+
 ## A file that is not under the source: `extra_files`
 
 `DotCloudPublisher.extra_files` maps a pack path to a file anywhere (`{"requires.json": "/tmp/build/requires.json"}`). It exists for a file a build step derives when the source is somebody's checkout: writing it into the tree for the length of a publish leaves an untracked file there whenever the run is killed. Each entry goes through the same path as an imported output (hashed, copied, listed, rewritten if it is a text resource), replaces a source file at the same pack path, and ignores the exclusions because it was named on purpose. A missing file or an unsafe pack path fails the publish, because a pack that ships without its derived file fails later on somebody else's machine. dot-server-deploy's packer adds its derived `requires.json` this way; before the hook it overrode the private `_imported_outputs_for`, which no subclass should touch. Added at dot-cloud API level 2 (`addons/dot_cloud/dot_cloud_api.gd`).

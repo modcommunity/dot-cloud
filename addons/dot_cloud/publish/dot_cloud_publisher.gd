@@ -113,6 +113,23 @@ const IMPORTED_DIR := "_imported"
 ## scripts, where there is nothing to import.
 var include_imported: bool = true
 
+## Ship the source file beside its imported form ([code]tile.png[/code] next to
+## [code]tile.png.import[/code] and its [code].ctex[/code]). Off by default.
+##
+## [b]Nothing at runtime reads an imported asset's source.[/b] Every load follows the
+## marker to the imported output, and an exported build carries no sources at all, so a
+## game that works exported already works without them. They were most of a pack: the
+## reference deathmatch shipped 3.5 MB of `.glb` and 0.5 MB of `.png` beside the
+## `.scn` and `.ctex` that were actually loaded -- half its bytes and a quarter of its
+## fetches, for files no client ever opened.
+##
+## Only a source whose marker named an imported output this pack ships is left out; an
+## asset imported as "keep" or "skip" has no output and its file IS the asset, so it
+## stays. A scene that names the source path still has it rebased onto the mount, because
+## the marker is what that path resolves through. Turn this on for content that reads
+## its own files raw ([code]Image.load_from_file[/code], [code]GLTFDocument[/code]).
+var ship_import_sources: bool = false
+
 ## Files the pack carries that are not under the source directory, as
 ## [code]pack path -> file[/code] (an absolute OS path, or `res://` / `user://`).
 ##
@@ -300,6 +317,20 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	var extra: Dictionary = imported["files"]
 	var remap: Dictionary = imported["remap"]
 
+	# Sources the imported form stands in for. Still in `inside` below, so a scene that
+	# names `res://assets/crate.glb` is rebased onto the mount, where its marker is.
+	var dropped := {}
+	if not ship_import_sources:
+		for src: String in imported["sources"]:
+			if relatives.has(src) and not extra_files.has(src):
+				dropped[src] = true
+		if not dropped.is_empty():
+			var kept := PackedStringArray()
+			for rel in relatives:
+				if not dropped.has(rel):
+					kept.append(rel)
+			relatives = kept
+
 	# After the imported outputs, so a file named on purpose wins a collision.
 	for named: Variant in extra_files:
 		var from := str(extra_files[named])
@@ -342,6 +373,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	var inside := {}
 	for rel in relatives:
 		inside[rel] = rel
+	for src: String in dropped:
+		inside[src] = src
 	for project_rel: String in remap:
 		inside[project_rel] = remap[project_rel]
 
@@ -467,6 +500,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			"files": manifest.files.size(),
 			"objects": seen.size(),
 			"deduped": deduped,
+			"sources_dropped": dropped.size(),
 			"written": written,
 			"bytes": DotPaths.format_bytes(total_bytes),
 			"rewritten": rewritten,
@@ -483,6 +517,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"objects_written": written,
 		"rewritten": rewritten,
 		"deduped": deduped,
+		"sources_dropped": dropped.size(),
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
 	})
@@ -544,7 +579,8 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 ## Imported outputs an `.import` marker in this pack points at.
 ##
-## Returns `{"files": {pack_rel: absolute}, "remap": {project_rel: pack_rel}}` — the
+## Returns `{"files": {pack_rel: absolute}, "remap": {project_rel: pack_rel},
+## "sources": {source_rel: true}}` (the assets a shipped output stands in for) — the
 ## second is what lets [method _rewrite_paths] send a marker to where the output actually
 ## landed, which is [constant IMPORTED_DIR] and not where the marker says.
 ##
@@ -576,7 +612,8 @@ func _imported_outputs_for(
 ) -> Dictionary:
 	var out := {}
 	var remap := {}
-	var empty := {"files": out, "remap": remap}
+	var sources := {}
+	var empty := {"files": out, "remap": remap, "sources": sources}
 
 	if not include_imported:
 		return empty
@@ -603,8 +640,9 @@ func _imported_outputs_for(
 			var landed := "%s/%s" % [IMPORTED_DIR, hit.get_file()]
 			out[landed] = root.path_join(hit)
 			remap[hit] = landed
+			sources[rel.trim_suffix(".import")] = true
 
-	return {"files": out, "remap": remap}
+	return {"files": out, "remap": remap, "sources": sources}
 
 
 ## Every `res://…` path in a text blob, as paths relative to the project root.

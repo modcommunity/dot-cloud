@@ -10,5 +10,7 @@ extends RefCounted
 # 2: DotCloudPublisher.extra_files (pack path -> file outside the source).
 # 3: acquire refuses a pack whose requires.json asks for more than this build has BEFORE
 #    downloading it (CODE_VERSION, no pack bytes fetched).
-const LEVEL := 3
+# 4: DotCloudPublisher.ship_import_sources (off: an imported asset's source is left out of
+#    the pack; the CLI's --with-sources turns it back on).
+const LEVEL := 4
 const OLDEST := 1

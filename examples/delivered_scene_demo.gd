@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 33
+const CHECKS := 37
 
 
 func _ready() -> void:
@@ -200,6 +200,12 @@ func _check_imported_outputs(key_pem: String) -> void:
 	DotPaths.write_text(root.path_join("textures/tile.png.import"),
 		"[remap]\n\npath=\"res://%s\"\n" % ctex)
 	DotPaths.write_text(root.path_join(ctex), "the imported form")
+	# Imported as "keep": no output, so the file is the asset and must ship.
+	DotPaths.write_text(root.path_join("textures/raw.bin"), "kept as is")
+	DotPaths.write_text(root.path_join("textures/raw.bin.import"), "[remap]\n\nimporter=\"keep\"\n")
+	# A scene naming the source path: the marker is what that path resolves through.
+	DotPaths.write_text(root.path_join("textures/uses.tscn"),
+		"[gd_scene format=3]\n\n[ext_resource type=\"Texture2D\" path=\"res://textures/tile.png\" id=\"1\"]\n\n[node name=\"S\" type=\"Sprite2D\"]\ntexture = ExtResource(\"1\")\n")
 
 	# An asset in a directory the publisher was told to skip. Its marker used to be kept
 	# whatever the exclusions said -- markers were decided before them -- and once a marker
@@ -238,6 +244,22 @@ func _check_imported_outputs(key_pem: String) -> void:
 	)
 	_check(not from_root.has(".godot/imported/shot.png-def456.ctex"),
 		"and nothing from a directory the publisher was told to skip")
+
+	# The source an imported output stands in for is bytes nothing at runtime opens:
+	# half of the reference deathmatch's pack. Left out, but a scene naming it is still
+	# rebased onto the mount, because that path resolves through the marker that is.
+	_check(not from_root.has("textures/tile.png"),
+		"the imported asset's source is left out of the pack",
+		", ".join(PackedStringArray(from_root.keys())))
+	_check(from_root.has("textures/raw.bin") and from_root.has("textures/raw.bin.import"),
+		"but an asset imported as keep, which has no output, ships its file")
+	var scene := _published_text(WORK.path_join("pub_root"), from_root.get("textures/uses.tscn", ""))
+	_check(scene.contains("res://dot_cloud/from_root/1.0.0/textures/tile.png"),
+		"and a scene naming the left-out source is still rebased onto the mount",
+		scene.strip_edges())
+	var with_src := _publish_paths(root, WORK.path_join("pub_src"), "with_src", key_pem, true)
+	_check(with_src.has("textures/tile.png") and with_src.has(landed),
+		"ship_import_sources puts the source back beside the imported form")
 	_check(not from_root.has("screenshots/shot.png.import"),
 		"including that directory's markers, which used to be kept regardless")
 
@@ -383,9 +405,10 @@ func _check_extra_files(key_pem: String) -> void:
 
 ## Publish [param source] and return the manifest's file paths as a set.
 func _publish_paths(
-	source: String, out: String, id: String, key_pem: String
+	source: String, out: String, id: String, key_pem: String, with_sources := false
 ) -> Dictionary:
 	var pub := DotCloudPublisher.new()
+	pub.ship_import_sources = with_sources
 	pub.content_id = id
 	pub.version = "1.0.0"
 	pub.signing_key_pem = key_pem

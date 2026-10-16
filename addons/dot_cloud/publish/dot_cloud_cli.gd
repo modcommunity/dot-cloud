@@ -75,6 +75,8 @@ func _publish(opts: Dictionary) -> int:
 	pub.entry_scene = str(opts.get("entry", ""))
 	pub.mount_root = str(opts.get("mount-root", "dot_cloud"))
 	pub.min_engine_version = str(opts.get("min-engine", ""))
+	# For content that reads its own asset files raw; see the property.
+	pub.ship_import_sources = opts.has("with-sources")
 
 	for m in _multi(opts, "mirror"):
 		pub.mirrors.append(m)
@@ -123,6 +125,7 @@ func _publish(opts: Dictionary) -> int:
 	print("  objects     %d (%d written, %d deduplicated)" % [
 		int(d["objects"]), int(d["objects_written"]), int(d["deduped"])
 	])
+	print("  sources     %d left out (imported form shipped)" % int(d["sources_dropped"]))
 	print("  size        %s" % DotPaths.format_bytes(int(d["bytes"])))
 	print("  signed      %s" % ("yes" if bool(d["signed"]) else "NO"))
 
@@ -331,6 +334,7 @@ Commands
     --entry PATH         entry scene, relative to the content root
     --mount-root NAME    res:// subdirectory to mount under        (dot_cloud)
     --min-engine V       minimum Godot version
+    --with-sources       also ship each imported asset's source file
     --mirror URL         base URL clients fetch from  (repeatable)
     --key PATH           private key PEM; omit to publish unsigned
     --key-id NAME        key identifier written into the manifest  (default)

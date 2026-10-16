@@ -91,10 +91,14 @@ extends DotConfig
 
 ## Files fetched at once.
 ##
-## Above about 8 the bottleneck stops being latency and starts being bandwidth,
-## and more slots only add overhead. Browsers cap concurrent connections per host
-## around 6, so higher values there are silently queued.
-@export_range(1, 32, 1) var parallel_downloads: int = 6
+## [b]A game pack is hundreds of small files, so a cold download is bound by round
+## trips, not bandwidth.[/b] The reference deathmatch is ~460 objects, half under
+## 4 KiB; through a 40 ms, 50 Mbit/s link a cold acquire took 8.2 s at 6 and 6.6 s at
+## 12. A browser caps HTTP/1.1 at about 6 connections per host and queues the rest,
+## which costs nothing; over HTTP/2, which the content host speaks, all 12 share one
+## connection. Stay at or under [code]DotHttp.MAX_POOL[/code] (16), which bounds the
+## request nodes.
+@export_range(1, 32, 1) var parallel_downloads: int = 12
 
 ## Resume partial downloads with HTTP range requests.
 ##
