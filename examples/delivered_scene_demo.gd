@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 31
+const CHECKS := 33
 
 
 func _ready() -> void:
@@ -291,6 +291,20 @@ func _check_requirements(key_pem: String, cloud: DotCloudClient) -> void:
 	_check(
 		not FileAccess.file_exists("res://dot_cloud/delivered_needs/1.0.0/game/thing.gd"),
 		"and refuses it before mounting anything"
+	)
+	# Level 3: refused before the payload is downloaded, not just before it mounts.
+	var pack_hash := ""
+	var env := DotCloudEnvelope.unwrap(FileAccess.get_file_as_bytes(out.path_join("manifest.json")))
+	var parsed := DotCloudManifest.from_json_bytes(env.value["payload"]) if env.ok else null
+	var mf: DotCloudManifest = parsed.value if parsed != null and parsed.ok else null
+	if mf != null:
+		for f in mf.files:
+			if f.path == "game/thing.gd":
+				pack_hash = f.sha256
+	_check(pack_hash != "", "the manifest lists the pack's script (precondition for the next check)")
+	_check(
+		pack_hash != "" and not cloud.store.has(pack_hash),
+		"and refuses it before downloading any of the pack"
 	)
 
 	# The same pack on a build that has what it asks for.

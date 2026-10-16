@@ -493,6 +493,14 @@ func _acquire_inner(
 	groups: PackedStringArray,
 	key: String
 ) -> DotResult:
+	# [b]Ask before downloading, not after.[/b] An old web shell once fetched about three
+	# minutes of a game and only then said it needed a newer addon. The requirements are
+	# one small file the manifest already lists, so fetch just that and refuse with
+	# nothing else on the wire.
+	var preflight := await _preflight_requirements(manifest, key)
+	if not preflight.ok:
+		return _fail(preflight.error)
+
 	var downloaded := await _download(manifest, groups, key)
 	if not downloaded.ok:
 		return _fail(downloaded.error)
@@ -520,6 +528,39 @@ func _acquire_inner(
 	content_ready.emit(manifest, str(mounted.value))
 
 	return _ready_result(manifest)
+
+
+## Fetches only [code]requires.json[/code] and runs [method check_requirements], so a pack
+## this build cannot run is refused ([constant DotError.CODE_VERSION]) before its payload
+## is downloaded. A manifest without the file behaves as it always did.
+##
+## A sub-manifest rather than a new downloader call: the downloader already does
+## failover, verification and the busy guard, and it only reads [member
+## DotCloudManifest.files]. A failure to fetch the file is not a refusal -- the full
+## download that follows reports its own network trouble, and the check after it runs
+## as before.
+func _preflight_requirements(manifest: DotCloudManifest, key: String) -> DotResult:
+	var req: DotCloudFile = null
+	for file in manifest.files:
+		if file.path == DotAddonApi.REQUIREMENTS_FILE:
+			req = file
+			break
+	if req == null:
+		return DotResult.success({})
+
+	if not store.has(req.sha256):
+		var sub := DotCloudManifest.new()
+		sub.content_id = manifest.content_id
+		sub.version = manifest.version
+		sub.mount_root = manifest.mount_root
+		sub.mirrors = manifest.mirrors
+		sub.files = [req]
+		var fetched := await _download(sub, PackedStringArray(), key)
+		if not fetched.ok:
+			DotLog.debug(CHANNEL, "requirements preflight could not fetch", {"content": key})
+			return DotResult.success({})
+
+	return check_requirements(manifest)
 
 
 ## Puts every object [param manifest] names into the store, and mounts nothing.

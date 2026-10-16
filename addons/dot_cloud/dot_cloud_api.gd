@@ -8,5 +8,7 @@ extends RefCounted
 
 # 1: everything before this file existed (an absent file reads as 1).
 # 2: DotCloudPublisher.extra_files (pack path -> file outside the source).
-const LEVEL := 2
+# 3: acquire refuses a pack whose requires.json asks for more than this build has BEFORE
+#    downloading it (CODE_VERSION, no pack bytes fetched).
+const LEVEL := 3
 const OLDEST := 1
