@@ -208,7 +208,7 @@ func validate_shape() -> DotResult:
 	# It is a real separator rather than a flattened one on purpose. Flattening owner
 	# and name into `owner_name` looks equivalent and is not: `_` is legal inside both
 	# halves, so `alice_bob` + `x` and `alice` + `bob_x` produce one id, and a key
-	# scoped to `alice_*` is then entitled to sign for the member called `alice_bob`.
+	# scoped to `alice/*` is then entitled to sign for the member called `alice_bob`.
 	# A separator that cannot occur inside either half is the only version of this with
 	# no ambiguity, and "/" is the one every forge already uses. Doubling a legal
 	# character does not work either -- [method DotPaths.slugify] collapses `__` to `_`.

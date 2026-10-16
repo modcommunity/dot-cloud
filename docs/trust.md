@@ -36,7 +36,7 @@ A bare PEM in `trusted_keys` is trusted for every content id there is. With two 
     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
     "community-alice": {
         "key": "-----BEGIN PUBLIC KEY-----\n…",
-        "content_ids": ["alice_*"]
+        "content_ids": ["alice/*"]
     }
 }
 ```

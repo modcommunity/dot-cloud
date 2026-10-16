@@ -172,6 +172,12 @@ static func key_scope(entry: Variant) -> PackedStringArray:
 ## Patterns are globs over the id -- [code]alice/*[/code] -- because a publisher's
 ## namespace is a prefix in every deployment that has ever had one, and a glob says so
 ## without inventing a syntax. An empty scope covers everything.
+##
+## [b]A wildcard never crosses a "/".[/b] [code]String.match[/code] lets "*" swallow
+## separators, so [code]alice*[/code] matched [code]alice/anything[/code] and
+## [code]alice/*[/code] matched [code]alice/a/b[/code]. The owner segment is the security
+## boundary, so each segment is matched on its own and the segment counts must agree.
+## This only ever narrows what a scope covers. Security-relevant: keep it conservative.
 static func scope_allows(entry: Variant, content_id: String) -> bool:
 	var scope := key_scope(entry)
 
@@ -181,10 +187,24 @@ static func scope_allows(entry: Variant, content_id: String) -> bool:
 	for pattern in scope:
 		if pattern == "" :
 			continue
-		if content_id == pattern or content_id.match(pattern):
+		if content_id == pattern or _match_segments(pattern, content_id):
 			return true
 
 	return false
+
+
+static func _match_segments(pattern: String, content_id: String) -> bool:
+	var pp := pattern.split("/")
+	var ii := content_id.split("/")
+
+	if pp.size() != ii.size():
+		return false
+
+	for n in pp.size():
+		if not ii[n].match(pp[n]):
+			return false
+
+	return true
 
 
 ## [method verify_any], and then: was that key allowed to sign THIS content?

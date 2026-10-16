@@ -26,7 +26,7 @@ const WORK := "user://dot_cloud_mount_demo"
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 94
+const CHECKS := 98
 
 var _failures: int = 0
 var _checks: int = 0
@@ -282,6 +282,15 @@ func _section_namespaced_ids() -> void:
 		not DotCloudSignature.scope_allows(scoped, "alicebob/x"))
 	_check("nor the flattened lookalike",
 		not DotCloudSignature.scope_allows(scoped, "alice_bob/x"))
+	_check("alice/* does not cover a deeper path",
+		not DotCloudSignature.scope_allows(scoped, "alice/a/b"))
+	var loose := {"key": "k", "content_ids": ["alice*"]}
+	_check("alice* does not cross a / into alice/x",
+		not DotCloudSignature.scope_allows(loose, "alice/x"))
+	_check("alice* still covers a one-segment alice-bob",
+		DotCloudSignature.scope_allows(loose, "alice-bob"))
+	_check("an exact id still matches",
+		DotCloudSignature.scope_allows({"key": "k", "content_ids": ["alice/x"]}, "alice/x"))
 
 	_line("")
 	_sections_finished += 1
