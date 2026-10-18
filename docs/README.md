@@ -11,5 +11,6 @@ The reasoning behind content delivery, one subject per file. [CLAUDE.md](../CLAU
 | [sources.md](sources.md) | The three sources, why a source is skipped, the in-band bounds, resume, the downloader |
 | [publishing.md](publishing.md) | The CLI, imported assets, path rewriting, binary imports, `DotCloudRegistry` |
 | [addon-packs.md](addon-packs.md) | Newer addons over a build: the engine facts, the safeguards, the browser, the test |
+| [workshop.md](workshop.md) | The Workshop contract: `provides`, `DotContentIndex`, session tags, the sync client, solo launch, online isolation, script packs |
 | [testing.md](testing.md) | The seven demos and the fan-out trap |
 | [history.md](history.md) | The bugs, and how each looked |

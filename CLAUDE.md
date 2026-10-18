@@ -23,6 +23,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/sources.md](docs/sources.md) | local, HTTP and in-band sources, failover, resume, the downloader |
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
+| [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
 | [docs/testing.md](docs/testing.md) | the seven demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
