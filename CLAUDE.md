@@ -24,7 +24,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
-| [docs/testing.md](docs/testing.md) | the seven demos, the fan-out trap, adding a check |
+| [docs/testing.md](docs/testing.md) | the eight demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
 ## Layout
@@ -32,8 +32,8 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | Path | What |
 | --- | --- |
 | `addons/dot_cloud/dot_cloud_config.gd` | layered config; `validate()` refuses unsigned by default |
-| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources` |
-| `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper) |
+| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session` |
+| `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper), `DotCloudProvides` (the `provides` block, strict at publish, tolerant at mount), `DotCloudScriptScan` (`runs_code`) |
 | `addons/dot_cloud/store/` | the content-addressed cache: LRU eviction, refs, the index |
 | `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; the downloader (worker pool, failover, throttle, progress) |
 | `addons/dot_cloud/verify/` | RSA-SHA256 sign/verify |
@@ -41,11 +41,11 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | `addons/dot_cloud/client/` | `DotCloudClient`, the one node a game needs |
 | `addons/dot_cloud/addon_set/`, `boot/` | newer addons as packs; the boot scene that mounts the overlay (names no addon class, and must not) |
 | `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
-| `examples/` | the seven demos, `http_test_server.gd`, the addon boot probe |
+| `examples/` | the eight demos, `http_test_server.gd`, the addon boot probe |
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
 - A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
 
@@ -59,6 +59,11 @@ Short forms; the reasoning is in the linked file.
 - Unloading is freeing the nodes; `purge_resources` reports a leak count and cannot evict. A non-zero count is a caller that did not free its nodes. [mounting](docs/mounting.md#unloading-is-freeing-the-nodes)
 - A pack's `requires.json` is checked between download and mount, never after. [mounting](docs/mounting.md#a-pack-says-which-addon-api-it-needs)
 - A delivered game references its own files by path (no `class_name` in a game pack). [mounting](docs/mounting.md#a-pack-says-which-addon-api-it-needs)
+
+**Workshop**
+
+- `provides` is signed into the manifest from the source's `provides.json`; `runs_code` is computed by `DotCloudScriptScan`, never the author's. A manifest with `provides` whose stored files run code it did not declare is `CODE_FORBIDDEN` before the mount. [workshop](docs/workshop.md#runs_code)
+- A subscription mounts through `ensure_for_session(..., &"solo", &"subscription", {uid_policy: "add_only", allow_root: false})`: never online, never at the root, never re-pointing a UID the process knows. [workshop](docs/workshop.md#registering-on-mount)
 
 **Trust**
 

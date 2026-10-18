@@ -30,6 +30,9 @@ extends RefCounted
 
 const CHANNEL := "cloud.pub"
 
+## The file at the source root that says what the pack offers a game.
+const PROVIDES_FILE := "provides.json"
+
 var content_id: String = ""
 var version: String = "0.0.0"
 var display_name: String = ""
@@ -356,6 +359,11 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			source_dir
 		)
 
+	var provided := _provides_for(source_dir, relatives, extra, dropped)
+	if not provided.ok:
+		return provided
+	manifest.provides = provided.value
+
 	var written := 0
 	var deduped := 0
 	var total_bytes := 0
@@ -501,6 +509,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			"objects": seen.size(),
 			"deduped": deduped,
 			"sources_dropped": dropped.size(),
+			"provides": manifest.provides.get("entries", []).size() if not manifest.provides.is_empty() else -1,
+			"runs_code": bool(manifest.provides.get("runs_code", false)),
 			"written": written,
 			"bytes": DotPaths.format_bytes(total_bytes),
 			"rewritten": rewritten,
@@ -521,6 +531,63 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
 	})
+
+
+## Reads, validates and completes the pack's `provides.json`; an empty dictionary when the
+## source has none (every pack published before the Workshop).
+##
+## [b]`runs_code` is computed here and never taken from the author's file.[/b] A pack that
+## says it is data and ships a script is the thing the scan exists to catch, so the author's
+## value is overwritten, not honoured. Paths are checked against what the pack will ship
+## (including the sources of imported assets, whose `.import` marker ships in their place),
+## so a typo fails at publish rather than as an empty menu on a player's machine.
+func _provides_for(
+	source_dir: String,
+	relatives: PackedStringArray,
+	extra: Dictionary,
+	dropped: Dictionary
+) -> DotResult:
+	var file := source_dir.path_join(PROVIDES_FILE)
+	if not FileAccess.file_exists(file):
+		return DotResult.success({})
+
+	var read := DotPaths.read_json(file)
+	if not read.ok:
+		return read.wrap("Could not read %s." % PROVIDES_FILE)
+	if not (read.value is Dictionary):
+		return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % PROVIDES_FILE)
+
+	var parsed := DotCloudProvides.parse(read.value as Dictionary, true)
+	if not parsed.ok:
+		return parsed.wrap("%s is invalid." % PROVIDES_FILE)
+	var provides: Dictionary = parsed.value
+
+	var shipped := {}
+	for rel in relatives:
+		shipped[rel] = true
+	var exists := func(p: String) -> bool:
+		return shipped.has(p) or dropped.has(p) or extra.has(p)
+	var dir_exists := func(d: String) -> bool:
+		var prefix := d.trim_suffix("/") + "/"
+		for rel in relatives:
+			if rel.begins_with(prefix):
+				return true
+		return false
+	var checked := DotCloudProvides.check_files(provides, exists, dir_exists)
+	if not checked.ok:
+		return checked.wrap("%s does not match the pack." % PROVIDES_FILE)
+
+	var reader := func(rel: String) -> PackedByteArray:
+		return FileAccess.get_file_as_bytes(str(extra.get(rel, source_dir.path_join(rel))))
+	var scanned := DotCloudScriptScan.scan(relatives, reader, provides)
+	if not scanned.ok:
+		return scanned
+	provides["runs_code"] = bool((scanned.value as Dictionary)["runs_code"])
+	if provides["runs_code"]:
+		DotLog.info(CHANNEL, "pack runs code", {
+			"content": content_id, "why": ", ".join((scanned.value as Dictionary)["reasons"]),
+		})
+	return DotResult.success(provides)
 
 
 ## Files to publish, as paths relative to [param source_dir].

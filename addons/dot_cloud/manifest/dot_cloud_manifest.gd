@@ -68,6 +68,12 @@ const FORMAT_VERSION := 1
 ## Free-form metadata passed through untouched, for a host project's own use.
 @export var metadata: Dictionary = {}
 
+## What the pack offers a game: the author's `provides.json` plus the computed `runs_code`
+## (see [DotCloudProvides]). Empty for every pack published before the Workshop. Signed with
+## the rest of the payload, because the manifest is the only document verified before
+## anything is downloaded.
+@export var provides: Dictionary = {}
+
 ## Format version the document declared.
 var format_version: int = FORMAT_VERSION
 
@@ -153,6 +159,8 @@ static func from_dict(d: Dictionary) -> DotResult:
 	m.min_engine_version = str(d.get("min_engine_version", ""))
 	if d.get("metadata") is Dictionary:
 		m.metadata = d["metadata"]
+	if d.get("provides") is Dictionary:
+		m.provides = d["provides"]
 
 	for u in d.get("mirrors", []):
 		m.mirrors.append(str(u))
@@ -334,6 +342,8 @@ func to_dict() -> Dictionary:
 		d["mirrors"] = Array(mirrors)
 	if not metadata.is_empty():
 		d["metadata"] = metadata
+	if not provides.is_empty():
+		d["provides"] = provides
 
 	# Sorted by hash so the serialisation is deterministic regardless of the
 	# order the publisher walked the source directory. Without this, two

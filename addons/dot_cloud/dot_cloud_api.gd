@@ -12,5 +12,7 @@ extends RefCounted
 #    downloading it (CODE_VERSION, no pack bytes fetched).
 # 4: DotCloudPublisher.ship_import_sources (off: an imported asset's source is left out of
 #    the pack; the CLI's --with-sources turns it back on).
-const LEVEL := 4
+# 5: provides in the manifest (DotCloudProvides), DotCloudScriptScan, DotCloudClient.session_tag / ensure_for_session
+#    (uid_policy add_only, allow_root), mounted packs fill DotContentIndex. Needs dot-core API 9.
+const LEVEL := 5
 const OLDEST := 1

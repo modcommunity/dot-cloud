@@ -47,6 +47,9 @@ extends RefCounted
 
 const CHANNEL := "cloud.mount"
 
+## [code]options.uid_policy[/code]: only add ids the process does not know yet.
+const UID_ADD_ONLY := "add_only"
+
 var config: DotCloudConfig
 
 ## content_key -> {manifest, prefix, mounted_at, files}
@@ -71,7 +74,8 @@ func _init(p_config: DotCloudConfig) -> void:
 func mount(
 	manifest: DotCloudManifest,
 	store: DotCloudStore,
-	scheduler: DotScheduler = null
+	scheduler: DotScheduler = null,
+	options: Dictionary = {}
 ) -> DotResult:
 	var engine_check := manifest.validate()
 	if not engine_check.ok:
@@ -162,7 +166,11 @@ func mount(
 			)
 			return escaped
 
-	var uids := _register_uids(wanted, prefix, manifest.mount_root)
+	var uid_skips := [0]
+	var uids := _register_uids(
+		wanted, prefix, manifest.mount_root,
+		str(options.get("uid_policy", "")) == UID_ADD_ONLY, manifest.content_id, uid_skips
+	)
 
 	_mounts[key] = {
 		"manifest": manifest,
@@ -172,6 +180,7 @@ func mount(
 		"mounted_at": Time.get_ticks_msec(),
 		"files": wanted.size(),
 		"uids": uids,
+		"uids_skipped": int(uid_skips[0]),
 	}
 
 	store.add_refs(key, manifest.unique_hashes())
@@ -180,7 +189,10 @@ func mount(
 	DotLog.info(
 		CHANNEL,
 		"mounted",
-		{"content": key, "prefix": prefix, "files": wanted.size(), "uids": uids}
+		{
+			"content": key, "prefix": prefix, "files": wanted.size(), "uids": uids,
+			"uids_skipped": int(uid_skips[0]),
+		}
 	)
 
 	return DotResult.success(prefix)
@@ -222,7 +234,21 @@ func mount(
 ## that points into content (this pack, or an earlier version of it) is updated.
 ##
 ## Returns how many were registered, for the mount's log line.
-func _register_uids(files: Array[DotCloudFile], prefix: String, mount_root: String) -> int:
+##
+## [b]`add_only` (a subscription's mount) is stricter still.[/b] The rule above lets an id
+## move when it points into any mounted content, which is right for a second version of the
+## same pack and wrong for a stranger's pack that happens to reuse an id of a game pack or a
+## server's map: it would re-point that content for the rest of the process, online sessions
+## included. So under `add_only` an id already registered to a path outside THIS content id's
+## own mounts is skipped and counted in [param skipped], and only unknown ids are added.
+func _register_uids(
+	files: Array[DotCloudFile],
+	prefix: String,
+	mount_root: String,
+	add_only: bool = false,
+	content_id: String = "",
+	skipped: Array = []
+) -> int:
 	var registered := 0
 	var refused := 0
 	var content_root := "res://%s/" % mount_root
@@ -263,6 +289,10 @@ func _register_uids(files: Array[DotCloudFile], prefix: String, mount_root: Stri
 		# ONLY case an existing id may be moved, per the note above.
 		if ResourceUID.has_id(id):
 			var held := ResourceUID.get_id_path(id)
+
+			if add_only and not held.begins_with("%s%s/" % [content_root, content_id]):
+				skipped[0] = int(skipped[0]) + 1
+				continue
 
 			if not held.begins_with(content_root):
 				DotLog.warn(CHANNEL, "a pack claims a uid the host already owns; refused", {
@@ -700,6 +730,7 @@ func describe() -> Dictionary:
 			# `.import` markers it carries means some were refused for belonging to
 			# somebody else — see [method _register_uids].
 			"uids": e.get("uids", 0),
+			"uids_skipped": e.get("uids_skipped", 0),
 		})
 
 	return {

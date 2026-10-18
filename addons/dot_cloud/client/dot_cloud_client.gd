@@ -196,6 +196,17 @@ var _registered_name: StringName = &""
 ## content_key -> DotCloudManifest, for everything currently mounted.
 var _acquired: Dictionary = {}
 
+## The session a plain [method ensure] or [method acquire] mount is tagged with in
+## [DotContentIndex]. `online` by default: a plain mount is the server's content, and the
+## shell sets `solo` for a solo launch. The Workshop never relies on this; it passes the tag
+## explicitly through [method ensure_for_session].
+var session_tag: StringName = DotContentIndex.SESSION_ONLINE
+
+## content_key -> {session, source, uid_policy, allow_root} for a mount in progress that
+## [method ensure_for_session] started. Keyed rather than a member field so two mounts in
+## flight do not read each other's options.
+var _mount_opts: Dictionary = {}
+
 
 # --- Lifecycle -------------------------------------------------------------
 
@@ -467,6 +478,7 @@ func acquire_manifest(
 	var key := manifest.key()
 
 	if mounter.is_mounted(key):
+		_index_manifest(manifest)
 		_set_phase(Phase.READY, "Ready.")
 		return _ready_result(manifest)
 
@@ -493,6 +505,21 @@ func _acquire_inner(
 	groups: PackedStringArray,
 	key: String
 ) -> DotResult:
+	# [b]Refused from the manifest alone, before a byte is fetched.[/b] A root overlay replaces
+	# the build's code for the whole process, which is a server's decision, never a
+	# subscription's (see [method ensure_for_session]).
+	var opts: Dictionary = _mount_opts.get(key, {})
+	if not bool(opts.get("allow_root", true)) and not manifest.provides.is_empty():
+		var paths := PackedStringArray()
+		for f in manifest.files:
+			paths.append(f.path)
+		if DotCloudProvides.is_root_overlay(manifest.provides, paths):
+			return _fail(DotError.make(
+				DotError.CODE_FORBIDDEN,
+				"This pack would overlay the build's addons, which a subscription may not do.",
+				key
+			))
+
 	# [b]Ask before downloading, not after.[/b] An old web shell once fetched about three
 	# minutes of a game and only then said it needed a newer addon. The requirements are
 	# one small file the manifest already lists, so fetch just that and refuse with
@@ -516,18 +543,81 @@ func _acquire_inner(
 	if not fits.ok:
 		return _fail(fits.error)
 
+	var honest := _rescan_for_code(manifest)
+	if not honest.ok:
+		return _fail(honest.error)
+
 	_set_phase(Phase.MOUNTING, "Preparing content…")
 
-	var mounted := await mounter.mount(manifest, store, scheduler)
+	var mounted := await mounter.mount(manifest, store, scheduler, opts)
 	if not mounted.ok:
 		return _fail(mounted.error)
 
 	_acquired[key] = manifest
+	_index_manifest(manifest)
 
 	_set_phase(Phase.READY, "Ready.")
 	content_ready.emit(manifest, str(mounted.value))
 
 	return _ready_result(manifest)
+
+
+## Between download and mount: the stored files must not run more code than the manifest said.
+##
+## Only for a manifest that carries [code]provides[/code], which is where the publisher wrote
+## its `runs_code`; a pack with none predates the Workshop and is trusted as it always was.
+## Read from the store, not from a mount, because a mounted pack can never be unmounted and a
+## refusal after the fact would be a refusal of something already running.
+func _rescan_for_code(manifest: DotCloudManifest) -> DotResult:
+	if manifest.provides.is_empty() or bool(manifest.provides.get("runs_code", false)):
+		return DotResult.success(true)
+	var by_path := {}
+	var paths := PackedStringArray()
+	for f in manifest.wanted_files():
+		by_path[f.path] = f
+		paths.append(f.path)
+	var reader := func(p: String) -> PackedByteArray:
+		var f: DotCloudFile = by_path[p]
+		if store == null or not store.has(f.sha256):
+			return PackedByteArray()
+		var read := store.read(f.sha256)
+		return read.value if read.ok else PackedByteArray()
+	var scanned := DotCloudScriptScan.scan(paths, reader, manifest.provides)
+	if not scanned.ok:
+		return scanned
+	var verdict: Dictionary = scanned.value
+	if bool(verdict["runs_code"]):
+		return DotResult.fail(
+			DotError.CODE_FORBIDDEN,
+			"The pack's files run code its manifest did not declare.",
+			"%s: %s" % [manifest.key(), ", ".join(verdict["reasons"])]
+		)
+	return DotResult.success(true)
+
+
+## Registers what a mounted pack provides with [DotContentIndex], tagged with the session it
+## was mounted for. Idempotent, so an already-mounted id@version just gains the tag. A
+## manifest with no `provides` registers nothing: old packs behave exactly as before.
+func _index_manifest(manifest: DotCloudManifest) -> void:
+	if manifest.provides.is_empty():
+		return
+	var opts: Dictionary = _mount_opts.get(manifest.key(), {})
+	var session := StringName(str(opts.get("session", session_tag)))
+	var source := StringName(str(opts.get(
+		"source", &"server" if session == DotContentIndex.SESSION_ONLINE else &"game"
+	)))
+	var added := DotContentIndex.shared().add_pack({
+		"content_id": manifest.content_id,
+		"version": manifest.version,
+		"prefix": manifest.mount_prefix(),
+		"provides": DotCloudProvides.normalize(manifest.provides),
+		"session": session,
+		"source": source,
+	})
+	if not added.ok:
+		DotLog.warn(CHANNEL, "could not index what a pack provides", {
+			"content": manifest.key(), "why": added.error.message,
+		})
 
 
 ## Fetches only [code]requires.json[/code] and runs [method check_requirements], so a pack
@@ -726,6 +816,7 @@ func ensure(
 			content_key_for(content_id, effective_version)
 		)
 		if manifest != null:
+			_index_manifest(manifest)
 			_set_phase(Phase.READY, "Ready.")
 			return _ready_result(manifest)
 		# Mounted by an earlier run of this process, from a client that has since
@@ -737,6 +828,50 @@ func ensure(
 		return resolved
 
 	return await acquire_manifest(resolved.value, groups)
+
+
+## [method ensure] for a mount that knows which session it is for and where the content came
+## from. The one call the Workshop mounts through.
+##
+## [param session] is [constant DotContentIndex.SESSION_SOLO] or [constant
+## DotContentIndex.SESSION_ONLINE]; [param source] is `&"subscription"`, `&"server"` or
+## `&"game"`. [param options]:
+## [br]- [code]uid_policy: "add_only"[/code]: UIDs the process already knows are left alone and
+## counted ([code]uids_skipped=N[/code] in the mount line). A subscription shipping a resource
+## under the UID of the game's own texture would otherwise redirect the game's references to
+## its copy, in solo and in every later online session of the process.
+## [br]- [code]allow_root: false[/code]: a pack that overlays addons at the root is refused as
+## [constant DotError.CODE_FORBIDDEN].
+## [br]- [code]manifest_url[/code]: where the manifest is, as for [method ensure].
+## [br]A subscription is never mounted for an online session; that is refused here as well as
+## by the caller, because a subscription pack's code must not reach a server's game.
+func ensure_for_session(
+	content_id: StringName,
+	version: String,
+	session: StringName,
+	source: StringName = &"game",
+	options: Dictionary = {}
+) -> DotResult:
+	if session != DotContentIndex.SESSION_SOLO and session != DotContentIndex.SESSION_ONLINE:
+		return DotResult.fail(DotError.CODE_INVALID, "Unknown session '%s'." % session)
+	if source == &"subscription" and session != DotContentIndex.SESSION_SOLO:
+		return DotResult.fail(
+			DotError.CODE_FORBIDDEN, "A subscription is only mounted for a solo session.",
+			"%s@%s" % [content_id, version]
+		)
+	var effective := version if version != "" else "0.0.0"
+	var key := content_key_for(content_id, effective)
+	_mount_opts[key] = {
+		"session": session,
+		"source": source,
+		"uid_policy": str(options.get("uid_policy", "")),
+		"allow_root": bool(options.get("allow_root", true)),
+	}
+	var result := await ensure(
+		content_id, version, PackedStringArray(), str(options.get("manifest_url", ""))
+	)
+	_mount_opts.erase(key)
+	return result
 
 
 ## The verified manifest for [param content_id] at [param version], fetched the way
@@ -1270,6 +1405,7 @@ func describe() -> Dictionary:
 func describe_lines() -> PackedStringArray:
 	var out := PackedStringArray()
 	out.append("phase            %s" % phase_name(_phase))
+	out.append("session tag      %s" % session_tag)
 
 	if store != null:
 		out.append_array(store.describe_lines())
@@ -1277,6 +1413,12 @@ func describe_lines() -> PackedStringArray:
 	if mounter != null:
 		out.append("mounts:")
 		for l in mounter.describe_lines():
+			out.append("  " + l)
+
+	var index := DotRegistry.get_service(DotContentIndex.SERVICE) as DotContentIndex
+	if index != null:
+		out.append("provided:")
+		for l in index.describe_lines():
 			out.append("  " + l)
 
 	out.append("sources:")
