@@ -14,7 +14,7 @@ extends Node
 
 const WORK := "user://dot_cloud_workshop_sync_demo"
 const GAME := "gamemann/game-playground"
-const CHECKS := 88
+const CHECKS := 90
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -223,6 +223,7 @@ func _check_first_sync_and_cache() -> void:
 	var req := _last_request()
 	_check(req.get("headers", {}).get("authorization") == "Bearer tok-alice", "the bearer came from token_fn")
 	_check(req.get("query", {}).get("game") == GAME and not req.get("query", {}).has("since"), "the request names the game and, with no cache, no since")
+	_check(req.get("query", {}).get("platform") == DotCloudWorkshop.client_platform() and DotCloudWorkshop.client_platform() in ["web", "desktop", "mobile"], "the request names the platform, from DotPlatform", str(req.get("query", {}).get("platform")))
 	_check(_index.entries(&"map").size() == before + 1 and _index.entries(&"prop").size() == 1, "the index offers the map and the prop to the solo session")
 	var e := _index.entry("ws_a@1.0.0:map/m")
 	_check(e != null and e.source == &"subscription" and _index.packs(&"solo").size() >= 2, "tagged as a subscription in the solo session")
@@ -236,10 +237,14 @@ func _check_first_sync_and_cache() -> void:
 func _check_unchanged() -> void:
 	_line("")
 	_line("[b]unchanged revision[/b]")
+	# Forced here so the one platform the headless run is not (web) is seen on the wire too.
+	_ws.force_platform = "Web"
 	var res := await _ws.sync(GAME)
+	_ws.force_platform = ""
 	var s: Dictionary = res.value
 	var req := _last_request()
 	_check(req.get("query", {}).get("since") == "w1:one", "the request carries the cached revision as since")
+	_check(req.get("query", {}).get("platform") == "web", "force_platform overrides the platform sent, normalised", str(req.get("query", {}).get("platform")))
 	_check(s["from_cache"] and not s["offline"] and s["revision"] == "w1:one", "an unchanged answer keeps the cached list, online")
 	_check(_ids(s["mounted"]) == PackedStringArray(["ws_a", "ws_b"]), "the cached list's packs are mounted again (already mounted, tagged)")
 	_check(_ws.last_list().items().size() == 2, "last_list still holds both items")

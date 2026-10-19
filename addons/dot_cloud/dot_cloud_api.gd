@@ -15,5 +15,7 @@ extends RefCounted
 # 5: provides in the manifest (DotCloudProvides), DotCloudScriptScan, DotCloudClient.session_tag / ensure_for_session
 #    (uid_policy add_only, allow_root), mounted packs fill DotContentIndex. Needs dot-core API 9.
 # 6: DotCloudWorkshop (workshop/): the sync client, DotCloudWorkshopConfig / List / Device, registry name dot_workshop.
-const LEVEL := 6
+# 7: DotCloudWorkshop.client_platform / request_platform / force_platform (the site reviews
+#    script packs per platform).
+const LEVEL := 7
 const OLDEST := 1

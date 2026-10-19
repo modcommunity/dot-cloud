@@ -66,6 +66,14 @@ var account_id: String = ""
 ## -1 asks the platform, 0 and 1 force the answer (tests, and a host that knows better).
 var force_metered: int = -1
 
+## The platform sent with the list request, [code]web[/code], [code]desktop[/code] or
+## [code]mobile[/code]; empty asks [method client_platform]. The site holds its code-review
+## policy per platform (a browser's sandbox apart from a native build's whole machine), so this
+## decides which script packs it lists. Forcing it is for tests and for a host that knows
+## better; claiming [code]web[/code] on a native build only gets packs reviewed for the
+## browser, which [member DotCloudWorkshopConfig.workshop_script_packs] still filters.
+var force_platform: String = ""
+
 var device: DotCloudWorkshopDevice = null
 
 var _http: DotHttp = null
@@ -284,7 +292,7 @@ func _fetch(game: String, token: String, since: String) -> DotResult:
 		return DotResult.fail(DotError.CODE_STATE, "No workshop_backbone_url is configured.")
 	_http.base_url = config.workshop_backbone_url
 	_http.timeout_sec = config.workshop_timeout_sec
-	var path := "/api/app/v1/workshop?game=%s&platform=%s" % [game.uri_encode(), _platform()]
+	var path := "/api/app/v1/workshop?game=%s&platform=%s" % [game.uri_encode(), request_platform()]
 	if since != "":
 		path += "&since=" + since.uri_encode()
 	var res := await _http.get_json(path, {"Authorization": "Bearer " + token})
@@ -529,6 +537,12 @@ func _token() -> String:
 	return str(token_fn.call())
 
 
+## The platform this instance sends: [member force_platform] when set, else [method client_platform].
+func request_platform() -> String:
+	var forced := force_platform.strip_edges().to_lower()
+	return forced if forced != "" else client_platform()
+
+
 ## The second lock behind the shell's own: a join in progress, or a session already online.
 func _is_online_session() -> bool:
 	if DotRegistry.get_service(&"dot_client_link") != null:
@@ -536,7 +550,10 @@ func _is_online_session() -> bool:
 	return DotContentIndex.shared().session() == DotContentIndex.SESSION_ONLINE
 
 
-static func _platform() -> String:
+## What this build is, as the site's workshop list wants it: [code]web[/code] in a browser,
+## [code]mobile[/code] on a phone or tablet, otherwise [code]desktop[/code]. An old client that
+## sends nothing is read as native by the site, the strict case.
+static func client_platform() -> String:
 	if DotPlatform.is_web():
 		return "web"
 	if DotPlatform.is_mobile():
