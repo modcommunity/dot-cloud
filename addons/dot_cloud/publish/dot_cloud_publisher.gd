@@ -273,9 +273,25 @@ var platform_rules: Dictionary = {}
 ## by more than one tool (this class's CLI, a server's packer, the site's release sync) and
 ## the source is the one thing all of them read. Refused at publish: a pattern that matches
 ## nothing (a typo would ship the files to both sides and say nothing), a file two patterns
-## put on different sides, a side tag on the pack's [code]requires.json[/code] (both sides
-## check it before mounting), and a server-only entry scene (a client loads it).
+## put on different sides, a file [member side_needs] says the other side reads, and a
+## text resource on one side (or both) that references a file only the other side gets.
 var side_rules: Dictionary = {}
+
+## Pack paths a side must have, as [code]path -> "client" | "server" | "both"[/code]; a
+## side rule that takes one of them away from a side that needs it is refused at publish
+## (API 8). [code]requires.json[/code] and [code]provides.json[/code] are always both and
+## [member entry_scene] always client; a packer adds what its own loader opens, such as a
+## server's game descriptor and module. Add with [method need_on_side], which merges.
+var side_needs: Dictionary = {}
+
+
+## Says [param side] ("client", "server" or "both") reads [param path]; two different
+## sides make it both.
+func need_on_side(path: String, side: String) -> void:
+	if path == "":
+		return
+	var held := str(side_needs.get(path, side))
+	side_needs[path] = side if held == side else "both"
 
 
 # --- Publishing ------------------------------------------------------------
@@ -412,6 +428,10 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		inside[src] = src
 	for project_rel: String in remap:
 		inside[project_rel] = remap[project_rel]
+
+	var crossed := _check_side_references(relatives, extra, source_dir, inside, sides)
+	if not crossed.ok:
+		return crossed
 
 	var staging := out_dir.path_join(".rewritten")
 	if rewrite_resource_paths:
@@ -706,18 +726,20 @@ func _sides_for(source_dir: String, relatives: PackedStringArray, owners: Dictio
 		if side == DotCloudFile.SIDE_BOTH:
 			continue
 
-		# Both sides read requires.json before they mount (DotCloudClient.check_requirements).
-		if rel == DotAddonApi.REQUIREMENTS_FILE:
+		# Both sides read requires.json and provides.json before they mount; a client
+		# loads the entry scene; a packer names what its own loader opens.
+		var needs := side_needs.duplicate()
+		needs[DotAddonApi.REQUIREMENTS_FILE] = "both"
+		needs[PROVIDES_FILE] = "both"
+		if entry_scene != "" and not needs.has(entry_scene):
+			needs[entry_scene] = DotCloudFile.SIDE_CLIENT
+		var need := str(needs.get(rel, ""))
+		if need != "" and need != side:
 			return DotResult.fail(
 				DotError.CODE_INVALID,
-				"%s cannot be one side's file." % rel,
-				"both sides check it before mounting; narrow the side rule"
-			)
-		if rel == entry_scene and side == DotCloudFile.SIDE_SERVER:
-			return DotResult.fail(
-				DotError.CODE_INVALID,
-				"The entry scene '%s' cannot be server-only." % rel,
-				"a client loads the entry scene"
+				"'%s' cannot be %s-only." % [rel, side],
+				("the client and the server read it" if need == "both"
+					else "the %s reads it" % need) + "; narrow the side rule"
 			)
 		out[rel] = side
 
@@ -731,6 +753,48 @@ func _sides_for(source_dir: String, relatives: PackedStringArray, owners: Dictio
 
 	DotLog.debug(CHANNEL, "side rules applied", {"content": content_id, "sided": out.size()})
 	return DotResult.success(out)
+
+
+## Refuses a text resource that references a file its own side will not have: a scene both
+## sides load naming a client-only lightmap, or a client-only resource naming a server-only
+## one. Godot loads a scene's [code]ext_resource[/code] entries unconditionally, so the
+## scene would fail on the side that skipped the file, after a clean publish, fetch and
+## mount. Scripts are not scanned: a path in code is loaded when the code decides to, and
+## gating that by side is the game's job (a server that never draws never asks for a
+## lightmap). An imported asset's side is its marker's.
+func _check_side_references(
+	relatives: PackedStringArray,
+	extra: Dictionary,
+	source_dir: String,
+	inside: Dictionary,
+	sides: Dictionary
+) -> DotResult:
+	if sides.is_empty():
+		return DotResult.success(true)
+
+	for rel in relatives:
+		if not _is_text_resource(rel):
+			continue
+		var own := str(sides.get(rel, DotCloudFile.SIDE_BOTH))
+		var abs: String = extra.get(rel, source_dir.path_join(rel))
+		for ref in _res_paths_in(FileAccess.get_file_as_string(abs)):
+			var path := ref.get_slice("::", 0)
+			if not inside.has(path):
+				continue
+			var target := str(inside[path])
+			var theirs := str(sides.get(target, sides.get(target + ".import", DotCloudFile.SIDE_BOTH)))
+			if theirs == DotCloudFile.SIDE_BOTH or theirs == own:
+				continue
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"'%s' references '%s', which only the %s gets." % [rel, target, theirs],
+				"%s loads '%s'; put both on one side, or load the %s file from code on that side" % [
+					"every side" if own == DotCloudFile.SIDE_BOTH else "the " + own,
+					rel, theirs,
+				]
+			)
+
+	return DotResult.success(true)
 
 
 static func _side_pattern_matches(pattern: String, rel: String) -> bool:

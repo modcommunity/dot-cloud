@@ -428,10 +428,22 @@ func wanted_files(groups: PackedStringArray = PackedStringArray()) -> Array[DotC
 	return out
 
 
+## Bytes [member fetch_side] fetches: everything until a client stamps its side (API 8), so
+## a manifest read before acquisition counts both sides. [method describe] says which, and
+## [method bytes_for_side] asks for a given one.
 func total_bytes(groups: PackedStringArray = PackedStringArray()) -> int:
 	var n := 0
 	for f in wanted_files(groups):
 		n += f.size
+	return n
+
+
+## Bytes a fetcher running as [param side] would fetch, whatever [member fetch_side] is.
+func bytes_for_side(side: String, groups: PackedStringArray = PackedStringArray()) -> int:
+	var held := fetch_side
+	fetch_side = side
+	var n := total_bytes(groups)
+	fetch_side = held
 	return n
 
 
@@ -476,7 +488,10 @@ func describe() -> Dictionary:
 		"mirrors": mirrors.size(),
 		"groups": Array(group_names()),
 		"sided": side_counts(),
+		# Which side "bytes" counts: "both" until a client has stamped its own.
 		"fetch_side": fetch_side if fetch_side != DotCloudFile.SIDE_BOTH else "both",
+		"bytes_client": bytes_for_side(DotCloudFile.SIDE_CLIENT),
+		"bytes_server": bytes_for_side(DotCloudFile.SIDE_SERVER),
 	}
 
 

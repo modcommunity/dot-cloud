@@ -99,6 +99,15 @@ func mount(
 	if _mounts.has(key):
 		var held: Dictionary = _mounts[key]
 
+		# [b]The same content asked for with more files than were mounted[/b] (API 8): a
+		# shell that joined a server as a client and then hosts the same game itself wants
+		# the server-only files too, and the pack cannot be unmounted and remounted. The
+		# difference is mounted as a second pack at the same prefix; nothing already there
+		# is replaced. A narrower ask of the same content is already covered.
+		if str(held.get("identity", "")) != identity \
+				and str(held.get("whole", "")) == _mount_identity(manifest, manifest.files):
+			return await _mount_more(manifest, store, scheduler, options, wanted, held)
+
 		if str(held.get("identity", "")) != identity:
 			return DotResult.fail(
 				DotError.CODE_CONFLICT,
@@ -172,9 +181,15 @@ func mount(
 		str(options.get("uid_policy", "")) == UID_ADD_ONLY, manifest.content_id, uid_skips
 	)
 
+	var paths := {}
+	for f in wanted:
+		paths[f.path] = true
+
 	_mounts[key] = {
 		"manifest": manifest,
 		"identity": identity,
+		"whole": _mount_identity(manifest, manifest.files),
+		"paths": paths,
 		"prefix": prefix,
 		"pack": pack_path,
 		"mounted_at": Time.get_ticks_msec(),
@@ -196,6 +211,94 @@ func mount(
 	)
 
 	return DotResult.success(prefix)
+
+
+## Whether [param manifest] is mounted with every file it now wants: false when the same
+## content was mounted for a narrower side or group set, so [method mount] would add the
+## rest. Different content under the key reads as covered, as it always has: [method mount]
+## is where that is refused.
+func covers(manifest: DotCloudManifest) -> bool:
+	var held: Dictionary = _mounts.get(manifest.key(), {})
+	if held.is_empty():
+		return false
+	if str(held.get("whole", "")) != _mount_identity(manifest, manifest.files):
+		return true
+	var paths: Dictionary = held.get("paths", {})
+	for f in manifest.wanted_files():
+		if not paths.has(f.path):
+			return false
+	return true
+
+
+## The files [param wanted] has that the mount in [param held] lacks, as a second pack at the
+## same prefix. The checks are [method mount]'s, applied to the difference.
+func _mount_more(
+	manifest: DotCloudManifest,
+	store: DotCloudStore,
+	scheduler: DotScheduler,
+	options: Dictionary,
+	wanted: Array[DotCloudFile],
+	held: Dictionary
+) -> DotResult:
+	var key := manifest.key()
+	var paths: Dictionary = held.get("paths", {})
+	var extra: Array[DotCloudFile] = []
+	for f in wanted:
+		if not paths.has(f.path):
+			extra.append(f)
+
+	if extra.is_empty():
+		return DotResult.success(str(held["prefix"]))
+
+	for f in extra:
+		if f.required and not store.has(f.sha256):
+			return DotResult.fail(
+				DotError.CODE_STATE, "Content is not fully downloaded.", "first missing: %s" % f.path
+			)
+
+	if config.verify_before_mount and scheduler != null:
+		var verified := await _verify_objects(extra, store, scheduler)
+		if not verified.ok:
+			return verified
+
+	var pack_path := _pack_path(manifest, extra)
+	var built := _build_pack(manifest, store, extra, pack_path)
+	if not built.ok:
+		return built
+
+	if not ProjectSettings.load_resource_pack(pack_path, config.allow_replace_files):
+		return DotResult.fail(
+			DotError.CODE_IO, "The engine refused to mount the content pack.", pack_path
+		)
+
+	if config.enforce_mount_prefix:
+		var escaped := _check_prefix(manifest, extra)
+		if not escaped.ok:
+			DotLog.error(
+				CHANNEL,
+				"content mounted outside its prefix — this is a bug",
+				{"content": key, "detail": escaped.error.detail}
+			)
+			return escaped
+
+	var uid_skips := [0]
+	var uids := _register_uids(
+		extra, str(held["prefix"]), manifest.mount_root,
+		str(options.get("uid_policy", "")) == UID_ADD_ONLY, manifest.content_id, uid_skips
+	)
+
+	for f in extra:
+		paths[f.path] = true
+	held["paths"] = paths
+	held["files"] = paths.size()
+	held["uids"] = int(held.get("uids", 0)) + uids
+
+	DotLog.info(
+		CHANNEL,
+		"mounted more of it",
+		{"content": key, "added": extra.size(), "files": paths.size(), "uids": uids}
+	)
+	return DotResult.success(str(held["prefix"]))
 
 
 ## Points every UID this pack declares at the file inside the mount.

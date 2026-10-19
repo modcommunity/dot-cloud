@@ -63,6 +63,9 @@ const SIDE_SERVER := "server"
 ## [b]A field, not a platform tag.[/b] [member platforms] matches [method OS.has_feature],
 ## and "this process is the server" is not a feature: one binary is both, headless test
 ## clients exist, and a listen server is a client that also serves.
+##
+## [b]A value this build does not know is read as both[/b] (fetched by everyone), so a side
+## a later API level adds never fails a manifest on an older build.
 @export var side: String = SIDE_BOTH
 
 
@@ -142,14 +145,17 @@ func validate() -> DotResult:
 		if not safe_url.ok:
 			return safe_url.wrap("Manifest entry has an unsafe url_path.")
 
-	# Refused rather than read as "both": a signed document naming a side this build does
-	# not know is one it does not understand, and guessing either way fetches the wrong
-	# set. A new side would be a new API level, as this field was.
-	if not side in [SIDE_BOTH, SIDE_CLIENT, SIDE_SERVER]:
+	# [b]A side this build does not know is read as "both", not refused.[/b] Refusing it
+	# would fail the whole manifest on every API-8 build the day a later level adds a side,
+	# which is the failure the untagged default exists to avoid. Fetching it everywhere is
+	# what a build before API 8 does with any tag, it costs bytes and never a missing file,
+	# and the value is still inside the signed payload. A side is a fetch hint, never access
+	# control: every object of a pack is on the same public mirrors. See [method wanted_on_side].
+	if side.length() > 32:
 		return DotResult.fail(
 			DotError.CODE_INVALID,
-			"Manifest entry has an unknown side.",
-			"%s: '%s' (expected client, server, or no side for both)" % [path, side]
+			"Manifest entry has an over-long side.",
+			"%s: %d characters" % [path, side.length()]
 		)
 
 	return DotResult.success(true)
@@ -170,7 +176,10 @@ func wanted_on_this_platform() -> bool:
 ## [param fetch_side] [constant SIDE_BOTH] wants everything, which is what a caller that
 ## never chose a side gets: the behaviour of every build before API 8.
 func wanted_on_side(fetch_side: String) -> bool:
-	return side == SIDE_BOTH or fetch_side == SIDE_BOTH or side == fetch_side
+	if side == SIDE_BOTH or fetch_side == SIDE_BOTH or side == fetch_side:
+		return true
+	# A side a later API level added, which this build cannot know: both (see validate).
+	return not side in [SIDE_CLIENT, SIDE_SERVER]
 
 
 ## Whether this file is in any of [param selected] groups.

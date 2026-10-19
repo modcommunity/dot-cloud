@@ -478,7 +478,9 @@ func acquire_manifest(
 	_apply_side(manifest)
 	var key := manifest.key()
 
-	if mounter.is_mounted(key):
+	# Mounted, and with every file this side wants: a process that mounted it as a client
+	# and now hosts it too goes on to fetch and mount the rest (DotCloudMounter.covers).
+	if mounter.is_mounted(key) and mounter.covers(manifest):
 		_index_manifest(manifest)
 		_set_phase(Phase.READY, "Ready.")
 		return _ready_result(manifest)
@@ -833,6 +835,9 @@ func ensure(
 			content_key_for(content_id, effective_version)
 		)
 		if manifest != null:
+			_apply_side(manifest)
+			if not mounter.covers(manifest):
+				return await acquire_manifest(manifest, groups)
 			_index_manifest(manifest)
 			_set_phase(Phase.READY, "Ready.")
 			return _ready_result(manifest)

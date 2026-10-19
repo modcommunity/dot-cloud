@@ -8,7 +8,8 @@ extends Node
 ## flipped or dropped tag failing the signature, a server fetching no client-only object
 ## and still mounting with every required file of its side present, a client fetching no
 ## server-only object, `both`, the config's resolution and refusals, the publisher's
-## refusals, and the parser (unknown side refused, an untagged entry serialised as before).
+## refusals (cross-side references, needed files), a client widened to both, and the parser
+## (an unknown side read as both, an untagged entry serialised as before).
 ##
 ## [codeblock]
 ## godot --headless --path . res://examples/sides_demo.tscn
@@ -17,8 +18,8 @@ extends Node
 const WORK := "user://dot_cloud_sides_demo"
 
 ## Every check this suite runs, the closing count included. See docs/testing.md.
-const CHECKS := 40
-const SECTIONS := 8
+const CHECKS := 51
+const SECTIONS := 9
 
 const SIDES_JSON := '{"client": ["lightmaps/"], "server": ["server/*.json"]}'
 
@@ -61,6 +62,7 @@ func _run() -> void:
 	await _section_server_fetch()
 	await _section_client_fetch()
 	await _section_both()
+	await _section_widen()
 	await _section_config()
 	await _section_publisher_refusals()
 	await _section_parser()
@@ -199,6 +201,29 @@ func _section_both() -> void:
 	_end()
 
 
+## One process mounts a pack as a client, then hosts the same game: the server-only files
+## are fetched and mounted beside the first pack, at the same prefix.
+func _section_widen() -> void:
+	_begin("widen")
+	if _publish("1.0.3").is_empty():
+		return
+	var manifest := _read_manifest("1.0.3")
+	if manifest == null:
+		return
+	var prefix := manifest.mount_prefix()
+	var client := _make_client("widen", "client", _published("1.0.3"))
+	var first := await client.acquire_manifest(manifest)
+	_check("mounted as a client first", first.ok and not FileAccess.file_exists(prefix.path_join("server/rules.json")))
+
+	client.config.side = "both"
+	var again := await client.acquire_manifest(manifest)
+	_check("widened to both", again.ok, str(again.error) if not again.ok else "")
+	_check("server table now readable", FileAccess.file_exists(prefix.path_join("server/rules.json")))
+	_check("lightmap still readable", FileAccess.file_exists(prefix.path_join("lightmaps/hall.res")))
+	client.queue_free()
+	_end()
+
+
 func _section_config() -> void:
 	_begin("config")
 	var c := DotCloudConfig.new()
@@ -224,6 +249,21 @@ func _section_publisher_refusals() -> void:
 	pub.side_rules = {"game/": "server"}
 	var res := pub.publish(_source, WORK.path_join("refused"))
 	_check("server-only entry scene", not res.ok and res.error.code == DotError.CODE_INVALID)
+
+	# A scene both sides load that names a client-only lightmap would fail on the server
+	# after a clean publish, fetch and mount: Godot loads ext_resources unconditionally.
+	var scene := '[gd_scene format=3]\n\n[ext_resource type="Resource" path="res://%s" id="1"]\n\n[node name="L" type="Node"]\n'
+	_check("both-side scene naming a client file", _refused(SIDES_JSON, false, {"game/level.tscn": scene % "lightmaps/hall.res"}))
+	_check("client resource naming a server file", _refused(SIDES_JSON, false, {"lightmaps/look.tscn": scene % "server/rules.json"}))
+	_check("client resource naming a client file is fine", not _refused(SIDES_JSON, false, {"lightmaps/look.tscn": scene % "lightmaps/hall.res"}))
+
+	# What a packer's loader opens (a server's descriptor and module) cannot be taken away.
+	var needy := _publisher("9.0.2")
+	needy.need_on_side("server/rules.json", "client")
+	var needed := needy.publish(_source, WORK.path_join("refused"))
+	_check("a file the other side needs", not needed.ok and needed.error.code == DotError.CODE_INVALID)
+	needy.need_on_side("server/rules.json", "server")
+	_check("two sides needing a file make it both", str(needy.side_needs["server/rules.json"]) == "both")
 	_end()
 
 
@@ -238,7 +278,11 @@ func _section_parser() -> void:
 	var odd := base.duplicate()
 	odd["side"] = "sideways"
 	var parsed := DotCloudFile.from_dict(odd)
-	_check("unknown side refused", not parsed.ok and parsed.error.code == DotError.CODE_INVALID)
+	# A side a later API level adds is fetched by everyone here, never a refused manifest.
+	_check("unknown side parses", parsed.ok, str(parsed.error) if not parsed.ok else "")
+	var future: DotCloudFile = parsed.value if parsed.ok else DotCloudFile.new()
+	_check("unknown side is fetched by both", future.wanted_on_side("client") and future.wanted_on_side("server"))
+	_check("unknown side kept as written", str(future.to_dict().get("side", "")) == "sideways")
 	_end()
 
 
@@ -279,13 +323,15 @@ func _read_manifest(version: String) -> DotCloudManifest:
 
 
 ## Publishes a throwaway source with [param sides] as its sides.json; true when refused.
-func _refused(sides: String, with_requires: bool = false) -> bool:
+func _refused(sides: String, with_requires: bool = false, extra: Dictionary = {}) -> bool:
 	var dir := WORK.path_join("refusal_src")
 	DotPaths.remove_tree(dir)
 	if not _write_source(dir, sides).ok:
 		return false
 	if with_requires:
 		DotPaths.write_text(dir.path_join(DotAddonApi.REQUIREMENTS_FILE), "{}\n")
+	for rel: String in extra:
+		DotPaths.write_text(dir.path_join(rel), str(extra[rel]))
 	var res := _publisher("9.0.1").publish(dir, WORK.path_join("refused"))
 	return not res.ok and res.error.code == DotError.CODE_INVALID
 
