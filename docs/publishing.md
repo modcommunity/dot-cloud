@@ -39,6 +39,20 @@ So `ship_import_sources` is off (API level 4): a file is left out when its marke
 
 `DotCloudPublisher.extra_files` maps a pack path to a file anywhere (`{"requires.json": "/tmp/build/requires.json"}`). It exists for a file a build step derives when the source is somebody's checkout: writing it into the tree for the length of a publish leaves an untracked file there whenever the run is killed. Each entry goes through the same path as an imported output (hashed, copied, listed, rewritten if it is a text resource), replaces a source file at the same pack path, and ignores the exclusions because it was named on purpose. A missing file or an unsafe pack path fails the publish, because a pack that ships without its derived file fails later on somebody else's machine. dot-server-deploy's packer adds its derived `requires.json` this way; before the hook it overrode the private `_imported_outputs_for`, which no subclass should touch. Added at dot-cloud API level 2 (`addons/dot_cloud/dot_cloud_api.gd`).
 
+## A file only one side needs: `sides.json`
+
+A game pack goes to its server and to every player, and some of it is only ever read by one of them: baked light a headless server never draws (a game's lightmaps were about 12 MB of its pack), or a server's own tables a client never runs. A `sides.json` at the source root says so, and the publisher writes each matched entry's `side` into the manifest (API level 8):
+
+```json
+{ "client": ["lightmaps/"], "server": ["server/*.json"] }
+```
+
+A pattern ending in `/` is a directory prefix; anything else is a `String.match` glob over the pack path, where `*` crosses `/`. An imported asset's `.import` marker and its relocated `_imported/` output take the side of the asset, so a rule written against the file a person sees covers what ships. `DotCloudPublisher.side_rules` (`{pattern: "client" | "server"}`) adds rules from code and merges with the file. Refused at publish, as `CODE_INVALID`: a pattern that matches nothing (a typo would otherwise ship the files to both sides and say nothing), a file two patterns put on different sides, an unknown key, a side on `requires.json` (both sides read it before mounting), and a server-only entry scene (a client loads it). The file itself ships, like `provides.json`, and goes to both sides.
+
+**In the source, not in one packer's config**, because a game is packed by more than one tool: this CLI, dot-server-deploy's `./server pack --source`, and the site's release sync. The source tree is the one thing all of them read; a rule in one packer's descriptor would leave the other two shipping lightmaps to servers. The site's own manifest builder has to read the same file to tag what it publishes.
+
+The tag is part of the signed payload; how a fetcher uses it, and why an older build is unaffected, is in [mounting.md](mounting.md#a-pack-can-leave-files-out-per-side).
+
 ## A scene's references move with the pack
 
 Godot writes a scene's script and resource references as **absolute** `res://` paths, and a pack does not mount where its content was authored. A published scene naming `res://game/thing.gd`, mounted at `res://dot_cloud/<id>/<version>/`, mounts, loads, and fails only when something calls a method on a script that is not there. It is the same constraint `class_name` has ("the pack is data, the code ships in the build") by a second route, and why every game here uses relative preloads.

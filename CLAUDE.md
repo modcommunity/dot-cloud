@@ -24,7 +24,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
-| [docs/testing.md](docs/testing.md) | the nine demos, the fan-out trap, adding a check |
+| [docs/testing.md](docs/testing.md) | the ten demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
 ## Layout
@@ -32,7 +32,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | Path | What |
 | --- | --- |
 | `addons/dot_cloud/dot_cloud_config.gd` | layered config; `validate()` refuses unsigned by default |
-| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop` |
+| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop`, 7 `client_platform`, 8 `DotCloudFile.side` / `DotCloudConfig.side` / `sides.json` |
 | `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper), `DotCloudProvides` (the `provides` block, strict at publish, tolerant at mount), `DotCloudScriptScan` (`runs_code`) |
 | `addons/dot_cloud/store/` | the content-addressed cache: LRU eviction, refs, the index |
 | `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; the downloader (worker pool, failover, throttle, progress) |
@@ -42,11 +42,11 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | `addons/dot_cloud/addon_set/`, `boot/` | newer addons as packs; the boot scene that mounts the overlay (names no addon class, and must not) |
 | `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
 | `addons/dot_cloud/workshop/` | `DotCloudWorkshop` (registry `dot_workshop`, the solo sync client), `DotCloudWorkshopConfig`, `DotCloudWorkshopList`, `DotCloudWorkshopDevice` (this device's overrides) |
-| `examples/` | the nine demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
+| `examples/` | the ten demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
 - A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
 
@@ -96,6 +96,7 @@ Short forms; the reasoning is in the linked file.
 - An imported asset's source is left out (`ship_import_sources` off, API 4): it was half of every game pack and nothing at runtime opens it. A file whose marker names no output (`keep`) still ships. [publishing](docs/publishing.md#the-source-of-an-imported-asset-stays-behind)
 - The publisher rewrites `res://` paths in `.tscn`/`.tres` onto the mount; binary `.scn`/`.res` it cannot, and the mount registers UIDs instead. [publishing](docs/publishing.md#a-scenes-references-move-with-the-pack)
 - A file in the pack that is not under the source goes in `extra_files` (API 2); never override `_imported_outputs_for`. [publishing](docs/publishing.md#a-file-that-is-not-under-the-source-extra_files)
+- A file only one side needs is declared in the source's `sides.json` (`{"client": [...], "server": [...]}`, API 8); the tag is signed into the entry, and the side a process fetches as is its own `DotCloudConfig.side` (`auto`: headless is server; web is always client). `wanted_files()` is the one filter. [publishing](docs/publishing.md#a-file-only-one-side-needs-sidesjson), [mounting](docs/mounting.md#a-pack-can-leave-files-out-per-side)
 - `DotCloudRegistry` has no caller on purpose: it waits for its site endpoint. [publishing](docs/publishing.md#dotcloudregistry-is-written-and-nothing-calls-it)
 
 **Addon packs**

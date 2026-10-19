@@ -475,6 +475,7 @@ func acquire_manifest(
 		if not started.ok:
 			return started
 
+	_apply_side(manifest)
 	var key := manifest.key()
 
 	if mounter.is_mounted(key):
@@ -543,6 +544,9 @@ func _acquire_inner(
 	if not fits.ok:
 		return _fail(fits.error)
 
+	# Again, after the awaits above: another client in this process (a listen server's
+	# player, a suite) may have stamped the same manifest object with its own side meanwhile.
+	_apply_side(manifest)
 	var honest := _rescan_for_code(manifest)
 	if not honest.ok:
 		return _fail(honest.error)
@@ -673,12 +677,25 @@ func download_manifest(
 		if not started.ok:
 			return started
 
+	_apply_side(manifest)
 	var downloaded := await _download(manifest, groups, manifest.key())
 	if not downloaded.ok:
 		return downloaded
 
 	_set_phase(Phase.READY, "Ready.")
 	return DotResult.success(manifest)
+
+
+## Stamps this client's side ([method DotCloudConfig.resolved_side]) on [param manifest], so
+## its [method DotCloudManifest.wanted_files] leaves out the other side's entries (API 8).
+##
+## On every way in -- acquire, download, plan -- rather than at parse, because a caller may
+## hand in a manifest it parsed itself, and because the side is this process's fact, not
+## the document's: a manifest shared between a server's client and a player's in one
+## process (a listen server, a suite) is re-stamped by whichever is about to use it.
+func _apply_side(manifest: DotCloudManifest) -> void:
+	if config != null:
+		manifest.fetch_side = config.resolved_side()
 
 
 ## The download half of an acquisition, shared by [method acquire_manifest] and
@@ -1280,6 +1297,7 @@ func plan_for(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray()
 ) -> Dictionary:
+	_apply_side(manifest)
 	var wanted := manifest.wanted_files(groups)
 
 	var seen := {}
@@ -1406,6 +1424,8 @@ func describe_lines() -> PackedStringArray:
 	var out := PackedStringArray()
 	out.append("phase            %s" % phase_name(_phase))
 	out.append("session tag      %s" % session_tag)
+	if config != null:
+		out.append("side             %s (%s)" % [config.resolved_side() if config.resolved_side() != "" else "both", config.side])
 
 	if store != null:
 		out.append_array(store.describe_lines())

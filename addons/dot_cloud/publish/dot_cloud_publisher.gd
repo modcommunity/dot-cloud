@@ -33,6 +33,10 @@ const CHANNEL := "cloud.pub"
 ## The file at the source root that says what the pack offers a game.
 const PROVIDES_FILE := "provides.json"
 
+## The file at the source root that says which files only one side fetches (API 8):
+## [code]{"client": ["lightmaps/"], "server": ["server/*.json"]}[/code]. See [member side_rules].
+const SIDES_FILE := "sides.json"
+
 var content_id: String = ""
 var version: String = "0.0.0"
 var display_name: String = ""
@@ -255,6 +259,24 @@ var optional_prefixes: PackedStringArray = PackedStringArray()
 ## Restricts files to platforms by path prefix, as [code]prefix -> [tags][/code].
 var platform_rules: Dictionary = {}
 
+## Files only one side of a game fetches, as [code]pattern -> "client" | "server"[/code]
+## (API 8), merged with the source's [constant SIDES_FILE]. Written into each entry's
+## [member DotCloudFile.side], inside the signed payload.
+##
+## A pattern ending in [code]/[/code] is a directory prefix; anything else is a
+## [method String.match] glob over the pack path, where [code]*[/code] crosses
+## [code]/[/code]. An imported asset's marker and its relocated output take the side of the
+## source asset, so [code]"textures/hd/"[/code] covers the [code]_imported/[/code] file
+## too.
+##
+## [b]In the source tree rather than in one publisher's config,[/b] because a game is packed
+## by more than one tool (this class's CLI, a server's packer, the site's release sync) and
+## the source is the one thing all of them read. Refused at publish: a pattern that matches
+## nothing (a typo would ship the files to both sides and say nothing), a file two patterns
+## put on different sides, a side tag on the pack's [code]requires.json[/code] (both sides
+## check it before mounting), and a server-only entry scene (a client loads it).
+var side_rules: Dictionary = {}
+
 
 # --- Publishing ------------------------------------------------------------
 
@@ -364,6 +386,11 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		return provided
 	manifest.provides = provided.value
 
+	var sided := _sides_for(source_dir, relatives, imported["owners"])
+	if not sided.ok:
+		return sided
+	var sides: Dictionary = sided.value
+
 	var written := 0
 	var deduped := 0
 	var total_bytes := 0
@@ -439,6 +466,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		entry.required = not _is_optional(entry.path)
 		entry.groups = _groups_for(entry.path)
 		entry.platforms = _platforms_for(entry.path)
+		entry.side = str(sides.get(rel, DotCloudFile.SIDE_BOTH))
 
 		var checked := entry.validate()
 		if not checked.ok:
@@ -509,6 +537,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			"objects": seen.size(),
 			"deduped": deduped,
 			"sources_dropped": dropped.size(),
+			"sided": sides.size(),
 			"provides": manifest.provides.get("entries", []).size() if not manifest.provides.is_empty() else -1,
 			"runs_code": bool(manifest.provides.get("runs_code", false)),
 			"written": written,
@@ -528,6 +557,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"rewritten": rewritten,
 		"deduped": deduped,
 		"sources_dropped": dropped.size(),
+		"sided": sides.size(),
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
 	})
@@ -588,6 +618,125 @@ func _provides_for(
 			"content": content_id, "why": ", ".join((scanned.value as Dictionary)["reasons"]),
 		})
 	return DotResult.success(provides)
+
+
+## Each pack path's side, from [member side_rules] and the source's [constant SIDES_FILE];
+## a path in no rule is absent (both sides). [param owners] maps a relocated imported output
+## to the source asset it stands for.
+func _sides_for(source_dir: String, relatives: PackedStringArray, owners: Dictionary) -> DotResult:
+	var rules := {}
+	for pattern: Variant in side_rules:
+		rules[str(pattern)] = str(side_rules[pattern])
+
+	var file := source_dir.path_join(SIDES_FILE)
+	if FileAccess.file_exists(file):
+		var read := DotPaths.read_json(file)
+		if not read.ok:
+			return read.wrap("Could not read %s." % SIDES_FILE)
+		if not (read.value is Dictionary):
+			return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % SIDES_FILE)
+		var doc: Dictionary = read.value
+		for key: Variant in doc:
+			if not str(key) in [DotCloudFile.SIDE_CLIENT, DotCloudFile.SIDE_SERVER]:
+				return DotResult.fail(
+					DotError.CODE_INVALID,
+					"%s: unknown key '%s'." % [SIDES_FILE, key],
+					"expected client and server, each a list of patterns"
+				)
+			if not (doc[key] is Array):
+				return DotResult.fail(
+					DotError.CODE_INVALID, "%s: '%s' must be a list." % [SIDES_FILE, key]
+				)
+			for pattern: Variant in (doc[key] as Array):
+				var p := str(pattern)
+				if rules.has(p) and rules[p] != str(key):
+					return DotResult.fail(
+						DotError.CODE_INVALID,
+						"%s: '%s' is listed for both sides." % [SIDES_FILE, p]
+					)
+				rules[p] = str(key)
+
+	var out := {}
+	if rules.is_empty():
+		return DotResult.success(out)
+
+	for pattern: String in rules:
+		var want: String = rules[pattern]
+		if not want in [DotCloudFile.SIDE_CLIENT, DotCloudFile.SIDE_SERVER]:
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"Side rule '%s' names side '%s'." % [pattern, want],
+				"a side is client or server; a file in no rule goes to both"
+			)
+		if pattern.strip_edges() == "" or pattern.begins_with("res://") or pattern.begins_with("/"):
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"Side rule '%s' is not a pack path." % pattern,
+				"patterns are relative to the source root, like lightmaps/ or maps/*.res"
+			)
+
+	var hits := {}
+	for rel in relatives:
+		# The marker and the relocated output of an imported asset follow the asset, so a
+		# rule written against the file a person sees covers what actually ships.
+		var names := PackedStringArray([rel])
+		if rel.ends_with(".import"):
+			names.append(rel.trim_suffix(".import"))
+		if owners.has(rel):
+			names.append(str(owners[rel]))
+
+		var side := DotCloudFile.SIDE_BOTH
+		for pattern: String in rules:
+			var matched := false
+			for n in names:
+				if _side_pattern_matches(pattern, n):
+					matched = true
+					break
+			if not matched:
+				continue
+			hits[pattern] = true
+			if side != DotCloudFile.SIDE_BOTH and side != rules[pattern]:
+				return DotResult.fail(
+					DotError.CODE_INVALID,
+					"'%s' is put on both sides by the side rules." % rel,
+					"pattern '%s' says %s" % [pattern, rules[pattern]]
+				)
+			side = rules[pattern]
+
+		if side == DotCloudFile.SIDE_BOTH:
+			continue
+
+		# Both sides read requires.json before they mount (DotCloudClient.check_requirements).
+		if rel == DotAddonApi.REQUIREMENTS_FILE:
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"%s cannot be one side's file." % rel,
+				"both sides check it before mounting; narrow the side rule"
+			)
+		if rel == entry_scene and side == DotCloudFile.SIDE_SERVER:
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"The entry scene '%s' cannot be server-only." % rel,
+				"a client loads the entry scene"
+			)
+		out[rel] = side
+
+	for pattern: String in rules:
+		if not hits.has(pattern):
+			return DotResult.fail(
+				DotError.CODE_INVALID,
+				"Side rule '%s' matches nothing in the pack." % pattern,
+				"a typo here ships those files to both sides and says nothing"
+			)
+
+	DotLog.debug(CHANNEL, "side rules applied", {"content": content_id, "sided": out.size()})
+	return DotResult.success(out)
+
+
+static func _side_pattern_matches(pattern: String, rel: String) -> bool:
+	if pattern.ends_with("/"):
+		return rel.begins_with(pattern)
+	return rel.match(pattern)
 
 
 ## Files to publish, as paths relative to [param source_dir].
@@ -680,7 +829,8 @@ func _imported_outputs_for(
 	var out := {}
 	var remap := {}
 	var sources := {}
-	var empty := {"files": out, "remap": remap, "sources": sources}
+	var owners := {}
+	var empty := {"files": out, "remap": remap, "sources": sources, "owners": owners}
 
 	if not include_imported:
 		return empty
@@ -708,8 +858,9 @@ func _imported_outputs_for(
 			out[landed] = root.path_join(hit)
 			remap[hit] = landed
 			sources[rel.trim_suffix(".import")] = true
+			owners[landed] = rel.trim_suffix(".import")
 
-	return {"files": out, "remap": remap, "sources": sources}
+	return {"files": out, "remap": remap, "sources": sources, "owners": owners}
 
 
 ## Every `res://…` path in a text blob, as paths relative to the project root.

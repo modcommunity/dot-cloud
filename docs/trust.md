@@ -48,5 +48,6 @@ A bare PEM in `trusted_keys` is trusted for every content id there is. With two 
 ## Other boundaries
 
 - The in-band source's delegate must refuse hashes the client has no business requesting, or it is a way to read the server's cache ([sources.md](sources.md#the-in-band-source)).
+- A manifest entry's `side` (API 8) is inside the signed payload, and the side a process fetches as is its own `DotCloudConfig.side`, never something a server sends ([mounting.md](mounting.md#a-pack-can-leave-files-out-per-side)).
 - A local source still verifies hashes: a development source is being edited, so it is not automatically trustworthy.
 - An addon overlay is admitted only signed, only upward and only from configured namespaces ([addon-packs.md](addon-packs.md#what-keeps-it-from-doing-harm)).

@@ -46,6 +46,25 @@ extends Resource
 ## from a directory laid out by name instead.
 @export var url_path: String = ""
 
+const SIDE_BOTH := ""
+const SIDE_CLIENT := "client"
+const SIDE_SERVER := "server"
+
+## The side that fetches this file: [constant SIDE_BOTH] (the default, and what every entry
+## published before dot-cloud API 8 is), [constant SIDE_CLIENT] or [constant SIDE_SERVER].
+##
+## A dedicated server never draws, so a game's baked light is megabytes it downloads,
+## verifies and caches for nothing; a client never runs the server's own tables. The tag
+## is in the manifest payload and therefore under the signature: a server or mirror that
+## flips it breaks the signature rather than talking a client out of a file it needs.
+## The side asking is the fetcher's own setting ([member DotCloudConfig.side]), never
+## something the document or a server says about the reader.
+##
+## [b]A field, not a platform tag.[/b] [member platforms] matches [method OS.has_feature],
+## and "this process is the server" is not a feature: one binary is both, headless test
+## clients exist, and a listen server is a client that also serves.
+@export var side: String = SIDE_BOTH
+
 
 static func from_dict(d: Dictionary) -> DotResult:
 	var f := DotCloudFile.new()
@@ -55,6 +74,7 @@ static func from_dict(d: Dictionary) -> DotResult:
 	f.size = int(d.get("size", 0))
 	f.required = bool(d.get("required", true))
 	f.url_path = str(d.get("url_path", ""))
+	f.side = str(d.get("side", SIDE_BOTH))
 
 	for g in d.get("groups", []):
 		f.groups.append(str(g))
@@ -85,6 +105,10 @@ func to_dict() -> Dictionary:
 		d["platforms"] = Array(platforms)
 	if url_path != "":
 		d["url_path"] = url_path
+	# Omitted for both sides, so an untagged pack serialises to exactly the bytes it did
+	# before API 8 and its signature is unchanged by this field existing.
+	if side != SIDE_BOTH:
+		d["side"] = side
 	return d
 
 
@@ -118,6 +142,16 @@ func validate() -> DotResult:
 		if not safe_url.ok:
 			return safe_url.wrap("Manifest entry has an unsafe url_path.")
 
+	# Refused rather than read as "both": a signed document naming a side this build does
+	# not know is one it does not understand, and guessing either way fetches the wrong
+	# set. A new side would be a new API level, as this field was.
+	if not side in [SIDE_BOTH, SIDE_CLIENT, SIDE_SERVER]:
+		return DotResult.fail(
+			DotError.CODE_INVALID,
+			"Manifest entry has an unknown side.",
+			"%s: '%s' (expected client, server, or no side for both)" % [path, side]
+		)
+
 	return DotResult.success(true)
 
 
@@ -129,6 +163,14 @@ func wanted_on_this_platform() -> bool:
 		if OS.has_feature(tag):
 			return true
 	return false
+
+
+## Whether a fetcher running as [param fetch_side] wants this file.
+##
+## [param fetch_side] [constant SIDE_BOTH] wants everything, which is what a caller that
+## never chose a side gets: the behaviour of every build before API 8.
+func wanted_on_side(fetch_side: String) -> bool:
+	return side == SIDE_BOTH or fetch_side == SIDE_BOTH or side == fetch_side
 
 
 ## Whether this file is in any of [param selected] groups.

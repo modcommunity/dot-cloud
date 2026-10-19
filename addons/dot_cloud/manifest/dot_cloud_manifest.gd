@@ -77,6 +77,18 @@ const FORMAT_VERSION := 1
 ## Format version the document declared.
 var format_version: int = FORMAT_VERSION
 
+## The side this process fetches and mounts the manifest as ([constant DotCloudFile.SIDE_BOTH],
+## [code]SIDE_CLIENT[/code] or [code]SIDE_SERVER[/code]); [method wanted_files] leaves out the
+## entries tagged for the other side.
+##
+## [b]Not part of the document.[/b] Not exported, not in [method to_dict], never parsed:
+## which side reads a manifest is the reader's fact, set by [DotCloudClient] from its own
+## [member DotCloudConfig.side], and nothing a server sends can move it. Filtering in
+## [method wanted_files] rather than at each caller is what keeps the downloader, the
+## mounter's "everything required is present" and "readable after mounting" checks and the
+## code rescan agreeing: a file this side skipped is not one any of them asks about.
+var fetch_side: String = DotCloudFile.SIDE_BOTH
+
 ## Signature from the enclosing [DotCloudEnvelope]. Empty for unsigned content.
 ##
 ## Not an [code]@export[/code] and not part of [method to_dict]: the signature
@@ -408,6 +420,8 @@ func wanted_files(groups: PackedStringArray = PackedStringArray()) -> Array[DotC
 	for f in files:
 		if not f.wanted_on_this_platform():
 			continue
+		if not f.wanted_on_side(fetch_side):
+			continue
 		if not f.in_groups(groups):
 			continue
 		out.append(f)
@@ -432,6 +446,15 @@ func group_names() -> PackedStringArray:
 	return out
 
 
+## Entries tagged for one side only, as [code]{"client": n, "server": n}[/code].
+func side_counts() -> Dictionary:
+	var out := {DotCloudFile.SIDE_CLIENT: 0, DotCloudFile.SIDE_SERVER: 0}
+	for f in files:
+		if f.side != DotCloudFile.SIDE_BOTH:
+			out[f.side] = int(out.get(f.side, 0)) + 1
+	return out
+
+
 ## Unique content hashes. Shorter than [member files] when a file appears twice
 ## under different paths, which deduplication makes free.
 func unique_hashes() -> PackedStringArray:
@@ -452,6 +475,8 @@ func describe() -> Dictionary:
 		"signed": signature != "",
 		"mirrors": mirrors.size(),
 		"groups": Array(group_names()),
+		"sided": side_counts(),
+		"fetch_side": fetch_side if fetch_side != DotCloudFile.SIDE_BOTH else "both",
 	}
 
 

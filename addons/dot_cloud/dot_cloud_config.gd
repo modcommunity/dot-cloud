@@ -126,6 +126,20 @@ extends DotConfig
 
 @export_group("Mounting")
 
+## Which side of a game this process fetches packs as: [code]auto[/code], [code]client[/code],
+## [code]server[/code] or [code]both[/code] (API 8). A manifest entry tagged for the other side
+## ([member DotCloudFile.side]) is never downloaded, cached, mounted or checked for.
+##
+## [code]auto[/code] is [code]server[/code] on a headless process and [code]client[/code]
+## everywhere else. A host that knows what it is says so: a dedicated server sets
+## [code]server[/code], and a client shell that also runs headless in tests sets
+## [code]client[/code], so a test client fetches what a player's does. [code]both[/code] is a
+## listen server, a tool that republishes or inspects packs, and the pre-API-8 behaviour.
+##
+## [b]A web build is always [code]client[/code],[/b] whatever this says: a browser can only
+## be a client (see [method resolved_side]).
+@export_enum("auto", "client", "server", "both") var side: String = "auto"
+
 ## Verify that no mounted path escapes the manifest's mount prefix.
 ##
 ## Belt and braces — [DotPaths.safe_relative] already refuses traversal at parse
@@ -235,7 +249,33 @@ func validate() -> DotResult:
 			DotError.CODE_INVALID, "parallel_downloads must be at least 1."
 		)
 
+	# A typo here (`sever`) would otherwise read as "both" and fetch everything, which works
+	# and quietly undoes the setting; or as a side that matches nothing.
+	if not side in ["auto", "client", "server", "both"]:
+		return DotResult.fail(
+			DotError.CODE_INVALID,
+			"side must be auto, client, server or both.",
+			"got '%s'" % side
+		)
+
 	return DotResult.success(null)
+
+
+## [member side] as the value a manifest filters on: [constant DotCloudFile.SIDE_CLIENT],
+## [constant DotCloudFile.SIDE_SERVER], or [constant DotCloudFile.SIDE_BOTH] for both.
+func resolved_side() -> String:
+	# Web builds are clients only (no listening sockets, no dedicated export), so a config
+	# file shared with the desktop build cannot make a browser skip client content.
+	if DotPlatform.is_web():
+		return DotCloudFile.SIDE_CLIENT
+	match side:
+		"client":
+			return DotCloudFile.SIDE_CLIENT
+		"server":
+			return DotCloudFile.SIDE_SERVER
+		"both":
+			return DotCloudFile.SIDE_BOTH
+	return DotCloudFile.SIDE_SERVER if DotPlatform.is_headless() else DotCloudFile.SIDE_CLIENT
 
 
 ## The cache ceiling for the platform actually running.

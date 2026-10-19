@@ -17,5 +17,8 @@ extends RefCounted
 # 6: DotCloudWorkshop (workshop/): the sync client, DotCloudWorkshopConfig / List / Device, registry name dot_workshop.
 # 7: DotCloudWorkshop.client_platform / request_platform / force_platform (the site reviews
 #    script packs per platform).
-const LEVEL := 7
+# 8: DotCloudFile.side (client / server, signed in the manifest), DotCloudConfig.side and
+#    resolved_side(), DotCloudManifest.fetch_side / side_counts(), DotCloudPublisher.side_rules
+#    and the source's sides.json. An older build ignores the field and fetches both sides.
+const LEVEL := 8
 const OLDEST := 1

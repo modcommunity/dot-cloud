@@ -30,6 +30,18 @@ dot-cloud reads the pack's `requires.json` (dot-core's `DotAddonApi`: `{"addons"
 
 A game pack mounted at a prefix carries no global class list, so its own scripts cannot use `class_name`; games reference their files by path. (An addon overlay mounted at the root can add class names: see [addon-packs.md](addon-packs.md#three-engine-facts).)
 
+## A pack can leave files out per side
+
+A manifest entry may carry `"side": "client"` or `"side": "server"` (`DotCloudFile.side`, API level 8; written from the source's `sides.json`, see [publishing.md](publishing.md#a-file-only-one-side-needs-sidesjson)). An entry with no `side` is for both, which is every entry published before the field existed and every file no rule matched.
+
+**The fetcher decides which side it is, never the document.** `DotCloudConfig.side` is `auto`, `client`, `server` or `both`; `auto` is `server` on a headless process and `client` otherwise, and a web build resolves to `client` whatever the setting says (`resolved_side()`), because a browser can only be a client. A host that knows what it is says so: dot-server-deploy's server and its installer set `server`, its client shell sets `client` (so a suite running the shell headless fetches what a player fetches), and a listen server or a tool that inspects packs sets `both`. `DotCloudClient` stamps the resolved side on the manifest (`DotCloudManifest.fetch_side`, not part of the document) on every way in: `acquire_manifest`, `download_manifest`, `plan_for`.
+
+**Filtered in one place.** `DotCloudManifest.wanted_files()` leaves out the other side's entries, and it is the list the downloader queues, the plan counts, the mounter checks for "everything required is present", builds the pack from, checks for "readable after mounting" and registers UIDs from, and the code rescan reads. A required lightmap a server skipped is therefore never reported missing on the server, and is still required on a client. Nothing is shared across sides in the cache except by hash.
+
+**Signed.** The tag is in the payload the signature covers: a server or mirror that flips `client` to `server`, or drops the tag, breaks the signature, so nobody can talk a client out of a file it needs with an unsigned field. An unknown side value is refused at parse (`CODE_INVALID`), like any other entry the document is wrong about.
+
+**An older build mounts a tagged pack unchanged.** `DotCloudFile.from_dict` has always ignored keys it does not know, so a build below API 8 reads a tagged entry as an untagged one and fetches both sides, as before. No format version bump: a tagged pack needs nothing new of its reader, it only lets a new one fetch less. An untagged entry serialises without the key, so a pack with no `sides.json` publishes byte-identical manifests and signatures.
+
 ## UIDs at mount
 
 An imported asset's binary form refers to its dependencies by UID with the authored absolute path as a fallback, and neither survives being mounted somewhere else. `DotCloudMounter._register_uids` walks the pack's `.import` markers after the mount and points each UID at the mounted copy; see [publishing.md](publishing.md#binary-imports-are-fixed-at-mount). The count is in the mount's log line (`uids=N`).
