@@ -14,7 +14,7 @@ extends Node
 
 const WORK := "user://dot_cloud_workshop_sync_demo"
 const GAME := "gamemann/game-playground"
-const CHECKS := 90
+const CHECKS := 92
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -237,14 +237,32 @@ func _check_first_sync_and_cache() -> void:
 func _check_unchanged() -> void:
 	_line("")
 	_line("[b]unchanged revision[/b]")
-	# Forced here so the one platform the headless run is not (web) is seen on the wire too.
+	# A native build may not claim the browser: web approvals are not approvals to run here.
+	var refusals: Array = []
+	var on_log := func(rec: Dictionary) -> void:
+		if str(rec.get("message", "")).begins_with("force_platform refused"):
+			refusals.append(rec)
+	DotLog.set_channel_level(DotCloudWorkshop.CHANNEL, DotLog.Level.WARN)
+	DotLog.signals().record.connect(on_log)
 	_ws.force_platform = "Web"
 	var res := await _ws.sync(GAME)
+	var again := _ws.request_platform()
+	_ws.force_platform = " Mobile "
+	var mobile := _ws.request_platform()
 	_ws.force_platform = ""
+	DotLog.signals().record.disconnect(on_log)
+	DotLog.set_channel_level(DotCloudWorkshop.CHANNEL, DotLog.Level.ERROR)
 	var s: Dictionary = res.value
 	var req := _last_request()
 	_check(req.get("query", {}).get("since") == "w1:one", "the request carries the cached revision as since")
-	_check(req.get("query", {}).get("platform") == "web", "force_platform overrides the platform sent, normalised", str(req.get("query", {}).get("platform")))
+	var own := DotCloudWorkshop.client_platform()
+	if own == "web":
+		_check(req.get("query", {}).get("platform") == "web" and again == "web", "a browser build may force web", str(req.get("query", {}).get("platform")))
+		_check(refusals.is_empty(), "and nothing is refused")
+	else:
+		_check(req.get("query", {}).get("platform") == own and again == own, "force_platform=web is refused on a native build, which sends its own", str(req.get("query", {}).get("platform")))
+		_check(refusals.size() == 1, "and the refusal is logged once", str(refusals.size()))
+	_check(mobile == "mobile", "a native platform can be forced, normalised", mobile)
 	_check(s["from_cache"] and not s["offline"] and s["revision"] == "w1:one", "an unchanged answer keeps the cached list, online")
 	_check(_ids(s["mounted"]) == PackedStringArray(["ws_a", "ws_b"]), "the cached list's packs are mounted again (already mounted, tagged)")
 	_check(_ws.last_list().items().size() == 2, "last_list still holds both items")

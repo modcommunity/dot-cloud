@@ -69,15 +69,20 @@ var force_metered: int = -1
 ## The platform sent with the list request, [code]web[/code], [code]desktop[/code] or
 ## [code]mobile[/code]; empty asks [method client_platform]. The site holds its code-review
 ## policy per platform (a browser's sandbox apart from a native build's whole machine), so this
-## decides which script packs it lists. Forcing it is for tests and for a host that knows
-## better; claiming [code]web[/code] on a native build only gets packs reviewed for the
-## browser, which [member DotCloudWorkshopConfig.workshop_script_packs] still filters.
+## decides which script packs it lists, and the [code]approved[/code] it reports is approval
+## for that platform. Forcing it is for tests and for a host that knows better, and only ever
+## toward the stricter side: [code]web[/code] is refused unless this build is a browser one
+## (logged once, and [method client_platform] is sent instead), because a pack cleared for the
+## browser's sandbox may still call [code]OS.execute[/code], which only a native build can run.
+## [code]desktop[/code] and [code]mobile[/code] are both native and always accepted; anything
+## else is refused the same way.
 var force_platform: String = ""
 
 var device: DotCloudWorkshopDevice = null
 
 var _http: DotHttp = null
 var _prepared: bool = false
+var _platform_refusal_logged: bool = false
 var _syncing: bool = false
 var _game_id: String = ""
 var _list: DotCloudWorkshopList = null
@@ -460,6 +465,9 @@ func _may_download(planned: Array[Dictionary], bytes: int) -> bool:
 	return answer == true
 
 
+## [param approved] is the site's verdict for [method request_platform], which never claims a
+## looser platform than this build is; so "approved" here always means approved for code that
+## can run on this machine, and the policy below is the client's own floor on top of it.
 func _script_allowed(runs_code: bool, approved: bool) -> bool:
 	if not runs_code:
 		return true
@@ -537,10 +545,23 @@ func _token() -> String:
 	return str(token_fn.call())
 
 
-## The platform this instance sends: [member force_platform] when set, else [method client_platform].
+## The platform this instance sends: [member force_platform] when set and allowed, else
+## [method client_platform]. The site trusts this claim only for the client's own safety (it
+## decides what is listed as approved), so a native build never claims [code]web[/code].
 func request_platform() -> String:
 	var forced := force_platform.strip_edges().to_lower()
-	return forced if forced != "" else client_platform()
+	if forced == "":
+		return client_platform()
+	var own := client_platform()
+	var native_ok := forced == "desktop" or forced == "mobile"
+	if forced == own or native_ok:
+		return forced
+	if not _platform_refusal_logged:
+		_platform_refusal_logged = true
+		DotLog.warn(CHANNEL, "force_platform refused: this build is not that platform", {
+			"forced": forced, "sent": own,
+		})
+	return own
 
 
 ## The second lock behind the shell's own: a join in progress, or a session already online.
