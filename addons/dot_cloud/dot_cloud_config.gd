@@ -100,6 +100,10 @@ extends DotConfig
 ## request nodes.
 @export_range(1, 32, 1) var parallel_downloads: int = 12
 
+## Fetch a manifest's bundle (one archive of its small objects) when enough are missing.
+@export var use_bundles: bool = true
+@export var bundle_min_missing: int = 8
+
 ## Resume partial downloads with HTTP range requests.
 ##
 ## Requires the content host to support ranges — and on web, to expose

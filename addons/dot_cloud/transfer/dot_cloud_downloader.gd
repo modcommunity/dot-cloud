@@ -215,6 +215,30 @@ func sync(
 		sync_finished.emit(done)
 		return done
 
+	# One request for the long tail of small files, when enough of them are missing.
+	var from_bundle := await _try_bundle(manifest, todo)
+	if from_bundle > 0:
+		var left: Array[DotCloudFile] = []
+		for f in todo:
+			if store.has(f.sha256):
+				_done_files += 1
+				_note_bytes(f.size)
+			else:
+				left.append(f)
+		todo = left
+		skipped += from_bundle
+		if todo.is_empty():
+			store.add_refs(manifest.key(), manifest.unique_hashes())
+			store.flush_index()
+			_running = false
+			var all_done := DotResult.success({
+				"fetched": from_bundle, "skipped": skipped - from_bundle, "failed": 0,
+				"bytes": _done_bytes,
+			})
+			_emit_progress(true)
+			sync_finished.emit(all_done)
+			return all_done
+
 	# Make room before starting rather than discovering the cache is full at
 	# byte 900,000,000. A shortfall we cannot meet is reported now, while the
 	# player can still be told something useful.
@@ -357,6 +381,38 @@ func sync(
 	_emit_progress(true)
 	sync_finished.emit(outcome)
 	return outcome
+
+
+## Fetches the manifest's bundle when it would carry enough of what is missing, and returns
+## how many objects it put in the store (0: not used, or it failed and per-file takes over).
+func _try_bundle(manifest: DotCloudManifest, todo: Array[DotCloudFile]) -> int:
+	var decl := manifest.usable_bundle()
+	if decl.is_empty() or not config.use_bundles:
+		return 0
+	var cap := int(decl["max_object_bytes"])
+	var wanted := {}
+	var bytes := 0
+	for f in todo:
+		if f.size <= cap:
+			wanted[f.sha256] = true
+			bytes += f.size
+	# A refresh that lacks three files should ask for three files, not a whole archive.
+	if wanted.size() < config.bundle_min_missing or bytes * 2 < int(decl["size"]):
+		return 0
+	_active_files.append("content bundle")
+	_emit_progress(true)
+	var got := 0
+	for s in _ordered_sources(manifest, [] as Array[String]):
+		if not s.has_method("fetch_bundle"):
+			continue
+		var res: DotResult = await s.fetch_bundle(manifest, store, scheduler, wanted)
+		if res.ok:
+			got = int(res.value["objects"])
+			break
+		DotLog.warn(CHANNEL, "bundle failed; fetching files one by one", {"why": str(res.error)})
+	_active_files.erase("content bundle")
+	DotLog.info(CHANNEL, "bundle", {"content": manifest.key(), "objects": got, "of": wanted.size()})
+	return got
 
 
 ## One pool worker: takes the next queued file until the queue is empty.

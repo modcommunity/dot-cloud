@@ -24,7 +24,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
-| [docs/testing.md](docs/testing.md) | the ten demos, the fan-out trap, adding a check |
+| [docs/testing.md](docs/testing.md) | the eleven demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
 ## Layout
@@ -42,11 +42,11 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | `addons/dot_cloud/addon_set/`, `boot/` | newer addons as packs; the boot scene that mounts the overlay (names no addon class, and must not) |
 | `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
 | `addons/dot_cloud/workshop/` | `DotCloudWorkshop` (registry `dot_workshop`, the solo sync client), `DotCloudWorkshopConfig`, `DotCloudWorkshopList`, `DotCloudWorkshopDevice` (this device's overrides) |
-| `examples/` | the ten demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
+| `examples/` | the eleven demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `bundle_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
 - A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
 

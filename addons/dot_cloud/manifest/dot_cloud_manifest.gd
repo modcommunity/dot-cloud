@@ -74,6 +74,12 @@ const FORMAT_VERSION := 1
 ## anything is downloaded.
 @export var provides: Dictionary = {}
 
+## One archive holding every small object, so a first load is one request instead of
+## thousands: `{sha256, size, count, max_object_bytes, url_path}`. Empty when the publisher wrote
+## none. A ZIP of objects each named by its own hash; the client verifies the archive and then
+## every entry, so it adds no trust. Signed with the rest of the payload.
+@export var bundle: Dictionary = {}
+
 ## Format version the document declared.
 var format_version: int = FORMAT_VERSION
 
@@ -173,6 +179,8 @@ static func from_dict(d: Dictionary) -> DotResult:
 		m.metadata = d["metadata"]
 	if d.get("provides") is Dictionary:
 		m.provides = d["provides"]
+	if d.get("bundle") is Dictionary:
+		m.bundle = d["bundle"]
 
 	for u in d.get("mirrors", []):
 		m.mirrors.append(str(u))
@@ -356,6 +364,8 @@ func to_dict() -> Dictionary:
 		d["metadata"] = metadata
 	if not provides.is_empty():
 		d["provides"] = provides
+	if not bundle.is_empty():
+		d["bundle"] = bundle
 
 	# Sorted by hash so the serialisation is deterministic regardless of the
 	# order the publisher walked the source directory. Without this, two
@@ -369,6 +379,22 @@ func to_dict() -> Dictionary:
 		d["files"].append(f.to_dict())
 
 	return d
+
+
+## The bundle's declaration, validated, or an empty dictionary when there is none or it is
+## malformed (a bad bundle is ignored, never fatal: every object is still fetchable alone).
+func usable_bundle() -> Dictionary:
+	if bundle.is_empty():
+		return {}
+	var sha := str(bundle.get("sha256", ""))
+	var url := str(bundle.get("url_path", ""))
+	if sha.length() != 64 or not sha.is_valid_hex_number(false):
+		return {}
+	if url == "" or url.begins_with("/") or ".." in url or "\\" in url or "://" in url:
+		return {}
+	if int(bundle.get("size", 0)) <= 0 or int(bundle.get("max_object_bytes", 0)) <= 0:
+		return {}
+	return bundle
 
 
 func to_json(pretty: bool = true) -> String:

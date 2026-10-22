@@ -20,5 +20,7 @@ extends RefCounted
 # 8: DotCloudFile.side (client / server, signed in the manifest), DotCloudConfig.side and
 #    resolved_side(), DotCloudManifest.fetch_side / side_counts(), DotCloudPublisher.side_rules
 #    and the source's sides.json. An older build ignores the field and fetches both sides.
-const LEVEL := 8
+# 9: DotCloudManifest.bundle (one ZIP of the small objects, signed), DotCloudPublisher.write_bundle,
+#    DotCloudConfig.use_bundles; the HTTP source's fetch_bundle. An older client ignores the field.
+const LEVEL := 9
 const OLDEST := 1

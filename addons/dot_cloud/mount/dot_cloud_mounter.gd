@@ -135,12 +135,16 @@ func mount(
 			"%d file(s) missing, first: %s" % [missing.size(), missing[0]]
 		)
 
-	if config.verify_before_mount and scheduler != null:
+	var pack_path := _pack_path(manifest, wanted)
+
+	# A pack already built is what gets mounted, and it was assembled from objects verified when
+	# they were committed. Re-hashing every object on each refresh cost seconds of a tab's main
+	# thread (no worker threads on web) to re-prove what the pack's name already fingerprints.
+	var pack_cached := FileAccess.file_exists(pack_path)
+	if config.verify_before_mount and scheduler != null and not pack_cached:
 		var verified := await _verify_objects(wanted, store, scheduler)
 		if not verified.ok:
 			return verified
-
-	var pack_path := _pack_path(manifest, wanted)
 
 	var built := _build_pack(manifest, store, wanted, pack_path)
 	if not built.ok:

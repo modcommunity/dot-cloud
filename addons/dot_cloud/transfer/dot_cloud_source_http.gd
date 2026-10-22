@@ -214,6 +214,78 @@ func fetch(
 ## The manifest's own mirrors win over the source's configured ones: the server
 ## knows where its content actually is, and a client's baked-in default will be
 ## wrong the first time content moves.
+## Downloads the manifest's bundle (one ZIP of small objects) and commits every entry that
+## [param wanted] names, verifying the archive's hash and then each entry's own. One request
+## instead of one per object. Returns `{objects, bytes}`; a failure leaves the per-file path
+## to fetch whatever is still missing, so it is never fatal to the sync.
+func fetch_bundle(
+	manifest: DotCloudManifest,
+	store: DotCloudStore,
+	scheduler: DotScheduler,
+	wanted: Dictionary
+) -> DotResult:
+	var decl := manifest.usable_bundle()
+	if decl.is_empty():
+		return DotResult.fail(DotError.CODE_INVALID, "The manifest declares no usable bundle.")
+	var supported := is_supported()
+	if not supported.ok:
+		return supported
+	var sha := str(decl["sha256"]).to_lower()
+	var part := store.partial_path(sha)
+	var last: DotResult = DotResult.fail(DotError.CODE_NETWORK, "Every content mirror failed.")
+
+	for base in _resolve_bases(manifest):
+		var url := "%s/%s" % [base.trim_suffix("/"), str(decl["url_path"]).trim_prefix("/")]
+		store.discard_partial(sha)
+		var res := await http.download_to_file(url, part, 0, headers)
+		if not res.ok:
+			last = res
+			note_failure()
+			continue
+		var checked: DotResult = await scheduler.run(DotHashJob.new(part, sha)) \
+			if scheduler != null else DotResult.success(true)
+		if not checked.ok:
+			last = checked
+			note_failure()
+			store.discard_partial(sha)
+			continue
+		_preferred_base = base
+		var out := await _unpack_bundle(part, store, wanted)
+		store.discard_partial(sha)
+		if out.ok:
+			note_success()
+		return out
+	return last.wrap("Could not fetch the content bundle.")
+
+
+func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> DotResult:
+	var zip := ZIPReader.new()
+	var err := zip.open(path)
+	if err != OK:
+		return DotResult.failure(DotError.from_engine(err, "opening the content bundle"))
+	var objects := 0
+	var bytes := 0
+	var tree := Engine.get_main_loop() as SceneTree
+	var slice_start := Time.get_ticks_msec()
+	for entry in zip.get_files():
+		if not wanted.has(entry) or store.has(entry):
+			continue
+		var body := zip.read_file(entry)
+		var put := store.put_bytes(body, entry)
+		if not put.ok:
+			DotLog.warn(CHANNEL, "bundle entry failed verification", {"entry": entry.substr(0, 12)})
+			continue
+		objects += 1
+		bytes += body.size()
+		# Hashing thousands of entries in one frame freezes a browser tab.
+		if tree != null and Time.get_ticks_msec() - slice_start > 8:
+			await tree.process_frame
+			slice_start = Time.get_ticks_msec()
+	zip.close()
+	DotWeb.sync_filesystem()
+	return DotResult.success({"objects": objects, "bytes": bytes})
+
+
 func _resolve_bases(manifest: DotCloudManifest) -> PackedStringArray:
 	var out := PackedStringArray()
 

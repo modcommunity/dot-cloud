@@ -11,6 +11,7 @@ extends RefCounted
 ## [codeblock]
 ## <out>/manifest.json              the signed manifest
 ## <out>/objects/<aa>/<full-hash>   one file per unique content hash
+## <out>/bundles/<hash>.zip         the small objects in one archive (see [member write_bundle])
 ## [/codeblock]
 ##
 ## Content addressing on the server side too, for the same reasons it works on the
@@ -168,6 +169,14 @@ var group_rules: Dictionary = {}
 ## and then fails to find its own scripts. Turn it off for content that is pure data
 ## and references nothing, or for a publisher that has already done this itself.
 @export var rewrite_resource_paths: bool = true
+
+## Also writes every object up to [member bundle_max_object_bytes] into one ZIP and names it in
+## the manifest, so a client with an empty cache makes one request for the imported-asset long
+## tail instead of one per file. Larger objects stay individual and download in parallel.
+@export var write_bundle: bool = true
+@export var bundle_max_object_bytes: int = 1048576
+## No bundle for fewer small objects than this: a request each is cheaper than the archive.
+@export var bundle_min_objects: int = 8
 
 ## Text resources whose `res://` references have to move with the pack.
 ##
@@ -512,6 +521,14 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			return copied
 		written += 1
 
+	var bundled := {}
+	if write_bundle:
+		var made_bundle := _write_bundle(manifest, out_dir)
+		if not made_bundle.ok:
+			return made_bundle
+		bundled = made_bundle.value
+		manifest.bundle = bundled
+
 	# The payload is written verbatim, whether signed or not, so the bytes the
 	# client verifies are the bytes the publisher hashed. Nothing reformats them
 	# in between — see DotCloudEnvelope.
@@ -580,6 +597,59 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"sided": sides.size(),
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
+	})
+
+
+## Writes `bundles/<sha256>.zip` with every unique object at or under the size cap, each entry
+## named by its hash. Returns the manifest declaration, or an empty dictionary when too few
+## objects qualify. ZIP because every platform the client runs on can read one with ZIPReader.
+func _write_bundle(manifest: DotCloudManifest, out_dir: String) -> DotResult:
+	var small := {}
+	for f in manifest.files:
+		if f.size <= bundle_max_object_bytes:
+			small[f.sha256] = f.size
+	if small.size() < bundle_min_objects:
+		return DotResult.success({})
+
+	var tmp := out_dir.path_join("bundles/pending.zip")
+	var parent := DotPaths.ensure_parent_dir(tmp)
+	if not parent.ok:
+		return parent
+	var zip := ZIPPacker.new()
+	var err := zip.open(tmp)
+	if err != OK:
+		return DotResult.failure(DotError.from_engine(err, "creating the bundle"))
+
+	var names := small.keys()
+	names.sort()
+	for h in names:
+		var src := out_dir.path_join("objects/%s/%s" % [str(h).substr(0, 2), h])
+		var bytes := FileAccess.get_file_as_bytes(src)
+		zip.start_file(str(h))
+		zip.write_file(bytes)
+		zip.close_file()
+	zip.close()
+
+	var hashed := DotHash.sha256_file(tmp)
+	if not hashed.ok:
+		return hashed
+	var digest: String = hashed.value
+	var final_rel := "bundles/%s.zip" % digest
+	DirAccess.rename_absolute(tmp, out_dir.path_join(final_rel))
+
+	# Older bundles of earlier publishes into this directory are dead weight.
+	var dir := DirAccess.open(out_dir.path_join("bundles"))
+	if dir != null:
+		for n in dir.get_files():
+			if n != "%s.zip" % digest:
+				dir.remove(n)
+
+	return DotResult.success({
+		"sha256": digest,
+		"size": DotPaths.file_size(out_dir.path_join(final_rel)),
+		"count": names.size(),
+		"max_object_bytes": bundle_max_object_bytes,
+		"url_path": final_rel,
 	})
 
 
