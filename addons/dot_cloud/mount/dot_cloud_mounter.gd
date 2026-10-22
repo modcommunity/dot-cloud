@@ -792,6 +792,13 @@ func mount_prefix_of(content_key: String) -> String:
 	return str(_mounts[content_key]["prefix"])
 
 
+## The `cfg` root a mounted pack ships (`<prefix>/cfg`), or "" when it has none or is not mounted.
+## A reader puts it first in its config roots (weakest), so `cfg/server` and the game still win.
+func cfg_root_of(content_key: String) -> String:
+	var root := mount_prefix_of(content_key).path_join("cfg")
+	return root if mount_prefix_of(content_key) != "" and DirAccess.dir_exists_absolute(root) else ""
+
+
 func mounted_keys() -> PackedStringArray:
 	var out := PackedStringArray(_mounts.keys())
 	out.sort()
