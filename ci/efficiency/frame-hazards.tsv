@@ -1,0 +1,9 @@
+# frame-hazards
+# Baselines only shrink: scripts/<gate> --update lowers or drops entries and refuses to add.
+examples/http_test_server.gd::_process::alloc_array	1
+examples/http_test_server.gd::_respond::alloc_dict	1
+examples/http_test_server.gd::_respond::duplicate	1
+examples/http_test_server.gd::_respond::string_build	8
+examples/workshop_backbone.gd::_process::alloc_array	1
+examples/workshop_backbone.gd::_respond::alloc_dict	3
+examples/workshop_backbone.gd::_respond::string_build	1
