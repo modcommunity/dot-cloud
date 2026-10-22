@@ -26,7 +26,7 @@ const WORK := "user://dot_cloud_mount_demo"
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 98
+const CHECKS := 107
 
 var _failures: int = 0
 var _checks: int = 0
@@ -77,6 +77,7 @@ func _run() -> void:
 	await _section_uids()
 	await _section_two_publishers()
 	await _section_namespaced_ids()
+	await _section_slice_loader()
 
 	_line("")
 	_check(
@@ -785,6 +786,40 @@ func _section_uids() -> void:
 
 
 ## The mounter's own row for one content key, however `describe` happens to shape it.
+func _section_slice_loader() -> void:
+	_sections_started += 1
+	_line("[b]12. slice loader yields between slices[/b]")
+
+	var paths := PackedStringArray()
+	for f in DirAccess.get_files_at("res://addons/dot_cloud/transfer"):
+		if f.ends_with(".gd"):
+			paths.append("res://addons/dot_cloud/transfer/" + f)
+	_check("have scripts to load", paths.size() >= 4, str(paths.size()))
+
+	for threaded in [false, true]:
+		var loader := DotCloudSliceLoader.new()
+		loader.budget_msec = 0
+		var seen := [0]
+		var ticks := [0]
+		loader.progress.connect(func(d: int, _t: int, _p: String) -> void: seen[0] = d)
+		var counter := func() -> void: ticks[0] += 1
+		get_tree().process_frame.connect(counter)
+		var res := await loader.load_all(get_tree(), paths, threaded)
+		get_tree().process_frame.disconnect(counter)
+		var label := "threaded" if threaded else "sync"
+		_check("%s: loaded all" % label, res.ok and int(res.value) == paths.size())
+		_check("%s: progress reached total" % label, seen[0] == paths.size(), str(seen[0]))
+		# The threaded pass finds everything cached by the first, so it may finish in no frame.
+		_check("%s: frames passed during the load" % label,
+			threaded or (ticks[0] >= 1 and loader.frames_yielded >= 1),
+			"%d ticks, %d yields" % [ticks[0], loader.frames_yielded])
+
+	var bad := await DotCloudSliceLoader.new().load_all(get_tree(), PackedStringArray(["res://nope.gd"]), false)
+	_check("a missing path fails", not bad.ok)
+	_check("with CODE_IO", bad.error.code == DotError.CODE_IO)
+	_sections_finished += 1
+
+
 func _mount_row(described: Dictionary, key: String) -> Dictionary:
 	var mounts: Variant = described.get("mounted")
 
