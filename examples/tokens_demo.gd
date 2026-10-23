@@ -6,7 +6,7 @@ extends Node
 ## godot --headless --path . res://examples/tokens_demo.tscn
 
 const WORK := "user://dot_cloud_tokens"
-const CHECKS := 16
+const CHECKS := 18
 
 var _failures := 0
 var _checks := 0
@@ -54,6 +54,11 @@ script = ExtResource("1")
 	_check(toks.has("game/thing.gdc") and toks.has("game/thing.gd.remap"), "with tokens it ships .gdc and .gd.remap")
 	_check(not toks.has("game/thing.gd"), "and not the text")
 	_check(not DirAccess.dir_exists_absolute(out.path_join(".tokens")), "the staging directory is not left in the output")
+
+	DotPaths.write_text(tokens.path_join("engine.txt"), "4.0.0.stable.official.000000000\n")
+	var stale := _publish(proj, work.path_join("out_stale"), "tok_stale", str(pair["private"]), tokens)
+	_check(stale.has("game/thing.gd") and not stale.has("game/thing.gdc"), "tokens from another engine build fall back to text")
+	DotPaths.write_text(tokens.path_join("engine.txt"), DotCloudPublisher.engine_stamp())
 
 	var cloud := DotCloudClient.new()
 	cloud.name = "Cloud"

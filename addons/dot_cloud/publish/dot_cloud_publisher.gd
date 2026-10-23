@@ -30,6 +30,7 @@ extends RefCounted
 ## [/codeblock]
 
 const CHANNEL := "cloud.pub"
+const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
 const PROVIDES_FILE := "provides.json"
@@ -271,6 +272,8 @@ func _rewrite_paths(abs: String, staged: String, inside: Dictionary) -> DotResul
 ## exact engine version that wrote them, so tokenize with the engine the clients run.
 ## Each swapped script ships as [code]x.gdc[/code] plus an [code]x.gd.remap[/code] naming it,
 ## the pair an export makes; a script with no `.gdc` in the directory stays text.
+## A [code]engine.txt[/code] in the directory (written by the tool) is compared with the running
+## engine; on a mismatch the scripts ship as text, which loads everywhere.
 var script_tokens_dir: String = ""
 
 ## Marks files optional by path prefix.
@@ -671,12 +674,24 @@ func _write_bundle(manifest: DotCloudManifest, out_dir: String) -> DotResult:
 	})
 
 
+## The running engine as `godot --version` prints it; `tokenize_scripts.sh` writes it beside the tokens.
+static func engine_stamp() -> String:
+	var v := Engine.get_version_info()
+	return "%d.%d.%d.%s.%s.%s" % [v.major, v.minor, v.patch, v.status, v.build, str(v.hash).substr(0, 9)]
+
+
 ## Replaces each `x.gd` that has `x.gdc` in [member script_tokens_dir] by the token file and
 ## a staged `x.gd.remap`. The text path goes into [param dropped] so scenes naming it are still
 ## rebased onto the mount. Returns the remaining relative paths.
 func _swap_in_script_tokens(
 	out_dir: String, relatives: PackedStringArray, extra: Dictionary, dropped: Dictionary
 ) -> DotResult:
+	var stamp := script_tokens_dir.path_join(TOKENS_ENGINE_FILE)
+	if FileAccess.file_exists(stamp):
+		var made_by := FileAccess.get_file_as_string(stamp).strip_edges()
+		if made_by != engine_stamp():
+			DotLog.warn(CHANNEL, "script tokens are from another engine build, shipping text scripts", {"tokens": made_by, "engine": engine_stamp()})
+			return DotResult.success(relatives)
 	var prefix := "res://%s/%s/%s/" % [mount_root, content_id, version]
 	var staging := out_dir.path_join(".tokens")
 	DotPaths.remove_tree(staging)

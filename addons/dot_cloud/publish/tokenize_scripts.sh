@@ -23,3 +23,4 @@ CFG
 godot --headless --path "$proj" --export-pack tokens "$work/t.pck" >/dev/null
 printf '[application]\nconfig/name="tokens"\n' > "$work/project.godot"
 godot --headless --path "$work" --script "$here/dot_cloud_token_extract.gd" -- "$work/t.pck" "$out"
+godot --version | head -1 | tr -d "\r" > "$out/engine.txt"
