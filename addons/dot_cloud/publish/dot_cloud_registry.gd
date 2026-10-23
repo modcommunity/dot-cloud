@@ -122,16 +122,20 @@ func claim(
 	return DotResult.success(d)
 
 
-## The bytes are in. [param file_count] and [param byte_size] are what ACTUALLY
-## landed, which is what the member's allowance is charged -- the claim's numbers were
-## a statement of intent.
-func complete(
+## `metadata.solo` of a pack manifest (game.yml `metadata.solo: true`); pass it to [method complete].
+static func solo_from_metadata(metadata: Dictionary) -> bool:
+	return metadata.get("solo", false) == true
+
+
+## The `complete` request body. `solo` is sent only when true, so the site's default stands otherwise.
+static func complete_body(
 	claim_id: int,
 	file_count: int,
 	byte_size: int,
 	manifest_sha: String = "",
-	contains: Dictionary = {}
-) -> DotResult:
+	contains: Dictionary = {},
+	solo: bool = false
+) -> Dictionary:
 	var body := {
 		"action": "complete",
 		"id": claim_id,
@@ -142,12 +146,29 @@ func complete(
 	if manifest_sha != "":
 		body["manifestSha"] = manifest_sha
 
-	# The bill of materials: `{ "<owner>/<repo>": "<version>" }`. Not a dependency
-	# list -- nothing resolves it -- but it is the only way to answer "which published
-	# games contain this asset version?" once an asset has been vendored into one.
+	# The bill of materials: `{ "<owner>/<repo>": "<version>" }`, the only way to answer
+	# "which published games contain this asset version?" once an asset is vendored.
 	if not contains.is_empty():
 		body["contains"] = contains
 
+	if solo:
+		body["solo"] = true
+
+	return body
+
+
+## The bytes are in. [param file_count] and [param byte_size] are what ACTUALLY
+## landed, which is what the member's allowance is charged -- the claim's numbers were
+## a statement of intent.
+func complete(
+	claim_id: int,
+	file_count: int,
+	byte_size: int,
+	manifest_sha: String = "",
+	contains: Dictionary = {},
+	solo: bool = false
+) -> DotResult:
+	var body := complete_body(claim_id, file_count, byte_size, manifest_sha, contains, solo)
 	var sent := await _send(body)
 
 	if sent.ok:

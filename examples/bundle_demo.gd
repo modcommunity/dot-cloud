@@ -10,7 +10,7 @@ extends Control
 const TestServer := preload("res://examples/http_test_server.gd")
 const WORK := "user://dot_cloud_bundle_demo"
 const SMALL := 40
-const CHECKS := 15
+const CHECKS := 19
 
 @onready var _output: RichTextLabel = $Output
 
@@ -54,6 +54,15 @@ func _run() -> void:
 	var decl := manifest.usable_bundle()
 	_check("manifest declares a bundle of the small objects", int(decl.get("count", 0)) == SMALL, str(decl.get("count")))
 	_check("the bundle is far smaller than the pack", int(decl.get("size", 1 << 30)) < 3 * 1024 * 1024)
+
+	var solo_meta := {"solo": true}
+	var omitted := DotCloudRegistry.complete_body(1, 2, 3, "sha")
+	var declared := DotCloudRegistry.complete_body(1, 2, 3, "sha", {}, DotCloudRegistry.solo_from_metadata(solo_meta))
+	_check("solo is omitted from complete unless declared", not omitted.has("solo"))
+	_check("metadata.solo true is sent as solo in complete", declared.get("solo", false) == true)
+	_check("metadata without solo, or solo false, reads false",
+		not DotCloudRegistry.solo_from_metadata({}) and not DotCloudRegistry.solo_from_metadata({"solo": false}))
+	_check("the published manifest carries metadata", manifest.metadata is Dictionary)
 
 	_server = TestServer.new()
 	_server.root = WORK.path_join("published")
