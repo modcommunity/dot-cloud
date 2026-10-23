@@ -59,6 +59,7 @@ The output is a static directory of `manifest.json` plus an `objects/` tree, whi
 - **Resumable parallel downloads.** Mirror failover, HTTP range resume, circuit breaking per source, bandwidth throttling, honest progress and ETA.
 - **Three sources.** HTTP/CDN, a local directory (development, LAN, bundled content), and in-band over the game connection for servers with no web host.
 - **Namespaced mounting.** Content mounts at `res://<root>/<content_id>/<version>/`, which is what makes swapping games at runtime work. See below.
+- **Server auto-update.** A dedicated server checks for newer signed versions of the packs it runs and restarts itself to install them: at once when empty, otherwise after waiting for empty or a countdown players are warned with. On by default; every dot-game game gets it. See [docs/auto-update.md](docs/auto-update.md).
 - **Quota awareness.** Browser storage estimates, mobile-specific ceilings, least-recently-used eviction that never evicts content currently in use.
 
 ## Two things worth knowing before you build on it
