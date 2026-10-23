@@ -1399,7 +1399,10 @@ func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false,
 			continue
 		for file in manifest.files:
 			var path := manifest.resource_path(file)
-			if path.get_extension() == "gd" and ResourceLoader.exists(path):
+			# A tokenized script ships as x.gdc behind x.gd.remap; load the .gd path either way.
+			if path.get_extension() == "gdc":
+				path = path.trim_suffix("c")
+			if path.get_extension() == "gd" and ResourceLoader.exists(path) and not scripts.has(path):
 				scripts.append(path)
 
 	var t0 := Time.get_ticks_msec()

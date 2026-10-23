@@ -23,5 +23,6 @@ extends RefCounted
 # 9: DotCloudManifest.bundle (one ZIP of the small objects, signed), DotCloudPublisher.write_bundle,
 #    DotCloudConfig.use_bundles; the HTTP source's fetch_bundle. An older client ignores the field.
 # 10: DotCloudSliceLoader.loaded / named_class_scripts, DotCloudClient.warm_content (its on_progress callable).
-const LEVEL := 10
+# 11: DotCloudPublisher.script_tokens_dir (pre-tokenized .gdc + .gd.remap in place of .gd text).
+const LEVEL := 11
 const OLDEST := 1
