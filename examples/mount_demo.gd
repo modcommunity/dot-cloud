@@ -26,7 +26,7 @@ const WORK := "user://dot_cloud_mount_demo"
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 107
+const CHECKS := 110
 
 var _failures: int = 0
 var _checks: int = 0
@@ -809,6 +809,7 @@ func _section_slice_loader() -> void:
 		var label := "threaded" if threaded else "sync"
 		_check("%s: loaded all" % label, res.ok and int(res.value) == paths.size())
 		_check("%s: progress reached total" % label, seen[0] == paths.size(), str(seen[0]))
+		_check("%s: holds what it loaded" % label, loader.loaded.size() == paths.size(), str(loader.loaded.size()))
 		# The threaded pass finds everything cached by the first, so it may finish in no frame.
 		_check("%s: frames passed during the load" % label,
 			threaded or (ticks[0] >= 1 and loader.frames_yielded >= 1),
@@ -817,6 +818,19 @@ func _section_slice_loader() -> void:
 	var bad := await DotCloudSliceLoader.new().load_all(get_tree(), PackedStringArray(["res://nope.gd"]), false)
 	_check("a missing path fails", not bad.ok)
 	_check("with CODE_IO", bad.error.code == DotError.CODE_IO)
+
+	var probe := "user://slice_probe.gd"
+	var f := FileAccess.open(probe, FileAccess.WRITE)
+	f.store_string("extends Node\nvar a: DotCloudSliceLoader\nvar b: DotCloudWorkshopDevice\nvar c: NotAClass\n")
+	f.close()
+	var device := ""
+	for entry in ProjectSettings.get_global_class_list():
+		if entry["class"] == &"DotCloudWorkshopDevice":
+			device = entry["path"]
+	var named := DotCloudSliceLoader.named_class_scripts(PackedStringArray([probe]))
+	_check("named: an uncached class is listed, a cached one is not",
+		named.has(device) == (not ResourceLoader.has_cached(device)) and named.size() <= 1, str(named))
+	DirAccess.remove_absolute(probe)
 	_sections_finished += 1
 
 

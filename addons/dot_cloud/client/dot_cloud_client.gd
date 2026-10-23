@@ -1380,6 +1380,38 @@ func manifest_for(content_key: String) -> DotCloudManifest:
 	return _acquired.get(content_key)
 
 
+## Compiles the scripts of the mounted packs [param keys], and the addon classes they name,
+## a slice per frame, so the load() of their scene that follows is a cache hit. Without
+## threads that load() compiles the whole closure in one frame. Keep the returned loader
+## until that load() is done: it holds what it loaded. Skipped where there are threads.
+func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false) -> DotCloudSliceLoader:
+	var loader := DotCloudSliceLoader.new()
+	if DotPlatform.has_threads() and not force:
+		return loader
+
+	var scripts := PackedStringArray()
+	for key in keys:
+		var manifest := manifest_for(key)
+		if manifest == null:
+			continue
+		for file in manifest.files:
+			var path := manifest.resource_path(file)
+			if path.get_extension() == "gd" and ResourceLoader.exists(path):
+				scripts.append(path)
+
+	var t0 := Time.get_ticks_msec()
+	var named := DotCloudSliceLoader.named_class_scripts(scripts)
+	var scan_ms := Time.get_ticks_msec() - t0
+	var res := await loader.load_all(tree, named + scripts, false)
+
+	DotLog.info(CHANNEL, "scripts warmed", {
+		"content": ",".join(keys), "pack_scripts": scripts.size(), "addon_classes": named.size(),
+		"scan_ms": scan_ms, "ms": Time.get_ticks_msec() - t0, "frames": loader.frames_yielded,
+		"ok": res.ok, "why": "" if res.ok else str(res.error),
+	})
+	return loader
+
+
 func _ready_result(manifest: DotCloudManifest) -> DotResult:
 	var entry := manifest.entry_scene_path()
 	if entry != "":

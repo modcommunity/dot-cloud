@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 37
+const CHECKS := 38
 
 
 func _ready() -> void:
@@ -148,6 +148,12 @@ script = ExtResource("1")
 	# --- the whole point
 	var scene_path := "res://dot_cloud/delivered_scene/1.0.0/scenes/world.tscn"
 	_check(ResourceLoader.exists(scene_path), "the scene is at the mounted path")
+
+	var warm_keys := PackedStringArray(cloud.acquired_keys())
+	var warmed: DotCloudSliceLoader = await cloud.warm_content(get_tree(), warm_keys, true)
+	var scripts := warmed.loaded.filter(func(r: Resource) -> bool: return r is Script)
+	_check(scripts.any(func(s: Script) -> bool: return s.resource_path.begins_with("res://dot_cloud/delivered_scene/")),
+		"warm_content compiles the pack's script and holds it", str(warm_keys))
 
 	var packed: PackedScene = load(scene_path)
 	_check(packed != null, "and it loads")

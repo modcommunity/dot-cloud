@@ -32,3 +32,7 @@ Load-bearing details:
 `download_manifest()` and `resolve_manifest()` are the download-without-mount halves `ensure()` is built from; the addon-pack path uses them because an addon pack must never also be mounted at its own content prefix.
 
 A failed sync says why: `DotCloudDownloader` keeps the first required file's failure in the summary's detail, while the summary's code stays `CODE_NETWORK` regardless, because callers branch on codes.
+
+## Compiling a pack's scripts before its scene loads
+
+Without threads (a browser), `load()` of a delivered scene compiles its whole script closure in one frame: game-arena's `arena.tscn` was 5.4 s, about 550 scripts, most of them addon classes the pack's scripts name. `warm_content(tree, keys)` compiles them first through `DotCloudSliceLoader`, a slice per frame: the addon classes the pack's sources name (`named_class_scripts`, a word scan; exported scripts report no dependencies), then the pack's own scripts. Keep the returned loader until the scene's `load()` is done, because its `loaded` array is what keeps the cache from dropping them. `DotClientLink` calls it before every delivered scene; it returns at once where there are threads. What it cannot split is one script's own compile (`arena_client.gd`, 2600 lines, about 0.6 s).
