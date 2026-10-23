@@ -1384,8 +1384,11 @@ func manifest_for(content_key: String) -> DotCloudManifest:
 ## a slice per frame, so the load() of their scene that follows is a cache hit. Without
 ## threads that load() compiles the whole closure in one frame. Keep the returned loader
 ## until that load() is done: it holds what it loaded. Skipped where there are threads.
-func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false) -> DotCloudSliceLoader:
+## [param on_progress] is called with (done, total) after each resource, for a loading bar.
+func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false, on_progress: Callable = Callable()) -> DotCloudSliceLoader:
 	var loader := DotCloudSliceLoader.new()
+	if on_progress.is_valid():
+		loader.progress.connect(func(done: int, total: int, _path: String) -> void: on_progress.call(done, total))
 	if DotPlatform.has_threads() and not force:
 		return loader
 
