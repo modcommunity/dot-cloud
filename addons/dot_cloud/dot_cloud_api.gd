@@ -29,5 +29,7 @@ extends RefCounted
 #     use_mirrors / prefetch_max_bytes / prefetch_max_packs / prefetch_on_web, DotCloudClient.load_mirror_list /
 #     mirror_list / mirror_alternatives / prefetch / parse_prefetch, DotCloudSourceHttp.mirror_list / bases_for
 #     (published mirrors before the origin, per-base demotion; the breaker counts files, not bases).
-const LEVEL := 13
+# 14: DotCloudMirrorList.parse_signed(bytes, trusted_keys, now_unix, newest_seen): refuses a signed list older than the
+#     newest accepted (replay of an old mirror list).
+const LEVEL := 14
 const OLDEST := 1
