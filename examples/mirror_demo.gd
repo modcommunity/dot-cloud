@@ -20,7 +20,7 @@ const CAROL := "carol/big"
 const VERSION := "1.0.0"
 
 ## Every check this suite runs, including the one that compares against it.
-const CHECKS := 61
+const CHECKS := 67
 
 var _failures := 0
 var _checks := 0
@@ -82,6 +82,7 @@ func _run() -> void:
 	await _test_resume_from_mirror()
 	await _test_opt_out()
 	await _test_prefetch()
+	await _test_rollback()
 
 	_check("every section ran to completion", _sections_completed == _sections_entered,
 		"%d/%d" % [_sections_completed, _sections_entered])
@@ -306,6 +307,39 @@ func _test_opt_out() -> void:
 	_sections_completed += 1
 
 
+func _test_rollback() -> void:
+	_sections_entered += 1
+	print("[section] an older signed list never replaces a newer one")
+	var now := int(Time.get_unix_time_from_system())
+	var keys := _trusted()
+	var old := _list("https://cdn.example", [])
+	old["issued_at"] = now - 600
+	_check("a list older than the newest seen is refused", not DotCloudMirrorList.parse_signed(_signed(old), keys, now, now - 60).ok)
+	_check("the same issue time is accepted again", DotCloudMirrorList.parse_signed(_signed(old), keys, now, now - 600).ok)
+
+	var mirrors := [_mirror("good", _good.base_url(), ["*"], true)]
+	_publish_list(mirrors, now)
+	var client := await _client("rollback", true)
+	if client == null:
+		return
+	var first := await client.load_mirror_list("", false)
+	_check("the current list loads", first.ok and client.mirror_list() != null and client.mirror_list().issued_at == now)
+	_publish_list(mirrors, now - 600)
+	var replay := await client.load_mirror_list("", false)
+	_check("a replayed older list is refused and the newer one stays", not replay.ok and client.mirror_list().issued_at == now)
+	_drop(client)
+	var fresh := await _client("rollback", true)
+	if fresh == null:
+		return
+	replay = await fresh.load_mirror_list("", false)
+	_check("a restarted client still refuses it (the newest is kept on disk)", not replay.ok)
+	_publish_list(mirrors, now + 5)
+	var newer := await fresh.load_mirror_list("", false)
+	_check("a newer list is taken", newer.ok and fresh.mirror_list().issued_at == now + 5)
+	_drop(fresh)
+	_sections_completed += 1
+
+
 func _test_prefetch() -> void:
 	_sections_entered += 1
 	print("[section] prefetch")
@@ -395,8 +429,11 @@ func _parsed(mirrors: Array, origin: String) -> DotCloudMirrorList:
 
 
 ## Writes the signed list into the origin and both mirror roots (rank probes each mirror's copy).
-func _publish_list(mirrors: Array) -> void:
-	var bytes := _signed(_list(_origin.base_url(), mirrors))
+func _publish_list(mirrors: Array, issued_at: int = 0) -> void:
+	var d := _list(_origin.base_url(), mirrors)
+	if issued_at > 0:
+		d["issued_at"] = issued_at
+	var bytes := _signed(d)
 	for dir in ["origin", "m_good", "m_bad"]:
 		DotPaths.write_bytes(WORK.path_join(dir).path_join("content/mirrors.json"), bytes)
 

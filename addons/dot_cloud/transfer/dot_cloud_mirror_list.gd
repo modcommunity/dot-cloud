@@ -31,8 +31,9 @@ var dropped: PackedStringArray = PackedStringArray()
 
 
 ## Unwraps, verifies and parses a published mirror list. Malformed entries are dropped one by
-## one; a bad envelope, signature, kind, format, origin or expiry refuses the whole list.
-static func parse_signed(bytes: PackedByteArray, trusted_keys: Dictionary, now_unix: int) -> DotResult:
+## one; a bad envelope, signature, kind, format, origin or expiry refuses the whole list, and so
+## does an [code]issued_at[/code] older than [param newest_seen] (a replayed list that is still valid).
+static func parse_signed(bytes: PackedByteArray, trusted_keys: Dictionary, now_unix: int, newest_seen: int = 0) -> DotResult:
 	var unwrapped := DotCloudEnvelope.unwrap(bytes)
 	if not unwrapped.ok:
 		return unwrapped.wrap("The mirror list is not a valid envelope.")
@@ -60,6 +61,9 @@ static func parse_signed(bytes: PackedByteArray, trusted_keys: Dictionary, now_u
 	list.expires_at = int(d.get("expires_at", 0))
 	if list.expires_at <= 0 or now_unix > list.expires_at:
 		return DotResult.fail(DotError.CODE_INVALID, "The mirror list has expired.", "expires_at %d" % list.expires_at)
+	if list.issued_at < newest_seen:
+		return DotResult.fail(DotError.CODE_INVALID, "The mirror list is older than one already accepted.",
+			"issued_at %d < %d" % [list.issued_at, newest_seen])
 	var origin_ok := check_base_url(str(d.get("origin", "")))
 	if not origin_ok.ok:
 		return origin_ok.wrap("The mirror list's origin is unusable.")
@@ -86,6 +90,24 @@ static func parse_signed(bytes: PackedByteArray, trusted_keys: Dictionary, now_u
 	if not list.dropped.is_empty():
 		DotLog.debug(CHANNEL, "mirror entries dropped", {"dropped": list.dropped})
 	return DotResult.success(list)
+
+
+## The newest [code]issued_at[/code] recorded at [param path], or 0.
+static func newest_seen(path: String) -> int:
+	if not FileAccess.file_exists(path):
+		return 0
+	var read := DotPaths.read_json(path)
+	return maxi(0, int((read.value as Dictionary).get("issued_at", 0))) if read.ok and read.value is Dictionary else 0
+
+
+## Records [param issued_at] at [param path] when it is newer than what is there.
+static func remember(path: String, issued_at: int) -> void:
+	if issued_at <= newest_seen(path):
+		return
+	var written := DotPaths.write_json(path, {"issued_at": issued_at}, false)
+	if not written.ok:
+		DotLog.warn(CHANNEL, "could not record the mirror list's issue time", {"detail": written.error.detail})
+	DotWeb.sync_filesystem()
 
 
 ## An http(s) base with a host and no userinfo, query or fragment, returned without a trailing slash.

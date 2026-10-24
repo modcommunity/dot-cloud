@@ -1401,12 +1401,17 @@ func _load_mirror_list_inner(where: String, rank: bool) -> DotResult:
 	var fetched := await _http.get_bytes(where)
 	if not fetched.ok:
 		return fetched.wrap("Could not download the mirror list.")
+	var seen_path := config.cache_dir.path_join("mirrors_seen.json")
+	var newest := DotCloudMirrorList.newest_seen(seen_path)
+	if _mirror_list != null:
+		newest = maxi(newest, _mirror_list.issued_at)
 	var parsed := DotCloudMirrorList.parse_signed(
-		fetched.value, config.trusted_keys, int(Time.get_unix_time_from_system())
+		fetched.value, config.trusted_keys, int(Time.get_unix_time_from_system()), newest
 	)
 	if not parsed.ok:
 		return parsed
 	var list: DotCloudMirrorList = parsed.value
+	DotCloudMirrorList.remember(seen_path, list.issued_at)
 	if rank and not list.mirrors.is_empty():
 		if _probe_http == null:
 			_probe_http = DotHttp.new()
