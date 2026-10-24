@@ -48,7 +48,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `bundle_demo`, `tokens_demo`, `auto_update_demo`. Each exits non-zero on a failed check. [testing](docs/testing.md)
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `bundle_demo`, `tokens_demo`, `auto_update_demo`, `mirror_demo` (signed list, bad mirrors, resume, opt-out, prefetch). Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
 - A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
 
