@@ -190,6 +190,12 @@ var _http: DotHttp = null
 ## too large", which the downloader reported as "Some required content could not be
 ## downloaded" -- a map that publishes perfectly and can never be fetched.
 var _object_http: DotHttp = null
+
+## The verified published mirror list (API 13), or null for origin only.
+var _mirror_list: DotCloudMirrorList = null
+
+## Probes mirrors in [method load_mirror_list]; its own node because ranking overrides its timeout.
+var _probe_http: DotHttp = null
 var _started: bool = false
 var _registered_name: StringName = &""
 
@@ -299,6 +305,10 @@ func start() -> DotResult:
 	_set_phase(Phase.IDLE, "")
 
 	DotLog.info(CHANNEL, "client ready", store.describe())
+
+	# Never fails the start: without the list the origin serves everything.
+	if config.mirrors_url != "" and config.use_mirrors:
+		await load_mirror_list()
 	return DotResult.success(self)
 
 
@@ -350,6 +360,7 @@ func _build_sources() -> void:
 	http_source.base_urls = resolved_http_base_urls()
 	http_source.priority = 50
 	http_source.http = _object_http
+	http_source.mirror_list = _mirror_list if config.use_mirrors else null
 	sources.append(http_source)
 
 	if allow_netchan_fallback:
@@ -1358,6 +1369,189 @@ func release(content_key: String) -> DotResult:
 func cancel() -> void:
 	if downloader != null and downloader.is_running():
 		downloader.cancel()
+
+
+# --- Mirrors and prefetch -------------------------------------------------
+
+## Fetches and verifies the site's signed mirror list ([param url], or
+## [member DotCloudConfig.mirrors_url]) and hands it to the HTTP source, ranked by latency when
+## [param rank] is set. Succeeds doing nothing when there is no URL or mirrors are opted out.
+## A failure logs WARN and leaves delivery origin-only; it never fails a download.
+func load_mirror_list(url: String = "", rank: bool = true) -> DotResult:
+	if not _started:
+		var started := await start()
+		if not started.ok:
+			return started
+	var where := resolve_base_url(url if url != "" else config.mirrors_url)
+	if where == "" or not config.use_mirrors:
+		return DotResult.success(null)
+
+	var res := await _load_mirror_list_inner(where, rank)
+	if not res.ok:
+		DotLog.warn(CHANNEL, "mirror list refused; using the origin only", {
+			"url": where, "why": str(res.error),
+		})
+	return res
+
+
+func _load_mirror_list_inner(where: String, rank: bool) -> DotResult:
+	var url_ok := DotCloudMirrorList.check_base_url(where)
+	if not url_ok.ok:
+		return url_ok
+	var fetched := await _http.get_bytes(where)
+	if not fetched.ok:
+		return fetched.wrap("Could not download the mirror list.")
+	var parsed := DotCloudMirrorList.parse_signed(
+		fetched.value, config.trusted_keys, int(Time.get_unix_time_from_system())
+	)
+	if not parsed.ok:
+		return parsed
+	var list: DotCloudMirrorList = parsed.value
+	if rank and not list.mirrors.is_empty():
+		if _probe_http == null:
+			_probe_http = DotHttp.new()
+			_probe_http.name = "ProbeHttp"
+			_probe_http.max_response_bytes = 64 * 1024
+			add_child(_probe_http)
+		await list.rank(_probe_http, 3.0)
+	_mirror_list = list
+	for s in sources:
+		var http_source := s as DotCloudSourceHttp
+		if http_source != null:
+			http_source.mirror_list = list
+	DotLog.info(CHANNEL, "mirror list loaded", list.describe())
+	return DotResult.success(list)
+
+
+## The verified mirror list in use, or null (none loaded, or opted out).
+func mirror_list() -> DotCloudMirrorList:
+	return _mirror_list if config != null and config.use_mirrors else null
+
+
+## The same path on every avatar-carrying published mirror, for an origin [param url], so an
+## addon fetching origin files (avatars) can fail over. Empty with no list or when opted out.
+func mirror_alternatives(url: String) -> PackedStringArray:
+	var list := mirror_list()
+	return list.alternatives(url) if list != null else PackedStringArray()
+
+
+## Downloads the packs a server will want into the store before connecting, mounting nothing.
+##
+## [param doc] is `{format: 1, kind: "dot_cloud_prefetch", server_id, app_id, packs: [{id,
+## version, bytes}], avatar_library, mirrors_url}`. Each pack's manifest is resolved and verified
+## like [method ensure]; a pack whose missing bytes exceed what is left of
+## [member DotCloudConfig.prefetch_max_bytes] is skipped, as is every pack past
+## [member DotCloudConfig.prefetch_max_packs]. The objects are ordinary unreferenced LRU entries.
+## Returns `{packs_fetched, packs_skipped, bytes, skipped: [{id, version, why}], avatar_library}`.
+func prefetch(doc: Dictionary) -> DotResult:
+	if not _started:
+		var started := await start()
+		if not started.ok:
+			return started
+	if DotPlatform.is_web() and not config.prefetch_on_web:
+		return DotResult.fail(DotError.CODE_UNSUPPORTED, "Prefetch is off in the browser.", "prefetch_on_web")
+
+	var parsed := parse_prefetch(doc, config.prefetch_max_packs)
+	if not parsed.ok:
+		return parsed
+	var plan: Dictionary = parsed.value
+
+	var doc_mirrors := str(plan["mirrors_url"])
+	if doc_mirrors != "" and _mirror_list == null and config.use_mirrors:
+		await load_mirror_list(doc_mirrors)
+
+	var skipped: Array = (plan["over_cap"] as Array).duplicate()
+	var fetched := 0
+	var bytes := 0
+	var budget := config.prefetch_max_bytes
+
+	for entry: Dictionary in plan["packs"]:
+		var id := str(entry["id"])
+		var version := str(entry["version"])
+		var resolved := await resolve_manifest(StringName(id), version)
+		if not resolved.ok:
+			skipped.append({"id": id, "version": version, "why": resolved.error.message})
+			continue
+		var manifest: DotCloudManifest = resolved.value
+		var need := plan_for(manifest)
+		var missing := int(need["missing_bytes"])
+		if missing > budget - bytes:
+			skipped.append({"id": id, "version": version, "why": "over the prefetch byte budget (%s)" % DotPaths.format_bytes(missing)})
+			continue
+		var key := manifest.key()
+		var done := await _download(manifest, PackedStringArray(), key)
+		# The sync claims refs; a prefetched pack nobody mounted must stay evictable.
+		if not mounter.is_mounted(key) and not _inflight.has(key):
+			store.release_refs(key)
+			store.flush_index()
+		if not done.ok:
+			skipped.append({"id": id, "version": version, "why": done.error.message})
+			continue
+		fetched += 1
+		bytes += missing
+
+	if _inflight.is_empty() and not _sync_busy:
+		_set_phase(Phase.IDLE, "")
+	DotLog.info(CHANNEL, "prefetch finished", {
+		"server": plan["server_id"], "fetched": fetched, "skipped": skipped.size(),
+		"bytes": DotPaths.format_bytes(bytes),
+	})
+	return DotResult.success({
+		"packs_fetched": fetched,
+		"packs_skipped": skipped.size(),
+		"bytes": bytes,
+		"skipped": skipped,
+		"avatar_library": plan["avatar_library"],
+	})
+
+
+## Validates a prefetch document strictly: kind, format, and each pack's id and version through
+## [method DotCloudManifest.validate_shape]. Packs past [param max_packs] land in `over_cap`.
+static func parse_prefetch(doc: Dictionary, max_packs: int) -> DotResult:
+	if str(doc.get("kind", "")) != "dot_cloud_prefetch":
+		return DotResult.fail(DotError.CODE_INVALID, "This is not a prefetch document.")
+	var fmt: Variant = doc.get("format", 0)
+	if not (fmt is int or fmt is float) or int(fmt) != 1:
+		return DotResult.fail(DotError.CODE_VERSION, "Unsupported prefetch format.", str(fmt))
+	var raw: Variant = doc.get("packs", null)
+	if not (raw is Array):
+		return DotResult.fail(DotError.CODE_PARSE, "The prefetch document has no packs array.")
+	var packs: Array = []
+	var over_cap: Array = []
+	var seen := {}
+	for p: Variant in raw:
+		if not (p is Dictionary):
+			return DotResult.fail(DotError.CODE_PARSE, "A prefetch pack is not an object.")
+		var id := str((p as Dictionary).get("id", ""))
+		var version := str((p as Dictionary).get("version", ""))
+		var probe := DotCloudManifest.new()
+		probe.content_id = id
+		probe.version = version
+		var shape := probe.validate_shape()
+		if not shape.ok:
+			return shape.wrap("The prefetch document names an unusable pack.")
+		var key := "%s@%s" % [id, version]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		var entry := {"id": id, "version": version}
+		if packs.size() >= max_packs:
+			over_cap.append({"id": id, "version": version, "why": "over the prefetch pack limit"})
+		else:
+			packs.append(entry)
+	var mirrors := str(doc.get("mirrors_url", ""))
+	if mirrors != "":
+		var ok := DotCloudMirrorList.check_base_url(mirrors)
+		if not ok.ok:
+			return ok.wrap("The prefetch document's mirrors_url is unusable.")
+	return DotResult.success({
+		"server_id": doc.get("server_id", null),
+		"app_id": doc.get("app_id", null),
+		"packs": packs,
+		"over_cap": over_cap,
+		"avatar_library": str(doc.get("avatar_library", "")),
+		"mirrors_url": mirrors,
+	})
 
 
 # --- State ----------------------------------------------------------------

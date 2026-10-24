@@ -51,6 +51,15 @@ var http: DotHttp = null
 ## spreading load a CDN already handles.
 var _preferred_base: String = ""
 
+## The site's published mirrors (API 13), set by [DotCloudClient]; null means origin only.
+var mirror_list: DotCloudMirrorList = null
+
+## Consecutive failures (network or hash) a base may have before it is tried last for [member cooldown_sec].
+const BASE_FAILURES_BEFORE_DEMOTION := 2
+
+## base -> {fails, until_ms}. Per base, so one dead mirror never trips the source breaker.
+var _base_health: Dictionary = {}
+
 
 func source_name() -> String:
 	return "http"
@@ -137,7 +146,7 @@ func fetch(
 
 		if not res.ok:
 			last = res
-			note_failure()
+			_note_base_failure(base)
 			DotLog.debug(
 				CHANNEL,
 				"mirror failed",
@@ -179,10 +188,8 @@ func fetch(
 
 		if not committed.ok:
 			last = committed
-			# An integrity failure is the mirror's fault as much as a 500 is:
-			# it served bytes that do not match what the manifest promised, and
-			# another mirror may serve the right ones.
-			note_failure()
+			# The mirror's fault as much as a 500 is; another base may serve the right bytes.
+			_note_base_failure(base)
 			# [b]With the reason.[/b] "failed verification" alone cannot tell a mirror
 			# serving the wrong bytes from a 404 body being hashed, and those are
 			# opposite problems: one is a corrupt or stale host, the other is a URL
@@ -201,19 +208,18 @@ func fetch(
 			continue
 
 		note_success()
+		_note_base_success(base)
 		_preferred_base = base
 		return committed
 
+	# One breaker failure per FILE that no base could serve, not per base: a dead community
+	# mirror ahead of a healthy origin must never put the whole source in cooldown.
+	note_failure()
 	return (last if last != null else DotResult.fail(
 		DotError.CODE_NETWORK, "Every content mirror failed."
 	)).wrap("Could not fetch '%s'." % file.path)
 
 
-## Ordered list of base URLs to try.
-##
-## The manifest's own mirrors win over the source's configured ones: the server
-## knows where its content actually is, and a client's baked-in default will be
-## wrong the first time content moves.
 ## Downloads the manifest's bundle (one ZIP of small objects) and commits every entry that
 ## [param wanted] names, verifying the archive's hash and then each entry's own. One request
 ## instead of one per object. Returns `{objects, bytes}`; a failure leaves the per-file path
@@ -240,21 +246,23 @@ func fetch_bundle(
 		var res := await http.download_to_file(url, part, 0, headers)
 		if not res.ok:
 			last = res
-			note_failure()
+			_note_base_failure(base)
 			continue
 		var checked: DotResult = await scheduler.run(DotHashJob.new(part, sha)) \
 			if scheduler != null else DotResult.success(true)
 		if not checked.ok:
 			last = checked
-			note_failure()
+			_note_base_failure(base)
 			store.discard_partial(sha)
 			continue
 		_preferred_base = base
+		_note_base_success(base)
 		var out := await _unpack_bundle(part, store, wanted)
 		store.discard_partial(sha)
 		if out.ok:
 			note_success()
 		return out
+	note_failure()
 	return last.wrap("Could not fetch the content bundle.")
 
 
@@ -286,13 +294,34 @@ func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> D
 	return DotResult.success({"objects": objects, "bytes": bytes})
 
 
+## Base URLs to try for [param manifest], best first: the sticky preference, the manifest's
+## own mirrors, published mirrors carrying the pack (rank order), then the origin last. A base
+## that failed twice in a row is moved to the end for [member cooldown_sec], never removed.
+func bases_for(manifest: DotCloudManifest) -> PackedStringArray:
+	return _resolve_bases(manifest)
+
+
 func _resolve_bases(manifest: DotCloudManifest) -> PackedStringArray:
 	var out := PackedStringArray()
+	var origin_side := PackedStringArray()
 
-	if _preferred_base != "":
+	# The origin is never sticky over published mirrors, or one bad mirror moves every later
+	# file of the session back onto the origin.
+	if _preferred_base != "" and not (mirror_list != null and mirror_list.is_origin_url(_preferred_base)):
 		out.append(_preferred_base)
 
 	for u in manifest.mirrors:
+		if mirror_list != null and mirror_list.is_origin_url(u):
+			origin_side.append(u)
+		elif not out.has(u):
+			out.append(u)
+
+	if mirror_list != null:
+		for u in _published_bases(manifest):
+			if not out.has(u):
+				out.append(u)
+
+	for u in origin_side:
 		if not out.has(u):
 			out.append(u)
 
@@ -300,7 +329,59 @@ func _resolve_bases(manifest: DotCloudManifest) -> PackedStringArray:
 		if not out.has(u):
 			out.append(u)
 
+	var healthy := PackedStringArray()
+	var cooling := PackedStringArray()
+	for u in out:
+		if _is_cooling(u):
+			cooling.append(u)
+		else:
+			healthy.append(u)
+	return healthy + cooling
+
+
+## The pack's directory on each published mirror: the same path under `<mirror>/content` as the
+## origin pack directory this manifest came from, or `<id>/<version>` when none is known.
+func _published_bases(manifest: DotCloudManifest) -> PackedStringArray:
+	var out := PackedStringArray()
+	var roots := mirror_list.pack_bases(manifest.content_id)
+	if roots.is_empty():
+		return out
+	var content_root := mirror_list.origin + "/content"
+	var rels := PackedStringArray()
+	for u in manifest.mirrors + base_urls:
+		var t := u.trim_suffix("/")
+		if t.begins_with(content_root + "/"):
+			var rel := t.substr(content_root.length())
+			if not rels.has(rel):
+				rels.append(rel)
+	if rels.is_empty():
+		rels.append("/%s/%s" % [manifest.content_id, manifest.version])
+	for root in roots:
+		for rel in rels:
+			out.append(root + rel)
 	return out
+
+
+func _is_cooling(base: String) -> bool:
+	var h: Dictionary = _base_health.get(base, {})
+	return (
+		int(h.get("fails", 0)) >= BASE_FAILURES_BEFORE_DEMOTION
+		and Time.get_ticks_msec() < int(h.get("until_ms", 0))
+	)
+
+
+func _note_base_failure(base: String) -> void:
+	var h: Dictionary = _base_health.get(base, {"fails": 0, "until_ms": 0})
+	h["fails"] = int(h["fails"]) + 1
+	if int(h["fails"]) >= BASE_FAILURES_BEFORE_DEMOTION:
+		h["until_ms"] = Time.get_ticks_msec() + int(cooldown_sec * 1000.0)
+		if _preferred_base == base:
+			_preferred_base = ""
+	_base_health[base] = h
+
+
+func _note_base_success(base: String) -> void:
+	_base_health.erase(base)
 
 
 func _build_url(base: String, file: DotCloudFile) -> String:
@@ -328,4 +409,10 @@ func health() -> Dictionary:
 	var d := super.health()
 	d["preferred"] = _preferred_base
 	d["mirrors"] = Array(base_urls)
+	d["published_mirrors"] = mirror_list.mirrors.size() if mirror_list != null else 0
+	var cooling: Array = []
+	for b in _base_health:
+		if _is_cooling(b):
+			cooling.append(b)
+	d["cooling_bases"] = cooling
 	return d

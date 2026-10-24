@@ -25,5 +25,9 @@ extends RefCounted
 # 10: DotCloudSliceLoader.loaded / named_class_scripts, DotCloudClient.warm_content (its on_progress callable).
 # 11: DotCloudPublisher.script_tokens_dir (pre-tokenized .gdc + .gd.remap in place of .gd text).
 # 12: DotCloudAutoUpdate / DotCloudAutoUpdateConfig (server/): a dedicated server restarts onto newer packs.
-const LEVEL := 12
+# 13: DotCloudMirrorList (the site's signed mirrors.json, key scope _platform/mirrors), DotCloudConfig.mirrors_url /
+#     use_mirrors / prefetch_max_bytes / prefetch_max_packs / prefetch_on_web, DotCloudClient.load_mirror_list /
+#     mirror_list / mirror_alternatives / prefetch / parse_prefetch, DotCloudSourceHttp.mirror_list / bases_for
+#     (published mirrors before the origin, per-base demotion; the breaker counts files, not bases).
+const LEVEL := 13
 const OLDEST := 1

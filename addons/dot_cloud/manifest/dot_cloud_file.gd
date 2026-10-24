@@ -78,6 +78,7 @@ static func from_dict(d: Dictionary) -> DotResult:
 	f.required = bool(d.get("required", true))
 	f.url_path = str(d.get("url_path", ""))
 	f.side = str(d.get("side", SIDE_BOTH))
+	# Unknown keys are ignored, so a later level's per-file `chunks` (docs/sources.md, delta patches) reads as a whole file.
 
 	for g in d.get("groups", []):
 		f.groups.append(str(g))

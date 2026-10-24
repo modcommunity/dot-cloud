@@ -128,6 +128,24 @@ extends DotConfig
 ## turns a working download into an infinite retry loop.
 @export_range(10.0, 3600.0, 10.0) var file_timeout_sec: float = 600.0
 
+@export_group("Mirrors and prefetch")
+
+## URL of the site's signed mirror list (`<game origin>/content/mirrors.json`); "" = none (API 13).
+@export var mirrors_url: String = ""
+
+## Fetch packs from published community mirrors. Off is the privacy opt-out: a mirror sees
+## which addresses fetch which packs, so off means the origin only.
+@export var use_mirrors: bool = true
+
+## Most bytes one [method DotCloudClient.prefetch] downloads; a pack that would exceed what is left is skipped.
+@export var prefetch_max_bytes: int = 256 * 1024 * 1024
+
+## Most packs one prefetch document may name; the rest are skipped.
+@export var prefetch_max_packs: int = 8
+
+## Allow prefetch in a browser, where storage is a quota shared with the whole origin.
+@export var prefetch_on_web: bool = false
+
 @export_group("Mounting")
 
 ## Which side of a game this process fetches packs as: [code]auto[/code], [code]client[/code],
@@ -252,6 +270,9 @@ func validate() -> DotResult:
 		return DotResult.fail(
 			DotError.CODE_INVALID, "parallel_downloads must be at least 1."
 		)
+
+	if prefetch_max_bytes < 0 or prefetch_max_packs < 0:
+		return DotResult.fail(DotError.CODE_INVALID, "prefetch_max_bytes and prefetch_max_packs must not be negative.")
 
 	# A typo here (`sever`) would otherwise read as "both" and fetch everything, which works
 	# and quietly undoes the setting; or as a side that matches nothing.
