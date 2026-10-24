@@ -20,12 +20,12 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/trust.md](docs/trust.md) | manifests, signatures, envelopes, trusted keys, anything a server or publisher supplies |
 | [docs/client.md](docs/client.md) | `DotCloudClient`: the registry name, `acquire` by URL, `ensure` by id and version |
 | [docs/store.md](docs/store.md) | `DotCloudStore`: content addressing, the index, partials, the web and mobile limits |
-| [docs/sources.md](docs/sources.md) | local, HTTP and in-band sources, failover, resume, the downloader |
+| [docs/sources.md](docs/sources.md) | local, HTTP and in-band sources, failover, resume, the downloader, published mirrors, prefetch |
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
 | [docs/auto-update.md](docs/auto-update.md) | `server/`: `DotCloudAutoUpdate`, the exit-code-75 restart contract, `autoupdate.yml` and the `sv_autoupdate_*` cvars |
-| [docs/testing.md](docs/testing.md) | the thirteen demos, the fan-out trap, adding a check |
+| [docs/testing.md](docs/testing.md) | the fourteen demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
 ## Layout
@@ -33,10 +33,10 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | Path | What |
 | --- | --- |
 | `addons/dot_cloud/dot_cloud_config.gd` | layered config; `validate()` refuses unsigned by default |
-| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop`, 7 `client_platform`, 8 `DotCloudFile.side` / `DotCloudConfig.side` / `sides.json`, 9 `DotCloudManifest.bundle` (one signed ZIP of the small objects), `DotCloudPublisher.write_bundle`, `DotCloudConfig.use_bundles`, 10 `DotCloudSliceLoader.loaded` / `named_class_scripts`, `DotCloudClient.warm_content` (compiles a pack's scripts a slice per frame, reports progress), 11 `DotCloudPublisher.script_tokens_dir` (scripts as `.gdc` + `.gd.remap`, made by `publish/tokenize_scripts.sh`), 12 `DotCloudAutoUpdate` / `DotCloudAutoUpdateConfig` |
+| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop`, 7 `client_platform`, 8 `DotCloudFile.side` / `DotCloudConfig.side` / `sides.json`, 9 `DotCloudManifest.bundle` (one signed ZIP of the small objects), `DotCloudPublisher.write_bundle`, `DotCloudConfig.use_bundles`, 10 `DotCloudSliceLoader.loaded` / `named_class_scripts`, `DotCloudClient.warm_content` (compiles a pack's scripts a slice per frame, reports progress), 11 `DotCloudPublisher.script_tokens_dir` (scripts as `.gdc` + `.gd.remap`, made by `publish/tokenize_scripts.sh`), 12 `DotCloudAutoUpdate` / `DotCloudAutoUpdateConfig`, 13 `DotCloudMirrorList` (signed published mirrors), per-base health, `DotCloudClient.load_mirror_list` / `mirror_alternatives` / `prefetch` |
 | `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper), `DotCloudProvides` (the `provides` block, strict at publish, tolerant at mount), `DotCloudScriptScan` (`runs_code`) |
 | `addons/dot_cloud/store/` | the content-addressed cache: LRU eviction, refs, the index |
-| `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; the downloader (worker pool, failover, throttle, progress) |
+| `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; `DotCloudMirrorList` (the site's signed mirror list); the downloader (worker pool, failover, throttle, progress) |
 | `addons/dot_cloud/verify/` | RSA-SHA256 sign/verify |
 | `addons/dot_cloud/mount/` | `DotCloudMounter`: PCK building and the unmount problem |
 | `addons/dot_cloud/client/` | `DotCloudClient`, the one node a game needs |
@@ -44,7 +44,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
 | `addons/dot_cloud/server/` | `DotCloudAutoUpdate` (registry `dot_cloud_autoupdate`, server only, a no-op on web), `DotCloudAutoUpdateConfig` |
 | `addons/dot_cloud/workshop/` | `DotCloudWorkshop` (registry `dot_workshop`, the solo sync client), `DotCloudWorkshopConfig`, `DotCloudWorkshopList`, `DotCloudWorkshopDevice` (this device's overrides) |
-| `examples/` | the thirteen demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
+| `examples/` | the fourteen demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
 
 ## Running and testing
 
@@ -90,6 +90,8 @@ Short forms; the reasoning is in the linked file.
 - A source is skipped by `is_supported`, `is_available` or `can_serve`, three different questions. [sources](docs/sources.md#three-reasons-to-skip-a-source)
 - The in-band source needs all three bounds (chunks, chunk timeout, file timeout). [sources](docs/sources.md#the-in-band-source)
 - A hash failure after a resume restarts that transfer from zero on the same mirror before blaming it. [sources](docs/sources.md#resume)
+- A published mirror can withhold or corrupt, never substitute: manifests never come from one, and the list verifies only against a key trusted for `_platform/mirrors`. `use_mirrors = false` is the privacy opt-out. [sources](docs/sources.md#published-mirrors-api-13)
+- The HTTP breaker counts files, not bases: a base that fails twice is demoted to last, and the source fails once only when every base failed. [sources](docs/sources.md#published-mirrors-api-13)
 - Fan out coroutines with bare calls plus a member counter; every return path increments and emits. [testing](docs/testing.md#the-fan-out-trap)
 
 **Publishing**
@@ -113,4 +115,4 @@ Short forms; the reasoning is in the linked file.
 
 ## Deliberately not here
 
-Delta patching (real work, clear payoff, not started), stored compression (it would break "the filename is the hash of the content"; `Accept-Encoding: gzip` covers the wire), an editor dock (publishing is CLI-only), and Ed25519 (Godot's `Crypto` has no EdDSA; it needs a GDExtension).
+Delta patching (designed in [sources](docs/sources.md#delta-patches-designed-not-built), not built), stored compression (it would break "the filename is the hash of the content"; `Accept-Encoding: gzip` covers the wire), an editor dock (publishing is CLI-only), and Ed25519 (Godot's `Crypto` has no EdDSA; it needs a GDExtension).
