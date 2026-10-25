@@ -11,8 +11,8 @@ extends Node
 ## [/codeblock]
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 41
-const SECTIONS := 7
+const CHECKS := 48
+const SECTIONS := 8
 
 var _failures: int = 0
 var _checks: int = 0
@@ -46,6 +46,7 @@ func _run() -> void:
 	await _section_loop()
 	await _section_manifest_rules()
 	await _section_nested()
+	await _section_concurrent()
 	_section_vram_tags()
 
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
@@ -143,6 +144,47 @@ func _section_nested() -> void:
 	_check("chain mounts", got.ok, str(got.error) if not got.ok else "")
 	_check("deepest first", _ready_keys.size() == 3 and _ready_keys[0] == "lib_store@1" and _ready_keys[2] == "deep_top@1", str(_ready_keys))
 	client.queue_free()
+	_end()
+
+
+func _section_concurrent() -> void:
+	_begin("concurrent")
+	var res: Array = []
+	var done := [0]
+	var fire := func(c: DotCloudClient, id: StringName) -> void:
+		res.append(await c.ensure(id, "1"))
+		done[0] += 1
+	var same := _client("conc_same")
+	fire.call(same, &"map_a")
+	fire.call(same, &"map_a")
+	while done[0] < 2:
+		await get_tree().process_frame
+	_check("same pack twice: first ok", res[0].ok, str(res[0].error) if not res[0].ok else "")
+	_check("same pack twice: second joins, not circular", res[1].ok, str(res[1].error) if not res[1].ok else "")
+	same.queue_free()
+
+	var two := _client("conc_two")
+	res.clear()
+	done[0] = 0
+	fire.call(two, &"map_a")
+	fire.call(two, &"map_b")
+	while done[0] < 2:
+		await get_tree().process_frame
+	_check("shared dependency: a ok", res[0].ok, str(res[0].error) if not res[0].ok else "")
+	_check("shared dependency: b ok", res[1].ok, str(res[1].error) if not res[1].ok else "")
+	_check("both mounted", two.is_mounted(&"map_a", "1") and two.is_mounted(&"map_b", "1"))
+	two.queue_free()
+
+	var cyc := _client("conc_cycle")
+	res.clear()
+	done[0] = 0
+	fire.call(cyc, &"loop_a")
+	fire.call(cyc, &"map_b")
+	while done[0] < 2:
+		await get_tree().process_frame
+	_check("cycle still refused beside another acquisition", not res[0].ok)
+	_check("neighbour unaffected by the cycle", res[1].ok, str(res[1].error) if not res[1].ok else "")
+	cyc.queue_free()
 	_end()
 
 

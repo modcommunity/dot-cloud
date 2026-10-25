@@ -479,7 +479,8 @@ func _await_inflight(key: String) -> DotResult:
 
 func acquire_manifest(
 	manifest: DotCloudManifest,
-	groups: PackedStringArray = PackedStringArray()
+	groups: PackedStringArray = PackedStringArray(),
+	chain: PackedStringArray = PackedStringArray()
 ) -> DotResult:
 	if not _started:
 		var started := await start()
@@ -497,7 +498,7 @@ func acquire_manifest(
 		return _ready_result(manifest)
 
 	# A dependency loop would join its own acquisition below and wait for itself forever.
-	if _dependency_chain.has(key):
+	if chain.has(key):
 		return _fail(DotError.make(DotError.CODE_INVALID, "Content dependencies are circular.", key))
 
 	if _inflight.has(key):
@@ -510,7 +511,7 @@ func acquire_manifest(
 	# appears after something else has already gone wrong.
 	_inflight[key] = true
 
-	var outcome := await _acquire_inner(manifest, groups, key)
+	var outcome := await _acquire_inner(manifest, groups, key, chain)
 
 	_inflight.erase(key)
 	_acquire_finished.emit(key, outcome)
@@ -521,7 +522,8 @@ func acquire_manifest(
 func _acquire_inner(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray,
-	key: String
+	key: String,
+	chain: PackedStringArray = PackedStringArray()
 ) -> DotResult:
 	# [b]Refused from the manifest alone, before a byte is fetched.[/b] A root overlay replaces
 	# the build's code for the whole process, which is a server's decision, never a
@@ -538,7 +540,7 @@ func _acquire_inner(
 				key
 			))
 
-	var needed := await _ensure_dependencies(manifest, key)
+	var needed := await _ensure_dependencies(manifest, key, chain)
 	if not needed.ok:
 		return _fail(needed.error)
 
@@ -587,27 +589,22 @@ func _acquire_inner(
 	return _ready_result(manifest)
 
 
-## Content keys being acquired as someone's dependency, outermost first, so a cycle is refused instead of awaited forever.
-var _dependency_chain: PackedStringArray = PackedStringArray()
-
-
 ## Acquires everything [param manifest] depends on, before its own download: a dependency already mounted
 ## returns at once and one whose files are in the store downloads nothing, so a client that has a shared
-## store pays for it once however many packs name it.
-func _ensure_dependencies(manifest: DotCloudManifest, key: String) -> DotResult:
+## store pays for it once however many packs name it. [param chain] is the keys above this call on its own
+## call stack, so concurrent acquisitions neither see each other's chain nor share the depth cap.
+func _ensure_dependencies(manifest: DotCloudManifest, key: String, chain: PackedStringArray) -> DotResult:
 	if manifest.dependencies.is_empty():
 		return DotResult.success(true)
-	if _dependency_chain.has(key) or _dependency_chain.size() >= 4:
+	if chain.has(key) or chain.size() >= 4:
 		return DotResult.fail(DotError.CODE_INVALID, "Content dependencies are circular or nested too deep.", key)
-	_dependency_chain.append(key)
-	var outcome := DotResult.success(true)
+	var below := chain.duplicate()
+	below.append(key)
 	for dep in manifest.dependencies:
-		var got := await ensure(StringName(str(dep["id"])), str(dep["version"]))
+		var got := await ensure(StringName(str(dep["id"])), str(dep["version"]), PackedStringArray(), "", below)
 		if not got.ok:
-			outcome = got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
-			break
-	_dependency_chain.remove_at(_dependency_chain.size() - 1)
-	return outcome
+			return got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
+	return DotResult.success(true)
 
 
 ## Where the dependency [param content_id] of a mounted pack is mounted, or "" when it is not mounted here.
@@ -846,7 +843,8 @@ func ensure(
 	content_id: StringName,
 	version: String = "",
 	groups: PackedStringArray = PackedStringArray(),
-	manifest_url: String = ""
+	manifest_url: String = "",
+	chain: PackedStringArray = PackedStringArray()
 ) -> DotResult:
 	var id := String(content_id)
 
@@ -884,7 +882,7 @@ func ensure(
 		if manifest != null:
 			_apply_side(manifest)
 			if not mounter.covers(manifest):
-				return await acquire_manifest(manifest, groups)
+				return await acquire_manifest(manifest, groups, chain)
 			_index_manifest(manifest)
 			_set_phase(Phase.READY, "Ready.")
 			return _ready_result(manifest)
@@ -896,7 +894,7 @@ func ensure(
 	if not resolved.ok:
 		return resolved
 
-	return await acquire_manifest(resolved.value, groups)
+	return await acquire_manifest(resolved.value, groups, chain)
 
 
 ## [method ensure] for a mount that knows which session it is for and where the content came
