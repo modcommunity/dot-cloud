@@ -33,6 +33,15 @@ Load-bearing details:
 
 A failed sync says why: `DotCloudDownloader` keeps the first required file's failure in the summary's detail, while the summary's code stays `CODE_NETWORK` regardless, because callers branch on codes.
 
+## Dependencies: a shared store is its own content
+
+A manifest may list `dependencies` (`[{"id", "version"}]`, API level 15, signed with the rest of the payload; `DotCloudPublisher.dependencies`, CLI `--depends id@version`). `acquire_manifest` acquires each one through `ensure` before it downloads the pack itself: a dependency already mounted returns at once, and one whose files are already in the store downloads nothing, so a client pays for a shared store once however many packs name it. A pack that fails to get its dependency is refused with the dependency's key in the message and mounts nothing.
+
+- **The version is exact**, because a mounted pack never unmounts and content mounts at `res://<mount_root>/<id>/<version>/`. A store that grows is published as a new version holding the old files too (same hashes, so a client downloads only the difference) and a pack built later names the newer one; an older pack keeps working against the older mount. `dependency_prefix(id, version)` says where a dependency is mounted, "" when it is not.
+- **Loops and depth.** A chain deeper than four, or a pack reached again while its own dependencies are being acquired, is refused with `CODE_INVALID`: joining the acquisition already running would wait for itself. At most eight dependencies per manifest.
+- **An older build ignores the field** and mounts the pack without the dependency, so the content that needs it fails to find its files; the pack's `requires.json` is the place to say it needs this API level.
+- `examples/dependency_demo.tscn` covers it.
+
 ## Compiling a pack's scripts before its scene loads
 
 Without threads (a browser), `load()` of a delivered scene compiles its whole script closure in one frame: game-arena's `arena.tscn` was 5.4 s, about 550 scripts, most of them addon classes the pack's scripts name. `warm_content(tree, keys)` compiles them first through `DotCloudSliceLoader`, a slice per frame: the addon classes the pack's sources name (`named_class_scripts`, a word scan; exported scripts report no dependencies), then the pack's own scripts. Keep the returned loader until the scene's `load()` is done, because its `loaded` array is what keeps the cache from dropping them. `DotClientLink` calls it before every delivered scene; it returns at once where there are threads. What it cannot split is one script's own compile (`arena_client.gd`, 2600 lines, about 0.6 s).

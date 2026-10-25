@@ -25,7 +25,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |
 | [docs/auto-update.md](docs/auto-update.md) | `server/`: `DotCloudAutoUpdate`, the exit-code-75 restart contract, `autoupdate.yml` and the `sv_autoupdate_*` cvars |
-| [docs/testing.md](docs/testing.md) | the fourteen demos, the fan-out trap, adding a check |
+| [docs/testing.md](docs/testing.md) | the fifteen demos, the fan-out trap, adding a check |
 | [docs/history.md](docs/history.md) | a delivery bug that "cannot be happening"; how each looked |
 
 ## Layout
@@ -33,7 +33,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | Path | What |
 | --- | --- |
 | `addons/dot_cloud/dot_cloud_config.gd` | layered config; `validate()` refuses unsigned by default |
-| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop`, 7 `client_platform`, 8 `DotCloudFile.side` / `DotCloudConfig.side` / `sides.json`, 9 `DotCloudManifest.bundle` (one signed ZIP of the small objects), `DotCloudPublisher.write_bundle`, `DotCloudConfig.use_bundles`, 10 `DotCloudSliceLoader.loaded` / `named_class_scripts`, `DotCloudClient.warm_content` (compiles a pack's scripts a slice per frame, reports progress), 11 `DotCloudPublisher.script_tokens_dir` (scripts as `.gdc` + `.gd.remap`, made by `publish/tokenize_scripts.sh`), 12 `DotCloudAutoUpdate` / `DotCloudAutoUpdateConfig`, 13 `DotCloudMirrorList` (signed published mirrors), per-base health, `DotCloudClient.load_mirror_list` / `mirror_alternatives` / `prefetch`, 14 `DotCloudMirrorList.parse_signed(..., newest_seen)` refuses a list older than the newest accepted |
+| `addons/dot_cloud/dot_cloud_api.gd` | the API level (dot-core's `DotAddonApi` rule) and what each level added: 2 `DotCloudPublisher.extra_files`, 3 `acquire` refuses on `requires.json` before downloading the pack, 4 `ship_import_sources`, 5 `provides`, `DotCloudScriptScan`, `ensure_for_session`, 6 `DotCloudWorkshop`, 7 `client_platform`, 8 `DotCloudFile.side` / `DotCloudConfig.side` / `sides.json`, 9 `DotCloudManifest.bundle` (one signed ZIP of the small objects), `DotCloudPublisher.write_bundle`, `DotCloudConfig.use_bundles`, 10 `DotCloudSliceLoader.loaded` / `named_class_scripts`, `DotCloudClient.warm_content` (compiles a pack's scripts a slice per frame, reports progress), 11 `DotCloudPublisher.script_tokens_dir` (scripts as `.gdc` + `.gd.remap`, made by `publish/tokenize_scripts.sh`), 12 `DotCloudAutoUpdate` / `DotCloudAutoUpdateConfig`, 13 `DotCloudMirrorList` (signed published mirrors), per-base health, `DotCloudClient.load_mirror_list` / `mirror_alternatives` / `prefetch`, 14 `DotCloudMirrorList.parse_signed(..., newest_seen)` refuses a list older than the newest accepted, 15 `DotCloudManifest.dependencies`, `--depends` |
 | `addons/dot_cloud/manifest/` | `DotCloudFile` (refuses traversal and bad hashes), `DotCloudManifest` (`from_json_bytes()` is the only parser), `DotCloudEnvelope` (the signed wrapper), `DotCloudProvides` (the `provides` block, strict at publish, tolerant at mount), `DotCloudScriptScan` (`runs_code`) |
 | `addons/dot_cloud/store/` | the content-addressed cache: LRU eviction, refs, the index |
 | `addons/dot_cloud/transfer/` | source base with circuit breaker and `can_serve()`; HTTP, local, in-band sources; `DotCloudMirrorList` (the site's signed mirror list); the downloader (worker pool, failover, throttle, progress) |
@@ -44,11 +44,11 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | `addons/dot_cloud/publish/` | publisher, CLI, `DotCloudRegistry` (built ahead of its consumer) |
 | `addons/dot_cloud/server/` | `DotCloudAutoUpdate` (registry `dot_cloud_autoupdate`, server only, a no-op on web), `DotCloudAutoUpdateConfig` |
 | `addons/dot_cloud/workshop/` | `DotCloudWorkshop` (registry `dot_workshop`, the solo sync client), `DotCloudWorkshopConfig`, `DotCloudWorkshopList`, `DotCloudWorkshopDevice` (this device's overrides) |
-| `examples/` | the fourteen demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
+| `examples/` | the fifteen demos, `http_test_server.gd`, `workshop_backbone.gd` (a fake site), the addon boot probe |
 
 ## Running and testing
 
-- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `bundle_demo`, `tokens_demo`, `auto_update_demo`, `mirror_demo` (signed list, bad mirrors, resume, opt-out, prefetch). Each exits non-zero on a failed check. [testing](docs/testing.md)
+- The family's two steps ([game-dev/CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `dependency_demo`, `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `bundle_demo`, `tokens_demo`, `auto_update_demo`, `mirror_demo` (signed list, bad mirrors, resume, opt-out, prefetch). Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
 - A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
 

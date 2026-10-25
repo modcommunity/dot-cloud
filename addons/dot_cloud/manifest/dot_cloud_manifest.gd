@@ -80,6 +80,15 @@ const FORMAT_VERSION := 1
 ## every entry, so it adds no trust. Signed with the rest of the payload.
 @export var bundle: Dictionary = {}
 
+## Content this one needs mounted first, each `{id, version}`; empty for most packs. A shared store
+## (textures, models) is its own content, so a client that already has it skips it and a pack is
+## not rebuilt when the store grows. The version is exact: a mounted pack never unmounts, so a pack
+## names the store revision it was built against. Signed with the rest of the payload.
+@export var dependencies: Array[Dictionary] = []
+
+## Most dependencies a manifest may name (a typo or a hostile list must not start a hundred downloads).
+const MAX_DEPENDENCIES := 8
+
 ## Format version the document declared.
 var format_version: int = FORMAT_VERSION
 
@@ -181,6 +190,11 @@ static func from_dict(d: Dictionary) -> DotResult:
 		m.provides = d["provides"]
 	if d.get("bundle") is Dictionary:
 		m.bundle = d["bundle"]
+	if d.get("dependencies") is Array:
+		for dep: Variant in d["dependencies"]:
+			if not (dep is Dictionary):
+				return DotResult.fail(DotError.CODE_PARSE, "Each dependency must be an object with an id and a version.")
+			m.dependencies.append({"id": str((dep as Dictionary).get("id", "")), "version": str((dep as Dictionary).get("version", ""))})
 
 	for u in d.get("mirrors", []):
 		m.mirrors.append(str(u))
@@ -302,6 +316,10 @@ func validate_shape() -> DotResult:
 	if not root_safe.ok:
 		return root_safe.wrap("The manifest's mount_root is unsafe.")
 
+	var deps := _check_dependencies()
+	if not deps.ok:
+		return deps
+
 	if entry_scene != "":
 		var entry_safe := DotPaths.safe_relative(entry_scene)
 		if not entry_safe.ok:
@@ -319,6 +337,23 @@ func validate_shape() -> DotResult:
 ## publisher that asked it would refuse to build content targeting a newer Godot than
 ## the box doing the building. [DotCloudPublisher] used to carry its own copy of the id
 ## rule to avoid exactly that, and the copy went stale the moment the rule changed.
+## Every dependency names a safe id and one exact version, and none is this content itself.
+func _check_dependencies() -> DotResult:
+	if dependencies.size() > MAX_DEPENDENCIES:
+		return DotResult.fail(DotError.CODE_INVALID, "A manifest names at most %d dependencies." % MAX_DEPENDENCIES)
+	for dep in dependencies:
+		var id := str(dep.get("id", ""))
+		var ver := str(dep.get("version", ""))
+		var safe := DotPaths.safe_relative(id)
+		if id == "" or not safe.ok or id.split("/", false).size() > 2 or DotPaths.slugify(id.replace("/", "-")) != id.replace("/", "-"):
+			return DotResult.fail(DotError.CODE_INVALID, "A dependency's id is unsafe or empty.", "got '%s'" % id)
+		if ver == "" or "/" in ver or "\\" in ver or not DotPaths.safe_relative(ver).ok:
+			return DotResult.fail(DotError.CODE_INVALID, "A dependency needs one exact version.", "'%s' of '%s'" % [ver, id])
+		if id == content_id and ver == version:
+			return DotResult.fail(DotError.CODE_INVALID, "Content cannot depend on itself.", id)
+	return DotResult.success(true)
+
+
 func validate() -> DotResult:
 	var shape := validate_shape()
 	if not shape.ok:
@@ -366,6 +401,8 @@ func to_dict() -> Dictionary:
 		d["provides"] = provides
 	if not bundle.is_empty():
 		d["bundle"] = bundle
+	if not dependencies.is_empty():
+		d["dependencies"] = dependencies
 
 	# Sorted by hash so the serialisation is deterministic regardless of the
 	# order the publisher walked the source directory. Without this, two

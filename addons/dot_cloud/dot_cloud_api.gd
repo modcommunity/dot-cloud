@@ -31,5 +31,7 @@ extends RefCounted
 #     (published mirrors before the origin, per-base demotion; the breaker counts files, not bases).
 # 14: DotCloudMirrorList.parse_signed(bytes, trusted_keys, now_unix, newest_seen): refuses a signed list older than the
 #     newest accepted (replay of an old mirror list).
-const LEVEL := 14
+# 15: DotCloudManifest.dependencies (signed {id, version} list), DotCloudPublisher.dependencies / CLI --depends;
+#     DotCloudClient acquires them first (skipped when mounted or already in the store). An older build ignores the field.
+const LEVEL := 15
 const OLDEST := 1

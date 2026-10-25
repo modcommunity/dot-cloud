@@ -46,6 +46,9 @@ var mount_root: String = "dot_cloud"
 var entry_scene: String = ""
 var min_engine_version: String = ""
 
+## Content this pack needs mounted first, each `{id, version}` (see [member DotCloudManifest.dependencies]).
+var dependencies: Array[Dictionary] = []
+
 ## Base URLs written into the manifest, so clients know where to fetch from.
 var mirrors: PackedStringArray = PackedStringArray()
 
@@ -346,6 +349,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	manifest.mount_root = mount_root
 	manifest.entry_scene = entry_scene
 	manifest.min_engine_version = min_engine_version
+	manifest.dependencies = dependencies.duplicate(true)
 	manifest.mirrors = mirrors
 	manifest.metadata = metadata
 
@@ -1141,6 +1145,21 @@ func _platforms_for(path: String) -> PackedStringArray:
 					out.append(str(t))
 				return out
 			return PackedStringArray([str(tags)])
+	return vram_platforms(path) if tag_vram_textures else PackedStringArray()
+
+
+## Tag a VRAM-compressed texture's per-format output (`.s3tc.ctex`, `.etc2.ctex`, and the `.bptc` / `.astc` ones) with
+## the platforms that use it (API 15), so a desktop client does not download the phone copy and the reverse. A
+## browser gets both: which format it uses depends on the GPU, which no feature tag says. macOS gets both too
+## (Apple GPUs read ETC2/ASTC, Intel ones S3TC). A rule from [member platform_rules] wins.
+var tag_vram_textures: bool = true
+
+
+static func vram_platforms(path: String) -> PackedStringArray:
+	if path.ends_with(".s3tc.ctex") or path.ends_with(".bptc.ctex"):
+		return PackedStringArray(["windows", "linux", "macos", "web"])
+	if path.ends_with(".etc2.ctex") or path.ends_with(".astc.ctex"):
+		return PackedStringArray(["android", "ios", "macos", "web"])
 	return PackedStringArray()
 
 

@@ -496,6 +496,10 @@ func acquire_manifest(
 		_set_phase(Phase.READY, "Ready.")
 		return _ready_result(manifest)
 
+	# A dependency loop would join its own acquisition below and wait for itself forever.
+	if _dependency_chain.has(key):
+		return _fail(DotError.make(DotError.CODE_INVALID, "Content dependencies are circular.", key))
+
 	if _inflight.has(key):
 		DotLog.debug(CHANNEL, "joining an acquisition already running", {"content": key})
 		return await _await_inflight(key)
@@ -533,6 +537,10 @@ func _acquire_inner(
 				"This pack would overlay the build's addons, which a subscription may not do.",
 				key
 			))
+
+	var needed := await _ensure_dependencies(manifest, key)
+	if not needed.ok:
+		return _fail(needed.error)
 
 	# [b]Ask before downloading, not after.[/b] An old web shell once fetched about three
 	# minutes of a game and only then said it needed a newer addon. The requirements are
@@ -577,6 +585,34 @@ func _acquire_inner(
 	content_ready.emit(manifest, str(mounted.value))
 
 	return _ready_result(manifest)
+
+
+## Content keys being acquired as someone's dependency, outermost first, so a cycle is refused instead of awaited forever.
+var _dependency_chain: PackedStringArray = PackedStringArray()
+
+
+## Acquires everything [param manifest] depends on, before its own download: a dependency already mounted
+## returns at once and one whose files are in the store downloads nothing, so a client that has a shared
+## store pays for it once however many packs name it.
+func _ensure_dependencies(manifest: DotCloudManifest, key: String) -> DotResult:
+	if manifest.dependencies.is_empty():
+		return DotResult.success(true)
+	if _dependency_chain.has(key) or _dependency_chain.size() >= 4:
+		return DotResult.fail(DotError.CODE_INVALID, "Content dependencies are circular or nested too deep.", key)
+	_dependency_chain.append(key)
+	var outcome := DotResult.success(true)
+	for dep in manifest.dependencies:
+		var got := await ensure(StringName(str(dep["id"])), str(dep["version"]))
+		if not got.ok:
+			outcome = got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
+			break
+	_dependency_chain.remove_at(_dependency_chain.size() - 1)
+	return outcome
+
+
+## Where the dependency [param content_id] of a mounted pack is mounted, or "" when it is not mounted here.
+func dependency_prefix(content_id: StringName, version: String) -> String:
+	return mount_prefix_for(content_id, version) if is_mounted(content_id, version) else ""
 
 
 ## Between download and mount: the stored files must not run more code than the manifest said.

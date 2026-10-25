@@ -78,6 +78,13 @@ func _publish(opts: Dictionary) -> int:
 	# For content that reads its own asset files raw; see the property.
 	pub.ship_import_sources = opts.has("with-sources")
 
+	for dep in _multi(opts, "depends"):
+		var at := dep.rfind("@")
+		if at <= 0:
+			printerr("--depends wants id@version, got '%s'" % dep)
+			return EXIT_USAGE
+		pub.dependencies.append({"id": dep.substr(0, at), "version": dep.substr(at + 1)})
+
 	for m in _multi(opts, "mirror"):
 		pub.mirrors.append(m)
 
@@ -334,6 +341,7 @@ Commands
     --entry PATH         entry scene, relative to the content root
     --mount-root NAME    res:// subdirectory to mount under        (dot_cloud)
     --min-engine V       minimum Godot version
+    --depends ID@V       content mounted first, one exact version (repeatable)
     --with-sources       also ship each imported asset's source file
     --mirror URL         base URL clients fetch from  (repeatable)
     --key PATH           private key PEM; omit to publish unsigned
