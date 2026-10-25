@@ -8,7 +8,7 @@ extends Node
 
 const WORK := "user://dot_cloud_auto_update_demo"
 const SECTIONS := 11
-const CHECKS := 66
+const CHECKS := 67
 
 var _failures: int = 0
 var _checks: int = 0
@@ -320,6 +320,9 @@ func _section_failures() -> void:
 	await u.check_now()
 	_check("no update on failure", u.state == DotCloudAutoUpdate.State.IDLE)
 	_check("failure counted", int(u.last_check.get("errors", 0)) == 2, str(u.last_check))
+	u.latest_fn = func(_id: String) -> DotResult: return DotResult.fail(DotError.CODE_FORBIDDEN, "Not allowed.")
+	await u.check_now()
+	_check("an unpublished id is not a failure", int(u.last_check.get("errors", 0)) == 0, str(u.last_check))
 	u.latest_fn = func(_id: String) -> DotResult: return DotResult.success({"id": "gamemann/arena2", "version": "0.1.0"})
 	await u.check_now()
 	_check("moved id is an update", u.state == DotCloudAutoUpdate.State.WAITING and str(u.updates[0]["to"]) == "gamemann/arena2@0.1.0", str(u.updates))

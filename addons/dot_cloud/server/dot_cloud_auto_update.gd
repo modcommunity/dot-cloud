@@ -166,6 +166,11 @@ func _check() -> DotResult:
 			continue
 		var res := got as DotResult
 		if not res.ok:
+			# S3 answers 403, not 404, for a key that does not exist: an id nothing published
+			# (a shipped descriptor for a game this server does not run) is not a failed check.
+			if res.error.code == DotError.CODE_FORBIDDEN:
+				DotLog.debug(CHANNEL, "no published pack to check", {"content": id})
+				continue
 			errors.append("%s: %s" % [id, str(res.error)])
 			continue
 		var latest := res.value as Dictionary
