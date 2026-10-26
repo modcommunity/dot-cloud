@@ -20,7 +20,7 @@ A mounted resource pack can never be unmounted, and packs mount at `res://dot_cl
 | --- | --- |
 | systemd (dot-server-deploy's `deploy/install-systemd.sh`) | `Restart=on-failure` plus `RestartForceExitStatus=75` |
 | docker compose | `restart: unless-stopped`; the entrypoint returns the server's status. A bare `docker run` needs `--restart unless-stopped` |
-| the Pterodactyl egg | the panel's crash detection restarts a server that exits on its own (it skips a second crash within 60 s, which a restart for an update never is) |
+| the Pterodactyl egg | `./server` restarts the engine itself on 75 when wings sets `P_SERVER_UUID` (`TMC_SUPERVISE=0` disables); wings' own crash detection is not relied on, and it is off on some panels |
 | a terminal | nothing restarts it; run under a supervisor or set `enabled: false` |
 
 `restart_fn` replaces the exit for a host with a restart mechanism of its own.
