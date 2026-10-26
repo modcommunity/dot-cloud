@@ -2,11 +2,8 @@ class_name DotCloudMirrorList
 extends RefCounted
 
 ## The site's signed list of community mirrors of a game origin (API 13).
-##
-## A mirror is untrusted: it serves objects whose hashes a signed manifest already names, so
-## it can withhold or corrupt, never substitute. Manifests and `latest.json` never come from
-## one. The list itself is a [DotCloudEnvelope] signed by a key trusted for
-## [constant SCOPE_ID], so a publisher key scoped to `alice/*` cannot point clients anywhere.
+## A mirror is untrusted (it can withhold or corrupt, never substitute; manifests never come from one), so the
+## list is a [DotCloudEnvelope] signed by a key trusted for [constant SCOPE_ID].
 
 const CHANNEL := "cloud.mirrors"
 

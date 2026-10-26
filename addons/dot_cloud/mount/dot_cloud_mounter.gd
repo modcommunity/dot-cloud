@@ -510,29 +510,10 @@ func _build_pack(
 
 
 func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
-	# The version is in the filename as well as the mount prefix, so publishing a
-	# new version never overwrites the pack a running process has open — which on
-	# Windows would fail outright, and elsewhere would corrupt it.
-	#
-	# [b]And a fingerprint of the CONTENT, because a version is not immutable in
-	# practice.[/b] This was `<id>-<version>.pck` and [method _build_pack] reuses whatever
-	# is at the path, on the stated assumption that a pack built for one id@version is
-	# byte-identical to any other. That is true of the published bytes and false of the
-	# development loop that produces them: republishing `g2gfast@0.1.0` from a corrected
-	# source is the ordinary way to fix a game, and every client that had mounted the
-	# previous one went on serving it from this cache. Measured in production — a box
-	# republished a pack whose sources had been fixed, verified every object of the NEW
-	# manifest, and then mounted the OLD pack:
-	#
-	#     A required file is not readable after mounting.
-	#     res://dot_cloud/g2gfast/0.1.0/game/g2g_paths.gd
-	#
-	# a file that is in the manifest, is in the store, and is not in the pack. The check
-	# that caught it is the last one before a game loads.
-	#
-	# It also fixes a second collision nobody had hit yet: [param files] is the WANTED
-	# set, so two different group selections of one id@version produced two different
-	# packs at one path, and whichever mounted first won.
+	# Version and a fingerprint of the CONTENT are in the name: republishing `id@0.1.0` from corrected
+	# sources is the ordinary fix loop, and a path without the fingerprint kept serving the old pack. The
+	# version also stops a new publish overwriting a pack a running process has open (fatal on Windows).
+	# [param files] is the wanted set, so two group selections of one id@version must not share a path.
 	return config.cache_dir.path_join(
 		"packs/%s-%s-%s.pck" % [
 			DotPaths.slugify(manifest.content_id),
@@ -689,26 +670,9 @@ func unmount(content_key: String, store: DotCloudStore) -> DotResult:
 
 ## Counts cached resources still live under [param prefix], and warns about them.
 ##
-## [b]This cannot evict anything, and the version that claimed to did not.[/b]
-## Godot's resource cache holds no strong reference of its own: a [Resource]
-## registers itself on load and unregisters in its destructor, so a path is in
-## the cache exactly while something else still refers to it. Verified in
-## 4.4.1 — drop every reference and [method ResourceLoader.has_cached] goes
-## false on its own, with nothing called to make it.
-##
-## So there is no eviction to perform here, and no script-exposed way to force
-## one. The previous implementation called
-## [code]load(path, "", CACHE_MODE_IGNORE)[/code] and counted the successes,
-## with a comment claiming that made the cache release its reference. It does
-## not: CACHE_MODE_IGNORE returns a brand-new instance and leaves the cached one
-## exactly where it was. The count was the number of resources re-read from disk
-## and thrown away — so [method unmount] logged [code]purged=4[/code] having
-## purged nothing, and paid for a full duplicate load of the content to say it.
-##
-## What is left is the useful half: a non-zero return means the caller did
-## [b]not[/b] free everything before unmounting, which is the one thing that
-## actually breaks a re-mount of this version (it hands back the stale
-## instance). Treat it as a leak report, not as work done.
+## This cannot evict anything: the resource cache holds no strong reference, so a path is cached exactly
+## while something else refers to it, and `CACHE_MODE_IGNORE` only returns a new instance. A non-zero
+## return means the caller did [b]not[/b] free everything before unmounting, which breaks a re-mount.
 func purge_resources(prefix: String) -> int:
 	var still_cached := 0
 

@@ -2,8 +2,7 @@ extends Node
 
 ## A pack whose scripts ship as binary tokens (DotCloudPublisher.script_tokens_dir) mounts,
 ## loads and runs, and the default publish still ships text.
-##
-## godot --headless --path . res://examples/tokens_demo.tscn
+## Run: godot --headless --path . res://examples/tokens_demo.tscn
 
 const WORK := "user://dot_cloud_tokens"
 const CHECKS := 18

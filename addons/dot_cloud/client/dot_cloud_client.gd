@@ -1,6 +1,6 @@
 @tool
 class_name DotCloudClient
-extends Node
+extends "dot_cloud_client_urls.gd"
 
 ## The one node a game needs: fetch a manifest, download, verify, mount.
 ##
@@ -24,6 +24,7 @@ extends Node
 ## while playing the current one is just two of these.
 
 const CHANNEL := "cloud"
+const _Prefetch := preload("dot_cloud_client_prefetch.gd")
 
 ## Registry name the rest of the family looks this up under.
 const SERVICE := &"dot_cloud_client"
@@ -75,41 +76,6 @@ signal _acquire_finished(content_key: String, result: DotResult)
 @export var config_file: String = "user://dot_cloud.json"
 
 @export_group("Sources")
-
-## HTTP base URLs to try when a manifest lists no mirrors of its own.
-@export var http_base_urls: PackedStringArray = PackedStringArray()
-
-## Directories searched before the network. For development and bundled content.
-@export var local_search_dirs: PackedStringArray = PackedStringArray()
-
-## How a content id and version become a manifest URL, for [method ensure].
-##
-## [b]This exists because half the family addresses content by id and version rather
-## than by URL.[/b] [method acquire] takes a manifest URL because dot-server has one to
-## hand — an operator wrote it in a game's configuration. dot-map does not: a map is an
-## id and a version in a catalogue, and a catalogue of a hundred maps should not repeat
-## the same CDN hostname a hundred times. So [method ensure] builds the URL from this,
-## against [member local_search_dirs] first and then [member http_base_urls], and a map
-## that wants a URL of its own overrides it per-map.
-##
-## [code]{base}[/code], [code]{id}[/code] and [code]{version}[/code] are substituted.
-## The default matches what [DotCloudPublisher] writes: a manifest at the root of an
-## output directory, with the id and the version as the path above it, which is the
-## same [code]id/version[/code] namespacing a mount uses.
-@export var manifest_url_template: String = "{base}/{id}/{version}/manifest.json"
-
-## Other shapes to try when [member manifest_url_template] does not answer.
-##
-## [b]An origin does not always hold one layout, and a client cannot make it.[/b] The
-## same base can serve content published under the versioned scheme above beside content
-## published before there was one — a map set uploaded as [code]{base}/{id}/manifest.json[/code]
-## is still the map a game asks for by name, and re-publishing every pack in existence is
-## not something a client gets to require in order to start.
-##
-## Each entry is expanded exactly as the main template is and appended after it, per base,
-## so the primary shape is always asked first and a fallback costs one 404 on content that
-## does not need it. Empty is the ordinary case: an origin with one layout should say so.
-@export var manifest_url_fallbacks: PackedStringArray = PackedStringArray()
 
 ## Allow content to arrive over the game connection when no HTTP source works.
 ##
@@ -213,8 +179,6 @@ var session_tag: StringName = DotContentIndex.SESSION_ONLINE
 ## flight do not read each other's options.
 var _mount_opts: Dictionary = {}
 
-
-# --- Lifecycle -------------------------------------------------------------
 
 ## Publishes the client so the addons that look for it can find it.
 ##
@@ -386,8 +350,6 @@ func set_netchan_delegate(delegate: Object) -> void:
 				{"delegate": delegate.get_class() if delegate != null else "<none>"}
 			)
 
-
-# --- Acquiring content -----------------------------------------------------
 
 ## The whole flow for one content set: fetch, verify, download, mount.
 ##
@@ -1081,137 +1043,6 @@ static func mount_prefix_for(content_id: StringName, version: String = "") -> St
 	]
 
 
-## Manifest URLs to try for this content, best first.
-##
-## Local directories before HTTP bases: the disk is faster, works offline, and is what a
-## development tree and a bundled install both look like.
-func manifest_urls_for(
-	content_id: StringName, version: String = ""
-) -> PackedStringArray:
-	var out := PackedStringArray()
-
-	# Every shape of every LOCAL base before any network base, rather than every base of
-	# every shape: the disk is cheaper than a request whatever layout it is in, and a
-	# fallback that reached the network before checking the rest of this machine would
-	# make an offline install depend on the layout it happened to be published under.
-	for base in local_search_dirs:
-		for url in _expand_all(base, content_id, version):
-			out.append(url)
-
-	for base in resolved_http_base_urls():
-		for url in _expand_all(base, content_id, version):
-			out.append(url)
-
-	return out
-
-
-## One base, every template, primary first.
-func _expand_all(
-	base: String, content_id: StringName, version: String
-) -> PackedStringArray:
-	var out := PackedStringArray([_expand_manifest_url(base, content_id, version)])
-
-	for template in manifest_url_fallbacks:
-		if template.strip_edges() == "":
-			continue
-
-		var url := _expand_with(template, base, content_id, version)
-
-		# A fallback that expands to the primary is a duplicate request and a duplicate
-		# line in the log, which reads as a retry that is not happening.
-		if not url in out:
-			out.append(url)
-
-	return out
-
-
-## Puts the page's origin on a root-relative base, so it becomes a URL.
-##
-## [b]`/content` is not something Godot can fetch, on any platform, and the comment
-## that said otherwise was here for months.[/b] The deployment it describes is right --
-## content served from the page's own origin is the one layout with no CORS to
-## configure at all -- but the resolution it assumed never happens. [HTTPRequest]
-## parses the string ITSELF, in C++, before the browser sees anything:
-##
-##     ERROR: Error parsing URL: '/content/surf_mesa/manifest.json'
-##        at: _parse_url (scene/main/http_request.cpp:61)
-##
-## and then the fetch fails with an engine message naming no setting anybody wrote.
-## [method DotWeb.origin] has existed the whole time, documented as "needed to build
-## same-origin content URLs", and nothing called it. This is the call.
-##
-## Only ever applied to HTTP bases. A local search directory beginning with `/` is an
-## absolute path on a real filesystem and must stay one.
-static func resolve_base_url(base: String) -> String:
-	return join_origin(DotWeb.origin(), base)
-
-
-## The pure half of [method resolve_base_url], so it can be tested off-web.
-##
-## Off-web [method DotWeb.origin] returns "" and this returns the base untouched --
-## which keeps a native client's absolute path working, and leaves a genuinely
-## misconfigured root-relative base to be refused by name further down rather than
-## turned into something that looks like a URL and is not.
-static func join_origin(origin: String, base: String) -> String:
-	if origin == "" or base == "" or base.contains("://") or not base.begins_with("/"):
-		return base
-	return origin.trim_suffix("/") + base
-
-
-## Every HTTP base, made absolute where a page origin can do it.
-func resolved_http_base_urls() -> PackedStringArray:
-	var out := PackedStringArray()
-	for base in http_base_urls:
-		out.append(resolve_base_url(base))
-	return out
-
-
-func _expand_manifest_url(
-	base: String, content_id: StringName, version: String
-) -> String:
-	return _expand_with(manifest_url_template, base, content_id, version)
-
-
-## The substitution itself, for the primary template and every fallback alike.
-static func _expand_with(
-	template: String, base: String, content_id: StringName, version: String
-) -> String:
-	return template \
-		.replace("{base}", base.trim_suffix("/")) \
-		.replace("{id}", String(content_id)) \
-		.replace("{version}", version if version != "" else "0.0.0")
-
-
-## Whether a manifest URL names a file on this machine rather than a server.
-##
-## [b]A scheme-less string is not automatically a path, and getting that wrong breaks
-## the browser.[/b] The obvious rule — "no [code]://[/code] means local" — is wrong for
-## exactly the deployment the web target wants: a page served from the same origin as
-## its content uses a root-relative URL like [code]/content/x/1.0.0/manifest.json[/code],
-## because same-origin is what avoids CORS entirely, and [DotHttp] resolves it against
-## [member DotHttp.base_url] like any other request. Treating it as a file would make
-## the one CORS-free configuration the only one that cannot fetch a manifest.
-##
-## So: the three file schemes are local outright, anything with another scheme is not,
-## and a bare path is local only if it is actually there. That last check is why this is
-## not a pure function, and it is worth it — the alternative is guessing.
-static func is_local_manifest_url(manifest_url: String) -> bool:
-	if manifest_url.begins_with("res://") or manifest_url.begins_with("user://"):
-		return true
-	if manifest_url.begins_with("file://"):
-		return true
-	if manifest_url.contains("://"):
-		return false
-	return FileAccess.file_exists(manifest_url)
-
-
-static func _local_manifest_path(manifest_url: String) -> String:
-	return (
-		manifest_url.trim_prefix("file://") if manifest_url.begins_with("file://")
-		else manifest_url
-	)
-
-
 ## Downloads and verifies a manifest without acting on it.
 ##
 ## Signature verification runs over the bytes as received, never a
@@ -1405,8 +1236,6 @@ func cancel() -> void:
 		downloader.cancel()
 
 
-# --- Mirrors and prefetch -------------------------------------------------
-
 ## Fetches and verifies the site's signed mirror list ([param url], or
 ## [member DotCloudConfig.mirrors_url]) and hands it to the HTTP source, ranked by latency when
 ## [param rank] is set. Succeeds doing nothing when there is no URL or mirrors are opted out.
@@ -1483,117 +1312,14 @@ func mirror_alternatives(url: String) -> PackedStringArray:
 ## [member DotCloudConfig.prefetch_max_packs]. The objects are ordinary unreferenced LRU entries.
 ## Returns `{packs_fetched, packs_skipped, bytes, skipped: [{id, version, why}], avatar_library}`.
 func prefetch(doc: Dictionary) -> DotResult:
-	if not _started:
-		var started := await start()
-		if not started.ok:
-			return started
-	if DotPlatform.is_web() and not config.prefetch_on_web:
-		return DotResult.fail(DotError.CODE_UNSUPPORTED, "Prefetch is off in the browser.", "prefetch_on_web")
-
-	var parsed := parse_prefetch(doc, config.prefetch_max_packs)
-	if not parsed.ok:
-		return parsed
-	var plan: Dictionary = parsed.value
-
-	var doc_mirrors := str(plan["mirrors_url"])
-	if doc_mirrors != "" and _mirror_list == null and config.use_mirrors:
-		await load_mirror_list(doc_mirrors)
-
-	var skipped: Array = (plan["over_cap"] as Array).duplicate()
-	var fetched := 0
-	var bytes := 0
-	var budget := config.prefetch_max_bytes
-
-	for entry: Dictionary in plan["packs"]:
-		var id := str(entry["id"])
-		var version := str(entry["version"])
-		var resolved := await resolve_manifest(StringName(id), version)
-		if not resolved.ok:
-			skipped.append({"id": id, "version": version, "why": resolved.error.message})
-			continue
-		var manifest: DotCloudManifest = resolved.value
-		var need := plan_for(manifest)
-		var missing := int(need["missing_bytes"])
-		if missing > budget - bytes:
-			skipped.append({"id": id, "version": version, "why": "over the prefetch byte budget (%s)" % DotPaths.format_bytes(missing)})
-			continue
-		var key := manifest.key()
-		var done := await _download(manifest, PackedStringArray(), key)
-		# The sync claims refs; a prefetched pack nobody mounted must stay evictable.
-		if not mounter.is_mounted(key) and not _inflight.has(key):
-			store.release_refs(key)
-			store.flush_index()
-		if not done.ok:
-			skipped.append({"id": id, "version": version, "why": done.error.message})
-			continue
-		fetched += 1
-		bytes += missing
-
-	if _inflight.is_empty() and not _sync_busy:
-		_set_phase(Phase.IDLE, "")
-	DotLog.info(CHANNEL, "prefetch finished", {
-		"server": plan["server_id"], "fetched": fetched, "skipped": skipped.size(),
-		"bytes": DotPaths.format_bytes(bytes),
-	})
-	return DotResult.success({
-		"packs_fetched": fetched,
-		"packs_skipped": skipped.size(),
-		"bytes": bytes,
-		"skipped": skipped,
-		"avatar_library": plan["avatar_library"],
-	})
+	return await _Prefetch.run(self, doc)
 
 
 ## Validates a prefetch document strictly: kind, format, and each pack's id and version through
 ## [method DotCloudManifest.validate_shape]. Packs past [param max_packs] land in `over_cap`.
 static func parse_prefetch(doc: Dictionary, max_packs: int) -> DotResult:
-	if str(doc.get("kind", "")) != "dot_cloud_prefetch":
-		return DotResult.fail(DotError.CODE_INVALID, "This is not a prefetch document.")
-	var fmt: Variant = doc.get("format", 0)
-	if not (fmt is int or fmt is float) or int(fmt) != 1:
-		return DotResult.fail(DotError.CODE_VERSION, "Unsupported prefetch format.", str(fmt))
-	var raw: Variant = doc.get("packs", null)
-	if not (raw is Array):
-		return DotResult.fail(DotError.CODE_PARSE, "The prefetch document has no packs array.")
-	var packs: Array = []
-	var over_cap: Array = []
-	var seen := {}
-	for p: Variant in raw:
-		if not (p is Dictionary):
-			return DotResult.fail(DotError.CODE_PARSE, "A prefetch pack is not an object.")
-		var id := str((p as Dictionary).get("id", ""))
-		var version := str((p as Dictionary).get("version", ""))
-		var probe := DotCloudManifest.new()
-		probe.content_id = id
-		probe.version = version
-		var shape := probe.validate_shape()
-		if not shape.ok:
-			return shape.wrap("The prefetch document names an unusable pack.")
-		var key := "%s@%s" % [id, version]
-		if seen.has(key):
-			continue
-		seen[key] = true
-		var entry := {"id": id, "version": version}
-		if packs.size() >= max_packs:
-			over_cap.append({"id": id, "version": version, "why": "over the prefetch pack limit"})
-		else:
-			packs.append(entry)
-	var mirrors := str(doc.get("mirrors_url", ""))
-	if mirrors != "":
-		var ok := DotCloudMirrorList.check_base_url(mirrors)
-		if not ok.ok:
-			return ok.wrap("The prefetch document's mirrors_url is unusable.")
-	return DotResult.success({
-		"server_id": doc.get("server_id", null),
-		"app_id": doc.get("app_id", null),
-		"packs": packs,
-		"over_cap": over_cap,
-		"avatar_library": str(doc.get("avatar_library", "")),
-		"mirrors_url": mirrors,
-	})
+	return _Prefetch.parse(doc, max_packs)
 
-
-# --- State ----------------------------------------------------------------
 
 func phase() -> Phase:
 	return _phase

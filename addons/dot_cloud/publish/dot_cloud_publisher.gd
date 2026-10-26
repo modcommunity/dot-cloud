@@ -30,6 +30,7 @@ extends RefCounted
 ## [/codeblock]
 
 const CHANNEL := "cloud.pub"
+const _Sides := preload("dot_cloud_publisher_sides.gd")
 const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
@@ -353,34 +354,15 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	manifest.mirrors = mirrors
 	manifest.metadata = metadata
 
-	# [b]The id and version rules are the manifest's, and are not restated here.[/b]
-	# They were, and the copy was already wrong the day `content_id` learned about
-	# `<owner>/<name>`: this refused a namespaced id that [method DotCloudManifest.validate]
-	# accepts, so a publisher could not produce content a client would happily mount.
-	# One rule, in the class whose field it is. `validate()` also checks the version,
-	# which this never did.
+	# The id and version rules are the manifest's alone; a restated copy once refused ids it accepts.
 	var shape := manifest.validate_shape()
 	if not shape.ok:
 		return shape
 
 	var relatives := _collect(source_dir)
 
-	# [b]An imported asset's OUTPUT lives at the project root, which is not always inside
-	# the directory being published.[/b] `_collect` walks the source, so publishing a
-	# whole project picks up `.godot/imported/` for free -- and publishing a SUBDIRECTORY
-	# of one, which is how every imported map is published
-	# (`--content ../game-g2gfast/maps/imported`), picks up the `.import` markers and
-	# none of the files they point at. The marker then names
-	# `res://.godot/imported/<name>.ctex`, the pack does not contain it, and the host
-	# does not have it either:
-	#
-	#     ERROR: Unable to open file: res://.godot/imported/nature_sand_wavey_1.png-….ctex
-	#     WARNING: Loaded resource as image file, this will not work on export.
-	#
-	# The warning is Godot falling back to reading the PNG directly, which works on a
-	# dedicated server and does not work in an export -- so this failed loudly on the
-	# machine that could survive it and would have failed silently on the ones that
-	# could not.
+	# An imported asset's output lives at the project root, which may be outside the published directory;
+	# without it the pack ships `.import` markers pointing at files it does not contain.
 	var imported := _imported_outputs_for(source_dir, relatives)
 	var extra: Dictionary = imported["files"]
 	var remap: Dictionary = imported["remap"]
@@ -430,12 +412,12 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 			source_dir
 		)
 
-	var provided := _provides_for(source_dir, relatives, extra, dropped)
+	var provided := _Sides.provides_for(self, source_dir, relatives, extra, dropped)
 	if not provided.ok:
 		return provided
 	manifest.provides = provided.value
 
-	var sided := _sides_for(source_dir, relatives, imported["owners"])
+	var sided := _Sides.sides_for(self, source_dir, relatives, imported["owners"])
 	if not sided.ok:
 		return sided
 	var sides: Dictionary = sided.value
@@ -446,14 +428,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	var rewritten := 0
 	var seen := {}
 
-	# Every path this pack will contain, so the rewrite below can tell a reference to
-	# its own content from a reference to the host build's.
-	# [b]A MAP, from where a reference says the file is to where this pack actually put
-	# it.[/b] It was a set, because those two were always the same thing -- and they stop
-	# being the same the moment an imported output is relocated out of `.godot/`. A
-	# `.import` marker still names `res://.godot/imported/tile.png-abc.ctex`, which is
-	# true of the project and false of the pack, so the marker has to be pointed at
-	# [constant IMPORTED_DIR] rather than merely prefixed.
+	# Maps where a reference says a file is to where this pack put it (they differ once an imported
+	# output is relocated out of `.godot/`), so a rewrite can tell its own content from the host's.
 	var inside := {}
 	for rel in relatives:
 		inside[rel] = rel
@@ -471,25 +447,11 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		DotPaths.remove_tree(staging)
 
 	for rel in relatives:
-		# `extra` entries come from the project root or [member extra_files]; everything
-		# else from the source.
+		# `extra` entries come from the project root or [member extra_files]; the rest from the source.
 		var abs: String = extra.get(rel, source_dir.path_join(rel))
 
-		# [b]A scene names its script by ABSOLUTE path, and the pack does not mount at
-		# the path it was authored at.[/b] Godot writes `res://game/thing.gd` into a
-		# .tscn, the pack mounts at `res://<mount_root>/<id>/<version>/`, and the scene
-		# then loads with its script missing -- measured:
-		#
-		#     mount: true   scene exists: true
-		#     ERROR: Attempt to open script 'res://s.gd' … 'File not found'
-		#
-		# which is the worst failure shape there is: the pack mounts, the scene loads,
-		# and nothing says a word until something tries to run one of its scripts.
-		# Rewritten here, where the id and the version are known and the bytes have not
-		# been hashed yet, so the manifest covers what will actually be mounted.
-		#
-		# Only paths this pack CONTAINS are moved. A scene referencing
-		# `res://addons/dot_core/…` means the host build's copy and must stay absolute.
+		# A scene names its script by absolute path and the pack mounts elsewhere, so rewrite paths to files
+		# this pack contains (not the host build's addons) before hashing, so the manifest covers what mounts.
 		if rewrite_resource_paths and _is_text_resource(rel):
 			var staged := _rewrite_paths(abs, staging.path_join(rel), inside)
 			if not staged.ok:
@@ -500,9 +462,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 
 		var safe := DotPaths.safe_relative(rel)
 		if not safe.ok:
-			# Refuse rather than skip: a path the publisher cannot express safely
-			# would be silently missing from the shipped content, and the failure
-			# would surface as a missing texture on a player's machine.
+			# Refuse rather than skip: a silently missing file surfaces as a missing texture on a player's machine.
 			return safe.wrap("Cannot publish '%s'." % rel)
 
 		var hashed := DotHash.sha256_file(abs)
@@ -535,8 +495,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 
 		var dest := objects_dir.path_join("%s/%s" % [digest.substr(0, 2), digest])
 
-		# Objects are immutable by construction — the name is the hash — so an
-		# existing one is already correct and copying over it is pure IO.
+		# Objects are named by their hash, so an existing one is already correct.
 		if FileAccess.file_exists(dest) and DotPaths.file_size(dest) == size:
 			continue
 
@@ -553,9 +512,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		bundled = made_bundle.value
 		manifest.bundle = bundled
 
-	# The payload is written verbatim, whether signed or not, so the bytes the
-	# client verifies are the bytes the publisher hashed. Nothing reformats them
-	# in between — see DotCloudEnvelope.
+	# Written verbatim, signed or not, so the bytes a client verifies are the bytes hashed here.
 	var payload := manifest.payload_bytes()
 	var document := payload
 
@@ -582,10 +539,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if not saved.ok:
 		return saved
 
-	# The staged rewrites have been hashed and copied into objects/ by now, and every
-	# object is named by its own hash -- so the staging tree is pure duplication and
-	# leaving it behind would double the size of a published directory somebody is
-	# about to upload.
+	# Staged rewrites are already hashed into objects/; leaving them would double the published size.
 	if rewrite_resource_paths:
 		DotPaths.remove_tree(staging)
 	DotPaths.remove_tree(out_dir.path_join(".tokens"))
@@ -718,178 +672,6 @@ func _swap_in_script_tokens(
 	return DotResult.success(kept)
 
 
-## Reads, validates and completes the pack's `provides.json`; an empty dictionary when the
-## source has none (every pack published before the Workshop).
-##
-## [b]`runs_code` is computed here and never taken from the author's file.[/b] A pack that
-## says it is data and ships a script is the thing the scan exists to catch, so the author's
-## value is overwritten, not honoured. Paths are checked against what the pack will ship
-## (including the sources of imported assets, whose `.import` marker ships in their place),
-## so a typo fails at publish rather than as an empty menu on a player's machine.
-func _provides_for(
-	source_dir: String,
-	relatives: PackedStringArray,
-	extra: Dictionary,
-	dropped: Dictionary
-) -> DotResult:
-	var file := source_dir.path_join(PROVIDES_FILE)
-	if not FileAccess.file_exists(file):
-		return DotResult.success({})
-
-	var read := DotPaths.read_json(file)
-	if not read.ok:
-		return read.wrap("Could not read %s." % PROVIDES_FILE)
-	if not (read.value is Dictionary):
-		return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % PROVIDES_FILE)
-
-	var parsed := DotCloudProvides.parse(read.value as Dictionary, true)
-	if not parsed.ok:
-		return parsed.wrap("%s is invalid." % PROVIDES_FILE)
-	var provides: Dictionary = parsed.value
-
-	var shipped := {}
-	for rel in relatives:
-		shipped[rel] = true
-	var exists := func(p: String) -> bool:
-		return shipped.has(p) or dropped.has(p) or extra.has(p)
-	var dir_exists := func(d: String) -> bool:
-		var prefix := d.trim_suffix("/") + "/"
-		for rel in relatives:
-			if rel.begins_with(prefix):
-				return true
-		return false
-	var checked := DotCloudProvides.check_files(provides, exists, dir_exists)
-	if not checked.ok:
-		return checked.wrap("%s does not match the pack." % PROVIDES_FILE)
-
-	var reader := func(rel: String) -> PackedByteArray:
-		return FileAccess.get_file_as_bytes(str(extra.get(rel, source_dir.path_join(rel))))
-	var scanned := DotCloudScriptScan.scan(relatives, reader, provides)
-	if not scanned.ok:
-		return scanned
-	provides["runs_code"] = bool((scanned.value as Dictionary)["runs_code"])
-	if provides["runs_code"]:
-		DotLog.info(CHANNEL, "pack runs code", {
-			"content": content_id, "why": ", ".join((scanned.value as Dictionary)["reasons"]),
-		})
-	return DotResult.success(provides)
-
-
-## Each pack path's side, from [member side_rules] and the source's [constant SIDES_FILE];
-## a path in no rule is absent (both sides). [param owners] maps a relocated imported output
-## to the source asset it stands for.
-func _sides_for(source_dir: String, relatives: PackedStringArray, owners: Dictionary) -> DotResult:
-	var rules := {}
-	for pattern: Variant in side_rules:
-		rules[str(pattern)] = str(side_rules[pattern])
-
-	var file := source_dir.path_join(SIDES_FILE)
-	if FileAccess.file_exists(file):
-		var read := DotPaths.read_json(file)
-		if not read.ok:
-			return read.wrap("Could not read %s." % SIDES_FILE)
-		if not (read.value is Dictionary):
-			return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % SIDES_FILE)
-		var doc: Dictionary = read.value
-		for key: Variant in doc:
-			if not str(key) in [DotCloudFile.SIDE_CLIENT, DotCloudFile.SIDE_SERVER]:
-				return DotResult.fail(
-					DotError.CODE_INVALID,
-					"%s: unknown key '%s'." % [SIDES_FILE, key],
-					"expected client and server, each a list of patterns"
-				)
-			if not (doc[key] is Array):
-				return DotResult.fail(
-					DotError.CODE_INVALID, "%s: '%s' must be a list." % [SIDES_FILE, key]
-				)
-			for pattern: Variant in (doc[key] as Array):
-				var p := str(pattern)
-				if rules.has(p) and rules[p] != str(key):
-					return DotResult.fail(
-						DotError.CODE_INVALID,
-						"%s: '%s' is listed for both sides." % [SIDES_FILE, p]
-					)
-				rules[p] = str(key)
-
-	var out := {}
-	if rules.is_empty():
-		return DotResult.success(out)
-
-	for pattern: String in rules:
-		var want: String = rules[pattern]
-		if not want in [DotCloudFile.SIDE_CLIENT, DotCloudFile.SIDE_SERVER]:
-			return DotResult.fail(
-				DotError.CODE_INVALID,
-				"Side rule '%s' names side '%s'." % [pattern, want],
-				"a side is client or server; a file in no rule goes to both"
-			)
-		if pattern.strip_edges() == "" or pattern.begins_with("res://") or pattern.begins_with("/"):
-			return DotResult.fail(
-				DotError.CODE_INVALID,
-				"Side rule '%s' is not a pack path." % pattern,
-				"patterns are relative to the source root, like lightmaps/ or maps/*.res"
-			)
-
-	var hits := {}
-	for rel in relatives:
-		# The marker and the relocated output of an imported asset follow the asset, so a
-		# rule written against the file a person sees covers what actually ships.
-		var names := PackedStringArray([rel])
-		if rel.ends_with(".import"):
-			names.append(rel.trim_suffix(".import"))
-		if owners.has(rel):
-			names.append(str(owners[rel]))
-
-		var side := DotCloudFile.SIDE_BOTH
-		for pattern: String in rules:
-			var matched := false
-			for n in names:
-				if _side_pattern_matches(pattern, n):
-					matched = true
-					break
-			if not matched:
-				continue
-			hits[pattern] = true
-			if side != DotCloudFile.SIDE_BOTH and side != rules[pattern]:
-				return DotResult.fail(
-					DotError.CODE_INVALID,
-					"'%s' is put on both sides by the side rules." % rel,
-					"pattern '%s' says %s" % [pattern, rules[pattern]]
-				)
-			side = rules[pattern]
-
-		if side == DotCloudFile.SIDE_BOTH:
-			continue
-
-		# Both sides read requires.json and provides.json before they mount; a client
-		# loads the entry scene; a packer names what its own loader opens.
-		var needs := side_needs.duplicate()
-		needs[DotAddonApi.REQUIREMENTS_FILE] = "both"
-		needs[PROVIDES_FILE] = "both"
-		if entry_scene != "" and not needs.has(entry_scene):
-			needs[entry_scene] = DotCloudFile.SIDE_CLIENT
-		var need := str(needs.get(rel, ""))
-		if need != "" and need != side:
-			return DotResult.fail(
-				DotError.CODE_INVALID,
-				"'%s' cannot be %s-only." % [rel, side],
-				("the client and the server read it" if need == "both"
-					else "the %s reads it" % need) + "; narrow the side rule"
-			)
-		out[rel] = side
-
-	for pattern: String in rules:
-		if not hits.has(pattern):
-			return DotResult.fail(
-				DotError.CODE_INVALID,
-				"Side rule '%s' matches nothing in the pack." % pattern,
-				"a typo here ships those files to both sides and says nothing"
-			)
-
-	DotLog.debug(CHANNEL, "side rules applied", {"content": content_id, "sided": out.size()})
-	return DotResult.success(out)
-
-
 ## Refuses a text resource that references a file its own side will not have: a scene both
 ## sides load naming a client-only lightmap, or a client-only resource naming a server-only
 ## one. Godot loads a scene's [code]ext_resource[/code] entries unconditionally, so the
@@ -930,12 +712,6 @@ func _check_side_references(
 			)
 
 	return DotResult.success(true)
-
-
-static func _side_pattern_matches(pattern: String, rel: String) -> bool:
-	if pattern.ends_with("/"):
-		return rel.begins_with(pattern)
-	return rel.match(pattern)
 
 
 ## Files to publish, as paths relative to [param source_dir].

@@ -1,14 +1,8 @@
 extends Node
 
-## Content that depends on other content (dot-cloud API 15): a shared store published once, packs naming it.
-##
-## Covered: the list in the signed payload and a tampered version failing the signature, a pack acquiring its store
-## first, a second pack skipping the store it shares, a store missing from every source refusing the pack before it
-## mounts, a loop refused instead of awaited, the manifest's own refusals, and the CLI-less parser.
-##
-## [codeblock]
-## godot --headless --path . res://examples/dependency_demo.tscn
-## [/codeblock]
+## Content that depends on other content (API 15): the signed list and its tamper check, store-first acquire,
+## a shared store skipped, a missing store or a loop refused before mount, and the CLI-less parser.
+## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
 const CHECKS := 48

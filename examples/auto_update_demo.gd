@@ -1,10 +1,7 @@
 extends Node
 
 ## [DotCloudAutoUpdate] against a fake clock, a fake origin and a fake player count.
-##
-## [codeblock]
-## godot --headless --path . res://examples/auto_update_demo.tscn
-## [/codeblock]
+## Run: godot --headless --path . res://examples/auto_update_demo.tscn
 
 const WORK := "user://dot_cloud_auto_update_demo"
 const SECTIONS := 11

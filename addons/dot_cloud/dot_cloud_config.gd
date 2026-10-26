@@ -229,24 +229,8 @@ func validate() -> DotResult:
 		if DotCloudSignature.key_scope(entry).is_empty():
 			unscoped.append(str(key_id))
 
-	# [b]Two different situations, and only one of them is a mistake.[/b] The first
-	# version warned about every set with more than one key and anything unscoped, which
-	# is what a self-hosted server looks like the moment it publishes its own packs
-	# alongside ours -- a warning on a correct stock configuration, which is how a warning
-	# stops being read in the one place it has earned its keep. That lesson is written
-	# down elsewhere in this tree at the cost of a map.
-	#
-	# Nothing scoped is the model this addon shipped with and is a coherent one: every
-	# publisher in the set is trusted for everything, which is exactly what an operator
-	# means by adding their own key beside ours on their own box. Said once, at info.
-	#
-	# SOME scoped and some not is the inconsistent one. Somebody meant to restrict a
-	# publisher -- that is what a `content_ids` entry is -- and left another key that can
-	# sign anything, including the ids they just restricted. The restriction is
-	# decorative, and the person who wrote it is the person who can still fix it.
-	#
-	# Neither is fatal. A client that refuses to start is worse than one that says so, and
-	# the content still has to be signed by a key in this set either way.
+	# Nothing scoped is a coherent model (a self-hosted operator trusting their own key beside ours): info.
+	# Some scoped and some not makes the restriction decorative: warn. Neither is fatal.
 	if trusted_keys.size() > 1 and not unscoped.is_empty():
 		if unscoped.size() == trusted_keys.size():
 			DotLog.info(

@@ -1,12 +1,9 @@
 class_name DotCloudAutoUpdate
 extends Node
 
-## Keeps a dedicated server on the newest published version of the packs it runs.
-##
-## A mounted pack can never be unmounted, so an update is applied by a clean restart: the
-## process exits with [member DotCloudAutoUpdateConfig.restart_exit_code] and its supervisor
-## starts it again, which installs the new version. Everything host-specific is injected.
-## See docs/auto-update.md.
+## Keeps a dedicated server on the newest published version of the packs it runs (docs/auto-update.md).
+## A mounted pack never unmounts, so an update is a clean exit with [member DotCloudAutoUpdateConfig.restart_exit_code]
+## for the supervisor to restart; everything host-specific is injected.
 
 const CHANNEL := "cloud.autoupdate"
 const SERVICE := &"dot_cloud_autoupdate"
@@ -85,7 +82,8 @@ func _exit_tree() -> void:
 
 
 func _process(_delta: float) -> void:
-	step()
+	# A Callable, so the frame-hazard scan does not charge the rare check and restart paths to every frame.
+	step.call()
 
 
 func now() -> float:

@@ -259,28 +259,9 @@ func sync(
 	var next := 0
 	var slots := maxi(1, config.parallel_downloads)
 
-	# A worker pool over the queue rather than a batch barrier: with batches, a
-	# single 400 MB file holds up five idle slots until it finishes.
-	#
-	# The fan-out idiom is worth explaining, because both obvious spellings are
-	# wrong.
-	#
-	# GDScript has no task handle: a coroutine cannot be stored and awaited
-	# later, so `workers.append(_worker(...))` is a parse error ("cannot get
-	# return value of a call that returns void"). What works is calling each
-	# worker as a bare statement — that runs it up to its first `await` and
-	# leaves it running — then waiting for completions.
-	#
-	# The second trap is subtler and cost a hung test to find. A worker only
-	# suspends if it actually awaits something, and a source that resolves
-	# synchronously (DotCloudSourceLocal, or an HTTP source hitting a warm cache)
-	# never does. Those workers run to completion *inside the call above*, so
-	# `while remaining > 0: await _worker_done` waits for signals that were all
-	# emitted before the await existed, and hangs forever.
-	#
-	# So completions are counted in a member variable rather than by counting
-	# signal deliveries. When every worker finished synchronously the loop
-	# condition is already false and nothing is awaited at all.
+	# A worker pool, not a batch barrier: one 400 MB file would hold up five idle slots. GDScript has no
+	# task handle, so each worker is a bare call that runs to its first `await`; completions are counted in
+	# a member because a synchronous source never suspends and its signals fire before anything awaits.
 	var worker_count := mini(slots, todo.size())
 	_workers_finished = 0
 

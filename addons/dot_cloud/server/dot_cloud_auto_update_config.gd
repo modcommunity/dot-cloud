@@ -2,10 +2,8 @@ class_name DotCloudAutoUpdateConfig
 extends DotConfig
 
 ## What a dedicated server does when a newer version of a pack it runs is published.
-##
-## Layers, weakest first: these defaults < `autoupdate.yml` under `cfg/addons/dot_cloud/`,
-## the game's and the operator's `cfg/server/addons/dot_cloud/` < `DOT_CLOUD_AUTOUPDATE_*`
-## < `--autoupdate-<key>=`. The `sv_autoupdate_*` cvars change a running server.
+## Layers, weakest first: defaults < `autoupdate.yml` under `cfg/` < `DOT_CLOUD_AUTOUPDATE_*` < `--autoupdate-<key>=`;
+## the `sv_autoupdate_*` cvars change a running server.
 
 const CFG_ADDON := "dot-cloud"
 const CFG_FILE := "autoupdate.yml"

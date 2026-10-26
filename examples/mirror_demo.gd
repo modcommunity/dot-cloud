@@ -1,14 +1,8 @@
 extends Node
 
-## Published mirrors (API 13) against real sockets: the signed list, ordering, a corrupt and a
-## dead mirror falling back to the origin, resume from a mirror, the opt-out, and prefetch.
-##
-## Three [code]http_test_server.gd[/code] instances: the origin, a good mirror and a bad one,
-## each serving its own copy of the origin root tree.
-##
-## [codeblock]
-## godot --headless --path . res://examples/mirror_demo.tscn
-## [/codeblock]
+## Published mirrors (API 13) against real sockets (an origin, a good mirror, a bad one): the signed list,
+## ordering, fallback to the origin, resume, the opt-out, and prefetch.
+## Run: godot --headless --path . res://examples/mirror_demo.tscn
 
 const TestServer := preload("res://examples/http_test_server.gd")
 
@@ -91,7 +85,6 @@ func _run() -> void:
 	_finish()
 
 
-# --- Sections --------------------------------------------------------------
 
 
 func _test_parse() -> void:
@@ -395,7 +388,6 @@ func _test_prefetch() -> void:
 	_sections_completed += 1
 
 
-# --- Helpers ---------------------------------------------------------------
 
 
 func _trusted() -> Dictionary:

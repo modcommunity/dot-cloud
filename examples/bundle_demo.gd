@@ -1,11 +1,7 @@
 extends Control
-## Proves the small-object bundle: a cold acquire is one archive request plus the objects too big
-## to bundle, a warm one is no object or bundle request at all, and a corrupt archive falls back
-## to per-file fetching instead of failing.
-##
-## [codeblock]
-## godot --headless --path . res://examples/bundle_demo.tscn
-## [/codeblock]
+## Proves the small-object bundle: a cold acquire is one archive request plus the big objects, a
+## warm one is no request at all, and a corrupt archive falls back to per-file fetching.
+## Run: godot --headless --path . res://examples/bundle_demo.tscn
 
 const TestServer := preload("res://examples/http_test_server.gd")
 const WORK := "user://dot_cloud_bundle_demo"

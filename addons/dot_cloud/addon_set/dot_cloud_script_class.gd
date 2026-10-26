@@ -199,7 +199,9 @@ static func _base_of(header: Dictionary, headers: Dictionary, depth: int) -> Str
 	if str((parent as Dictionary).get("class", "")) != "":
 		return str((parent as Dictionary)["class"])
 
-	return _base_of(parent, headers, depth + 1)
+	# The engine records "" when the parent it extends by path has no class_name, whatever that
+	# parent extends; dot_cloud_client.gd extends a base layer this way.
+	return ""
 
 
 ## A path `extends` names, relative to the script it is written in.

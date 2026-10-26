@@ -243,21 +243,9 @@ func validate_shape() -> DotResult:
 			DotError.CODE_INVALID, "The manifest has no content_id."
 		)
 
-	# [b]One segment, or two separated by a "/".[/b] A bare id is what every
-	# first-party pack has always been and still validates unchanged; the two-segment
-	# form is `<owner>/<name>`, which is what makes an id ownable.
-	#
-	# It is a real separator rather than a flattened one on purpose. Flattening owner
-	# and name into `owner_name` looks equivalent and is not: `_` is legal inside both
-	# halves, so `alice_bob` + `x` and `alice` + `bob_x` produce one id, and a key
-	# scoped to `alice/*` is then entitled to sign for the member called `alice_bob`.
-	# A separator that cannot occur inside either half is the only version of this with
-	# no ambiguity, and "/" is the one every forge already uses. Doubling a legal
-	# character does not work either -- [method DotPaths.slugify] collapses `__` to `_`.
-	#
-	# The id is still a path component, so it gets the traversal treatment every
-	# server-supplied path gets, and each segment must independently be a slug: that is
-	# what keeps "/" the only separator in it and keeps ".." out.
+	# One segment, or `<owner>/<name>`. A real "/" separator, not a flattened `owner_name`: `_` is legal in
+	# both halves, so `alice_bob`+`x` and `alice`+`bob_x` would collide and a key scoped to `alice/*`
+	# could sign for `alice_bob`. Each segment must be a slug, which keeps ".." out.
 	var id_safe := DotPaths.safe_relative(content_id)
 	if not id_safe.ok:
 		return id_safe.wrap("The manifest's content_id is unsafe.")
@@ -287,14 +275,8 @@ func validate_shape() -> DotResult:
 					% [part, content_id, DotPaths.slugify(part)]
 			)
 
-	# The version is not slug-checked the way content_id is, because a slug of
-	# "1.0.0" is "1_0_0" and requiring equality would refuse every semver ever
-	# published. It still lands in the mount prefix verbatim, so it gets the
-	# same traversal treatment as any other server-supplied path segment —
-	# safe_relative for "..", and a separator check because a version is one
-	# path *component*, not a path. Without both, version "../.." validated
-	# happily and mount_prefix() came out as "res://", which is precisely the
-	# shadowing that mount_root exists to prevent.
+	# Not slug-checked like content_id (the slug of "1.0.0" is "1_0_0"), but it lands in the mount prefix,
+	# so it must be one safe path component: version "../.." once made mount_prefix() come out as "res://".
 	var ver_slug := DotPaths.slugify(version)
 	if ver_slug == "":
 		return DotResult.fail(
@@ -328,15 +310,6 @@ func validate_shape() -> DotResult:
 	return DotResult.success(true)
 
 
-## [method validate_shape], and then: can THIS engine run it?
-##
-## [b]Split because the two questions have different right answers in different
-## places.[/b] The shape of a manifest is intrinsic -- an id with two slashes in it is
-## malformed on every machine, forever. [member min_engine_version] is not: it compares
-## against the engine that happens to be running, so it is a mount-time question, and a
-## publisher that asked it would refuse to build content targeting a newer Godot than
-## the box doing the building. [DotCloudPublisher] used to carry its own copy of the id
-## rule to avoid exactly that, and the copy went stale the moment the rule changed.
 ## Every dependency names a safe id and one exact version, and none is this content itself.
 func _check_dependencies() -> DotResult:
 	if dependencies.size() > MAX_DEPENDENCIES:
@@ -354,6 +327,10 @@ func _check_dependencies() -> DotResult:
 	return DotResult.success(true)
 
 
+## [method validate_shape], and then: can THIS engine run it?
+##
+## The shape is intrinsic (malformed on every machine); [member min_engine_version] compares against the
+## running engine, so it is a mount-time question a publisher building for a newer Godot must not ask.
 func validate() -> DotResult:
 	var shape := validate_shape()
 	if not shape.ok:
