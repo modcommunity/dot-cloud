@@ -74,6 +74,10 @@ const FORMAT_VERSION := 1
 ## anything is downloaded.
 @export var provides: Dictionary = {}
 
+## Who made what, and under which licence: `[{paths, licence, author, url}]`, the publisher's `licence.json`.
+## The site refuses a pack whose files are not all covered by an allowed licence. Empty for older packs.
+@export var licences: Array = []
+
 ## One archive holding every small object, so a first load is one request instead of
 ## thousands: `{sha256, size, count, max_object_bytes, url_path}`. Empty when the publisher wrote
 ## none. A ZIP of objects each named by its own hash; the client verifies the archive and then
@@ -188,6 +192,8 @@ static func from_dict(d: Dictionary) -> DotResult:
 		m.metadata = d["metadata"]
 	if d.get("provides") is Dictionary:
 		m.provides = d["provides"]
+	if d.get("licences") is Array:
+		m.licences = d["licences"]
 	if d.get("bundle") is Dictionary:
 		m.bundle = d["bundle"]
 	if d.get("dependencies") is Array:
@@ -376,6 +382,8 @@ func to_dict() -> Dictionary:
 		d["metadata"] = metadata
 	if not provides.is_empty():
 		d["provides"] = provides
+	if not licences.is_empty():
+		d["licences"] = licences
 	if not bundle.is_empty():
 		d["bundle"] = bundle
 	if not dependencies.is_empty():

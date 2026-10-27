@@ -35,6 +35,7 @@ const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
 const PROVIDES_FILE := "provides.json"
+const LICENCE_FILE := "licence.json"
 
 ## The file at the source root that says which files only one side fetches (API 8):
 ## [code]{"client": ["lightmaps/"], "server": ["server/*.json"]}[/code]. See [member side_rules].
@@ -416,6 +417,15 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if not provided.ok:
 		return provided
 	manifest.provides = provided.value
+
+	var licence_path := source_dir.path_join(LICENCE_FILE)
+	if FileAccess.file_exists(licence_path):
+		var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(licence_path))
+		if doc is Dictionary:
+			doc = (doc as Dictionary).get("licences")
+		if not (doc is Array):
+			return DotResult.fail(DotError.CODE_PARSE, "licence.json must be a list of {paths, licence, author, url}, or an object holding one as \"licences\".")
+		manifest.licences = doc
 
 	var sided := _Sides.sides_for(self, source_dir, relatives, imported["owners"])
 	if not sided.ok:

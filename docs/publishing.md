@@ -16,6 +16,14 @@ Output is a static directory (`manifest.json` + `objects/`) to drop behind any w
 
 The client-side pack is built at mount time by `PCKPacker`, not by the publisher: cached objects live at hash-named paths and must appear inside the pack at `res://<prefix>/<manifest path>`, which no export preset can express.
 
+## Uploading through the site: `publish --upload`
+
+Nobody but the site holds bucket credentials. `publish --upload --token-file ~/.config/dot/cli-token --id NAME --version V --source DIR --out DIR --lock content.lock.json --into .stores --kind store` claims the version (`POST /api/app/v1/packs`, the site answers with the `owner/NAME` content id the pack is then built with), packs unsigned (the site signs at finalize), sends the manifest, asks for presigned PUTs a page at a time and PUTs each object with exactly the headers the site names (the bucket checks the SHA-256 itself), then finalizes. `DotCloudUploader` does the four calls through `curl`; the token reaches curl in a config file under `user://`, never on a command line or in the environment. A failed run resumes by running the same command again: the site lists only what is missing, and an object already in the bucket is never sent. A pack that is `HELD` for review gets no lock line until a moderator approves it.
+
+**`licence.json` at the source root** is copied into the manifest as `licences` (`[{paths, licence, author, url}]`, or an object holding that list). The site refuses a pack with a file no entry covers, or a licence other than CC0-1.0, MIT, Unlicense, public-domain, CC-BY-3.0 and CC-BY-4.0. Nothing private is published.
+
+**The lock file** `content.lock.json` at a repository root pins `{id, version, manifest_sha256, into, kind, optional}` per pack, with the `origin` and `mirrors` to fetch from. `kind: "store"` is files on disk (dot-bootstrap's `tools/fetch_lock.sh`/`.ps1`, `-NoStores`/`--no-stores` skip them); `kind: "pack"` is mounted by `DotCloudClient.ensure` or mirrored into a server's `content/packs/` by `./server fetch-lock`. The manifest hash pins the exact signed bytes, so a mirror is as safe as the origin.
+
 ## An imported asset is not shippable as its source
 
 A `.glb` or a `.png` is **not a loadable resource**. The editor imports it into `.godot/imported/` and the `.import` marker beside it redirects every load there; nothing imports at runtime, on any platform. A pack that ships the source bytes without the imported form ships an asset no `load()` can open, and says nothing, because the file is right there:

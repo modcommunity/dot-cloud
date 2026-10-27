@@ -68,8 +68,16 @@ func _publish(opts: Dictionary) -> int:
 		printerr("publish needs --%s" % missing)
 		return EXIT_USAGE
 
+	var claim := {}
+	if opts.has("upload"):
+		var got := _claim(opts)
+		if not got.ok:
+			printerr("claim failed: %s" % str(got.error))
+			return EXIT_FAILED
+		claim = got.value
+
 	var pub := DotCloudPublisher.new()
-	pub.content_id = str(opts["id"])
+	pub.content_id = str(claim.get("contentId", opts["id"]))
 	pub.version = str(opts.get("version", "0.0.0"))
 	pub.display_name = str(opts.get("name", ""))
 	pub.entry_scene = str(opts.get("entry", ""))
@@ -84,6 +92,9 @@ func _publish(opts: Dictionary) -> int:
 			printerr("--depends wants id@version, got '%s'" % dep)
 			return EXIT_USAGE
 		pub.dependencies.append({"id": dep.substr(0, at), "version": dep.substr(at + 1)})
+
+	for dir_name in _multi(opts, "exclude-dir"):
+		pub.exclude_dirs.append(dir_name)
 
 	for m in _multi(opts, "mirror"):
 		pub.mirrors.append(m)
@@ -122,6 +133,8 @@ func _publish(opts: Dictionary) -> int:
 
 	if not res.ok:
 		printerr("publish failed: %s" % str(res.error))
+		if not claim.is_empty():
+			(claim["uploader"] as DotCloudUploader).fail_claim(int(claim["id"]), str(res.error))
 		return EXIT_FAILED
 
 	var d: Dictionary = res.value
@@ -141,7 +154,92 @@ func _publish(opts: Dictionary) -> int:
 		print("  A client with default settings will REFUSE this content.")
 		print("  Sign it with --key, or set require_signed_manifests = false.")
 
+	if opts.has("upload"):
+		return _finish_upload(opts, claim, d)
+
 	return EXIT_OK
+
+
+## Sends the output through the site and, once the pack is READY, pins it in the lock file.
+func _finish_upload(opts: Dictionary, claim: Dictionary, built: Dictionary) -> int:
+	var up: DotCloudUploader = claim["uploader"]
+	up.on_progress = func(done: int, total: int, bytes: int) -> void:
+		print("  uploaded %d/%d (%s)" % [done, total, DotPaths.format_bytes(bytes)])
+	var res := up.upload(str(opts["out"]), int(claim["id"]))
+	if not res.ok:
+		printerr("upload failed: %s (re-run to resume; the claim stays open)" % str(res.error))
+		return EXIT_FAILED
+	var v: Dictionary = res.value
+	print("  upload      %d objects sent, %d already there (%s), %s" % [int(v["uploaded"]), int(v["skipped"]), DotPaths.format_bytes(int(v["bytes"])), v["status"]])
+	if v["status"] != "READY":
+		print("  held for review: %s (no lock line until it is approved)" % v["message"])
+		return EXIT_OK
+	print("  manifest    %s" % v["manifest_url"])
+	if opts.has("lock"):
+		return _write_lock(str(opts["lock"]), (built["manifest"] as DotCloudManifest), v, opts, up.site)
+	return EXIT_OK
+
+
+## Sets this pack's entry in a JSON lock file: id, version, the signed manifest's sha-256 (from the site), where it lands.
+func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary, opts: Dictionary, site: String) -> int:
+	var doc := {"format": 1, "origin": site.trim_suffix("/") + "/content", "mirrors": [], "packs": []}
+	if FileAccess.file_exists(lock_path):
+		var old: Variant = JSON.parse_string(FileAccess.get_file_as_string(lock_path))
+		if old is Dictionary and old.get("packs") is Array:
+			doc = old
+	var packs: Array = []
+	var entry := {"id": manifest.content_id, "version": manifest.version, "manifest_sha256": done["manifest_sha256"],
+		"into": str(opts.get("into", "")), "kind": str(opts.get("kind", "pack")), "optional": opts.has("lock-optional")}
+	var replaced := false
+	for p: Dictionary in doc["packs"]:
+		if p.get("id") == manifest.content_id:
+			if entry["into"] == "":
+				entry["into"] = p.get("into", "")
+			packs.append(entry)
+			replaced = true
+		else:
+			packs.append(p)
+	if not replaced:
+		packs.append(entry)
+	packs.sort_custom(func(x: Dictionary, y: Dictionary) -> bool: return str(x["id"]) < str(y["id"]))
+	doc["packs"] = packs
+	var f := FileAccess.open(lock_path, FileAccess.WRITE)
+	if f == null:
+		printerr("could not write %s" % lock_path)
+		return EXIT_FAILED
+	f.store_string(JSON.stringify(doc, "\t") + "\n")
+	f.close()
+	print("  lock        %s" % lock_path)
+	return EXIT_OK
+
+
+## With --upload the site names the content id (owner/repo): claim first, estimating size from the source tree.
+func _claim(opts: Dictionary) -> DotResult:
+	if not opts.has("token-file"):
+		return DotResult.fail(DotError.CODE_INVALID, "--upload needs --token-file")
+	var up := DotCloudUploader.new()
+	up.token_file = str(opts["token-file"])
+	if opts.has("site"):
+		up.site = str(opts["site"]).trim_suffix("/")
+	var count := 0
+	var bytes := 0
+	var stack: Array[String] = [str(opts["source"])]
+	while not stack.is_empty():
+		var dir: String = stack.pop_back()
+		for sub in DirAccess.get_directories_at(dir):
+			if sub != ".git" and sub != ".godot":
+				stack.append(dir.path_join(sub))
+		for file in DirAccess.get_files_at(dir):
+			count += 1
+			var fa := FileAccess.open(dir.path_join(file), FileAccess.READ)
+			if fa != null:
+				bytes += fa.get_length()
+	var r := up.claim(str(opts["id"]), str(opts.get("version", "0.0.0")), count, bytes)
+	if r.ok:
+		var v: Dictionary = r.value
+		v["uploader"] = up
+		return DotResult.success(v)
+	return r
 
 
 func _keygen(opts: Dictionary) -> int:
@@ -342,6 +440,7 @@ Commands
     --mount-root NAME    res:// subdirectory to mount under        (dot_cloud)
     --min-engine V       minimum Godot version
     --depends ID@V       content mounted first, one exact version (repeatable)
+    --exclude-dir NAME   leave out any folder of this name (repeatable)
     --with-sources       also ship each imported asset's source file
     --mirror URL         base URL clients fetch from  (repeatable)
     --key PATH           private key PEM; omit to publish unsigned
@@ -349,6 +448,14 @@ Commands
     --optional PREFIX    mark files under PREFIX optional (repeatable)
     --group PREFIX=NAME  assign files under PREFIX to a group (repeatable)
     --platform PREFIX=TAGS  restrict files under PREFIX to platform tags
+
+    --upload             claim, pack as the site's owner/<id>, send it through the site
+    --token-file PATH    file holding the CLI token (never an argument or env)
+    --site URL           site origin                               (https://dev.dotgames.org)
+    --lock FILE          once READY, pin the pack in this content.lock.json
+    --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
+    --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
+    --lock-optional      lock entry: bootstrap may skip it
 
   keygen    Generate an RSA signing keypair.
     --private PATH       where to write the private key
