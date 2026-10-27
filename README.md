@@ -50,6 +50,16 @@ godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- 
     --id dm_arena --version 1.2.0 --entry arena.tscn --key keys/content.key
 ```
 
+To publish through the site to the CDN and pin the result in `content.lock.json` (token in `$DOT_CLI_TOKEN`, never an argument; `tools/publish_pack.ps1` on Windows takes the same options):
+
+```bash
+tools/publish_pack.sh --source content/dm_arena --id dm_arena --version 1.2.0 --lock content.lock.json
+tools/publish_pack.sh --source content/dm_arena --id dm_arena --bump patch   # republish: only changed files travel
+tools/publish_pack.sh versions --id dm_arena                                 # what the CDN holds
+```
+
+[docs/cdn-publish.md](docs/cdn-publish.md) has every option and a worked example.
+
 The output is a static directory of `manifest.json` plus an `objects/` tree, which any web server or CDN can host with no configuration.
 
 ## What it does

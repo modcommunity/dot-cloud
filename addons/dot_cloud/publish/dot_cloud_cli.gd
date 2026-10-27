@@ -52,6 +52,8 @@ func _initialize() -> void:
 			code = _verify(opts)
 		"inspect":
 			code = _inspect(opts)
+		"versions":
+			code = _versions(opts)
 		_:
 			printerr("Unknown command '%s'." % command)
 			_usage()
@@ -67,6 +69,14 @@ func _publish(opts: Dictionary) -> int:
 	if missing != "":
 		printerr("publish needs --%s" % missing)
 		return EXIT_USAGE
+
+	if opts.has("bump"):
+		var bumped := _bump_version(opts)
+		if bumped == "":
+			printerr("--bump needs --lock with an entry for '%s' and patch, minor or major" % str(opts["id"]))
+			return EXIT_USAGE
+		opts["version"] = bumped
+		print("republishing %s as %s" % [str(opts["id"]), bumped])
 
 	var claim := {}
 	if opts.has("upload"):
@@ -98,6 +108,13 @@ func _publish(opts: Dictionary) -> int:
 
 	for m in _multi(opts, "mirror"):
 		pub.mirrors.append(m)
+
+	for kv in _multi(opts, "meta"):
+		var parts := kv.split("=", true, 1)
+		if parts.size() != 2 or parts[0] == "":
+			printerr("--meta expects key=value, got '%s'" % kv)
+			return EXIT_USAGE
+		pub.metadata[parts[0]] = parts[1]
 
 	if opts.has("key"):
 		var key_path := str(opts["key"])
@@ -199,8 +216,13 @@ func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary
 	var replaced := false
 	for p: Dictionary in doc["packs"]:
 		if p.get("id") == manifest.content_id:
+			# A republish changes the version and hash only; where it lands and whether it is optional stay unless given.
 			if entry["into"] == "":
 				entry["into"] = p.get("into", "")
+			if not opts.has("kind"):
+				entry["kind"] = p.get("kind", "pack")
+			if not opts.has("lock-optional"):
+				entry["optional"] = p.get("optional", false)
 			packs.append(entry)
 			replaced = true
 		else:
@@ -216,6 +238,50 @@ func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary
 	f.store_string(JSON.stringify(doc, "\t") + "\n")
 	f.close()
 	print("  lock        %s" % lock_path)
+	return EXIT_OK
+
+
+## The next version of the lock file's entry for --id, or "" when there is no entry or the step is unknown.
+func _bump_version(opts: Dictionary) -> String:
+	if not opts.has("lock") or not FileAccess.file_exists(str(opts["lock"])):
+		return ""
+	var doc: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(opts["lock"])))
+	if not (doc is Dictionary and doc.get("packs") is Array):
+		return ""
+	var id := str(opts["id"])
+	for p: Dictionary in doc["packs"]:
+		var pid := str(p.get("id", ""))
+		if pid != id and not pid.ends_with("/" + id):
+			continue
+		var n := str(p.get("version", "")).split(".")
+		if n.size() != 3 or not (n[0].is_valid_int() and n[1].is_valid_int() and n[2].is_valid_int()):
+			return ""
+		match str(opts["bump"]):
+			"major":
+				return "%d.0.0" % (int(n[0]) + 1)
+			"minor":
+				return "%s.%d.0" % [n[0], int(n[1]) + 1]
+			"patch":
+				return "%s.%s.%d" % [n[0], n[1], int(n[2]) + 1]
+	return ""
+
+
+## Prints every version of this account's pack(s) the site holds: the read side of a publish.
+func _versions(opts: Dictionary) -> int:
+	if not opts.has("token-file"):
+		printerr("versions needs --token-file")
+		return EXIT_USAGE
+	var up := DotCloudUploader.new()
+	up.token_file = str(opts["token-file"])
+	if opts.has("site"):
+		up.site = str(opts["site"]).trim_suffix("/")
+	var res := up.versions(str(opts.get("id", "")))
+	if not res.ok:
+		printerr("versions failed: %s" % str(res.error))
+		return EXIT_FAILED
+	for v: Dictionary in res.value:
+		print("%-40s %-10s %-8s %6d files %10s  %s" % [v["contentId"], v["version"], v["status"], int(v["fileCount"]),
+			DotPaths.format_bytes(int(v["byteSize"])), str(v.get("manifestSha", ""))])
 	return EXIT_OK
 
 
@@ -363,7 +429,7 @@ func _user_args() -> PackedStringArray:
 	# does something useful rather than printing usage and confusing the caller.
 	var all := OS.get_cmdline_args()
 	for i in range(all.size()):
-		if ["publish", "keygen", "verify", "inspect", "help"].has(all[i]):
+		if ["publish", "keygen", "verify", "inspect", "versions", "help"].has(all[i]):
 			return all.slice(i)
 
 	return PackedStringArray()
@@ -463,6 +529,13 @@ Commands
     --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
     --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
     --lock-optional      lock entry: bootstrap may skip it
+    --bump patch|minor|major  republish: take the next version of the --lock entry for --id
+    --meta KEY=VALUE     manifest metadata, e.g. preview=preview.png credit="Kenney" (repeatable)
+
+  versions  List the versions of your pack(s) on the site.
+    --id NAME            one pack; omit for all of them
+    --token-file PATH    file holding the CLI token                (required)
+    --site URL           site origin                               (https://dev.dotgames.org)
 
   keygen    Generate an RSA signing keypair.
     --private PATH       where to write the private key

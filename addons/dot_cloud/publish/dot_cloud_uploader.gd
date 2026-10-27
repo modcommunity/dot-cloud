@@ -30,6 +30,17 @@ func claim(repo_name: String, version: String, files: int, bytes: int) -> DotRes
 	return r
 
 
+## Every version this account holds, newest first. Value: Array of {contentId, version, status, fileCount, byteSize, manifestSha, manifestUrl}.
+func versions(repo_name: String = "") -> DotResult:
+	var body := {"action": "versions"}
+	if repo_name != "":
+		body["repoName"] = repo_name
+	var r := _with_config(func(cfg: String) -> DotResult: return _post("/api/app/v1/packs", body, cfg))
+	if r.ok:
+		return DotResult.success((r.value as Dictionary).get("versions", []))
+	return r
+
+
 ## Marks a claim failed so its number is not left dangling.
 func fail_claim(claim_id: int, error: String) -> void:
 	_with_config(func(cfg: String) -> DotResult:
@@ -137,7 +148,7 @@ func _post(route: String, body: Dictionary, cfg: String) -> DotResult:
 
 ## PUT one object to its presigned URL with exactly the headers the site named (the bucket checks the sha-256 itself).
 func _put(p: Dictionary, path: String) -> DotResult:
-	var args := ["-sS", "-f", "-X", "PUT", "--upload-file", path, "-o", "/dev/null"]
+	var args := ["-sS", "-f", "-X", "PUT", "--upload-file", path, "-o", "NUL" if OS.get_name() == "Windows" else "/dev/null"]
 	for k in (p.get("headers", {}) as Dictionary):
 		args.append_array(["-H", "%s: %s" % [k, p["headers"][k]]])
 	args.append(str(p["url"]))

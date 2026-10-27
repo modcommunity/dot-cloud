@@ -25,6 +25,46 @@ The lock file is `content.lock.json` at the repository root:
 
 `manifest_sha256` pins the signed bytes as served, so a manifest from any mirror is as trustworthy as one from the origin. Objects are at `<origin>/<id>/<version>/objects/<aa>/<sha256>`.
 
+## The command: publish_pack
+
+`tools/publish_pack.sh` (Linux, macOS) and `tools/publish_pack.ps1` (Windows) take the same options; the PowerShell ones are `-PascalCase` (`-Source`, `-Id`, `-Bump`, `-LockOptional`, `-TokenFile`, `-DryRun`). They run `dot_cloud_cli.gd publish --upload` in this repository's project, so Godot is needed (`--godot BIN` or `$GODOT`) and `curl` (Windows 10+ ships `curl.exe`).
+
+| Option | Meaning |
+| --- | --- |
+| `--source DIR`, `--id NAME` | the pack directory and its repository name (required); `licence.json` at the source root becomes the manifest's `licences` |
+| `--version V` or `--bump patch\|minor\|major` | the version to claim, or the next one after the lock entry's |
+| `--lock FILE` | the lock file to pin in (default `content.lock.json` in the current directory) |
+| `--into DIR`, `--kind pack\|store`, `--lock-optional` | the lock entry; a republish keeps the entry's values unless given |
+| `--name TEXT`, `--meta KEY=VALUE` (repeatable) | manifest display name and metadata (`preview`, `credit`, ...) |
+| `--exclude-dir NAME` (repeatable) | leave out any folder of this name |
+| `--site URL`, `--token-file FILE`, `--out DIR`, `--dry-run` | site (`$DOT_SITE`, default `https://dev.dotgames.org`), token file, where the objects are built, build without sending |
+
+**The token is never an argument** (`--token` is refused). It comes from `$DOT_CLI_TOKEN`, which is copied to a mode-600 temp file removed on exit, or from the file in `--token-file`, `$DOT_CLI_TOKEN_FILE` or `~/.config/dot/cli-token`. The script sends only missing objects, so running it again after a failure resumes. A `HELD` first release writes no lock line; run it again after the moderator approves (the objects are already there, but a taken version cannot be claimed again, so `--bump`).
+
+A worked example: pin a CC0 asset store into a game.
+
+```bash
+cd ~/godot/game-arena
+echo '[{"paths": [""], "licence": "CC0-1.0", "author": "Kenney", "url": "https://kenney.nl"}]' > ~/stores/kenney/licence.json
+export DOT_CLI_TOKEN=tmcc_...   # a creator token; or put it in ~/.config/dot/cli-token
+~/godot/dot-cloud/tools/publish_pack.sh --source ~/stores/kenney --id zz-stores --version 1.0.0 \
+    --kind store --into .stores/kenney --lock-optional --name "Kenney stores"
+git add content.lock.json   # origin, id, version, manifest_sha256, into, kind, optional
+```
+
+### Republishing one entry
+
+Change the files or metadata of one pack (a new preview, a credit, a licence line, a name) and run the same command with `--bump patch` and the pack's `--id`. Only that entry's line in the lock file changes (`version`, `manifest_sha256`). A version is never reused, so a republish is a new version; every object an earlier READY version (the last three) has is copied inside the bucket, so only changed files travel. The old version stays on the CDN for any lock file that pins it.
+
+```bash
+~/godot/dot-cloud/tools/publish_pack.sh --source ~/stores/kenney --id zz-stores --bump patch \
+    --meta preview=preview.png --meta credit=Kenney
+```
+
+### The read side
+
+`publish_pack.sh versions [--id NAME]` lists your versions on the site (id, version, status, file count, size, manifest sha; `POST /api/app/v1/packs`, `action: versions`, owner only). Anyone with a lock file gets the content back with dot-bootstrap's `tools/fetch_lock.sh` / `fetch_lock.ps1`, which is what every game's bootstrap runs: it reads `content.lock.json`, fetches `<origin>/<id>/<version>/manifest.json` and `objects/<aa>/<sha256>` (origin first, then `mirrors`), checks the manifest against `manifest_sha256` and every object against the manifest, and takes `--only ID` for a single entry. `--packs DIR` also mirrors each `kind: "pack"` entry into a server's `content/packs/`, and dot-server-deploy's `fetch-content` reads the same lock. `DotCloudClient` does not read the lock file itself yet: it acquires by id from its configured sources.
+
 ## Raw stores are packs too
 
 A raw asset store (the 1.6 GB, 75,556-file CC0 `.stores` tree) is published exactly like a pack: same claim, manifest, objects and signature. The only difference is on the consuming side: `kind: "store"` in the lock file means "write each file to `into/<path>` on disk" instead of mounting it, so there is no second storage system, no second signer and no second retention rule. Unchanged files between store versions are copied server-side, so a new store version costs only what changed.
