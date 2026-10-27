@@ -21,6 +21,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 | [docs/client.md](docs/client.md) | `DotCloudClient`: the registry name, `acquire` by URL, `ensure` by id and version |
 | [docs/store.md](docs/store.md) | `DotCloudStore`: content addressing, the index, partials, the web and mobile limits |
 | [docs/sources.md](docs/sources.md) | local, HTTP and in-band sources, failover, resume, the downloader, published mirrors, prefetch |
+| [docs/cdn-publish.md](docs/cdn-publish.md) | publishing through the site (`/api/app/v1/packs/upload`), the licence gate, `content.lock.json` |
 | [docs/publishing.md](docs/publishing.md) | the CLI and `DotCloudPublisher`: imported assets, path rewriting, `DotCloudRegistry` |
 | [docs/addon-packs.md](docs/addon-packs.md) | `addon_set/`, `boot/`: newer addons over the build |
 | [docs/workshop.md](docs/workshop.md) | `provides.json`, `DotContentIndex`, `workshop/`, session tags, anything a subscription mounts |

@@ -9,6 +9,7 @@ The reasoning behind content delivery, one subject per file. [CLAUDE.md](../CLAU
 | [client.md](client.md) | The registry name and who finds it, `acquire` and `ensure`, local manifests |
 | [store.md](store.md) | Content addressing, the index against the directory, partials, platform notes |
 | [sources.md](sources.md) | The three sources, why a source is skipped, the in-band bounds, resume, the downloader |
+| [cdn-publish.md](cdn-publish.md) | Publishing through the site with a creator token: claim, manifest, presigned PUTs, finalize, the licence gate, `content.lock.json`, stores as packs |
 | [publishing.md](publishing.md) | The CLI, imported assets, path rewriting, binary imports, `DotCloudRegistry` |
 | [addon-packs.md](addon-packs.md) | Newer addons over a build: the engine facts, the safeguards, the browser, the test |
 | [auto-update.md](auto-update.md) | `DotCloudAutoUpdate`: a dedicated server restarting itself onto newer packs; the exit-code contract, when-empty, the warning countdown, the config keys and cvars |
