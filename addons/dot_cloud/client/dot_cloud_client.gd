@@ -408,6 +408,8 @@ func acquire(
 ## So the second caller waits for the first and gets its answer, which is what it wanted
 ## in the first place.
 var _inflight: Dictionary = {}
+## manifest URL -> pinned sha256 of the manifest file, set by [method ensure_locked].
+var _pinned: Dictionary = {}
 
 ## Whether [member downloader] is running a sync right now, and the signal that it
 ## stopped.
@@ -859,6 +861,47 @@ func ensure(
 	return await acquire_manifest(resolved.value, groups, chain)
 
 
+## Mounts what a repository's `content.lock.json` pins, the in-game twin of dot-bootstrap's fetch_lock.sh.
+##
+## [param opts] are [method DotCloudLock.load_file]'s (`from`, `cdn`, `cfg`, `only`, `skip`...). Each wanted `kind: "pack"` entry is
+## ensured from the first base that serves a manifest matching its `manifest_sha256`; `kind: "store"` entries are files for
+## fetch_lock to write to disk and are listed as skipped. A failed `optional` entry is logged, any other fails the call.
+## Value: {mounted: [id@version], skipped: [{id, version, why}], failed: [id@version]}.
+func ensure_locked(lock_path: String, opts: Dictionary = {}) -> DotResult:
+	var loaded := DotCloudLock.load_file(lock_path, opts)
+	if not loaded.ok:
+		return loaded
+	var lock: DotCloudLock = loaded.value
+	var report := {"mounted": [], "skipped": lock.skipped.duplicate(), "failed": []}
+	if lock.bases.is_empty():
+		DotLog.info(CHANNEL, "DOT_PACKS_FROM=none, no locked content fetched")
+		return DotResult.success(report)
+	for p in lock.packs:
+		var id := String(p["id"])
+		var version := String(p["version"])
+		if String(p.get("kind", "pack")) != "pack":
+			report["skipped"].append({"id": id, "version": version, "why": "kind store: written by fetch_lock"})
+			continue
+		var got: DotResult = DotResult.fail(DotError.CODE_STATE, "There is nowhere to fetch %s from." % id)
+		for base in lock.bases:
+			var url := "%s/%s/%s/manifest.json" % [base.rstrip("/"), id, version]
+			_pinned[url] = String(p.get("manifest_sha256", ""))
+			got = await ensure(StringName(id), version, PackedStringArray(), url)
+			_pinned.erase(url)
+			if got.ok:
+				break
+		if got.ok:
+			report["mounted"].append("%s@%s" % [id, version])
+		elif p.get("optional", false):
+			DotLog.warn(CHANNEL, "optional lock pack not mounted", {"id": id, "version": version, "error": str(got.error)})
+			report["skipped"].append({"id": id, "version": version, "why": "optional, unavailable"})
+		else:
+			report["failed"].append("%s@%s" % [id, version])
+	if not report["failed"].is_empty():
+		return DotResult.fail(DotError.CODE_NETWORK, "Locked packs not mounted: %s" % ", ".join(report["failed"]))
+	return DotResult.success(report)
+
+
 ## [method ensure] for a mount that knows which session it is for and where the content came
 ## from. The one call the Workshop mounts through.
 ##
@@ -1090,6 +1133,12 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 		if not res.ok:
 			return res.wrap("Could not download the content manifest.")
 		bytes = res.value
+
+	if _pinned.has(manifest_url) and DotHash.sha256_bytes(bytes) != _pinned[manifest_url]:
+		return DotResult.fail(
+			DotError.CODE_INTEGRITY, "The manifest at %s does not match content.lock.json." % manifest_url,
+			"manifest_sha256 pins the signed bytes as served; this is another document"
+		)
 
 	var parsed := DotCloudManifest.from_json_bytes(bytes)
 	if not parsed.ok:

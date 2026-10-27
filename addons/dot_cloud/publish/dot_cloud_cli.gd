@@ -210,6 +210,7 @@ func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary
 		var old: Variant = JSON.parse_string(FileAccess.get_file_as_string(lock_path))
 		if old is Dictionary and old.get("packs") is Array:
 			doc = old
+			doc["format"] = 1  # JSON.parse gives 1.0, which would be written back as "1.0"
 	var packs: Array = []
 	var entry := {"id": manifest.content_id, "version": manifest.version, "manifest_sha256": done["manifest_sha256"],
 		"into": str(opts.get("into", "")), "kind": str(opts.get("kind", "pack")), "optional": opts.has("lock-optional")}
