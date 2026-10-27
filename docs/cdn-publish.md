@@ -52,6 +52,8 @@ export DOT_CLI_TOKEN=tmcc_...   # a creator token; or put it in ~/.config/dot/cl
 git add content.lock.json   # origin, id, version, manifest_sha256, into, kind, optional
 ```
 
+`tools/test_publish_pack.sh` runs the command against `tools/test/mock_site.py`, a local stand-in for the site calls and the presigned PUT (no network, no bucket): first publish, `--bump` sending only the changed object, `versions`, a wrong token, `--token` refused. It has not been run against the dev bucket.
+
 ### Republishing one entry
 
 Change the files or metadata of one pack (a new preview, a credit, a licence line, a name) and run the same command with `--bump patch` and the pack's `--id`. Only that entry's line in the lock file changes (`version`, `manifest_sha256`). A version is never reused, so a republish is a new version; every object an earlier READY version (the last three) has is copied inside the bucket, so only changed files travel. The old version stays on the CDN for any lock file that pins it.
