@@ -3,13 +3,15 @@
 #   tools/publish_pack.sh [publish] --source DIR --id NAME [--version V | --bump patch|minor|major] [--lock content.lock.json]
 #                         [--into DIR] [--kind pack|store] [--lock-optional] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
 #                         [--site URL] [--token-file FILE] [--out DIR] [--godot BIN] [--dry-run]
+#   tools/publish_pack.sh relock --id NAME [--version V] [--lock FILE]   (rewrite the lock line of a held version once approved)
+#   publish --resume reuses an unfinished claim instead of failing with 409 version_taken
 #   tools/publish_pack.sh versions [--id NAME] [--site URL] [--token-file FILE]
 # Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
 # an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://dev.dotgames.org.
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CMD=publish; [ "${1:-}" = publish ] || [ "${1:-}" = versions ] && { CMD=$1; shift; }
+CMD=publish; [ "${1:-}" = publish ] || [ "${1:-}" = versions ] || [ "${1:-}" = relock ] && { CMD=$1; shift; }
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
 OUT=""; LOCK="content.lock.json"; DRY=""; ARGS=()
 abs() { case $1 in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
@@ -36,6 +38,9 @@ fi
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
 if [ "$CMD" = versions ]; then
     exec "${RUN[@]}" versions --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"
+fi
+if [ "$CMD" = relock ]; then
+    exec "${RUN[@]}" relock --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" "${ARGS[@]}"
 fi
 [ -n "$OUT" ] || OUT="$TMP/out"
 [ "$DRY" ] && exec "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"

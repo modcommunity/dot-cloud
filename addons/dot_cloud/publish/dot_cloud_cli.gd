@@ -54,6 +54,8 @@ func _initialize() -> void:
 			code = _inspect(opts)
 		"versions":
 			code = _versions(opts)
+		"relock":
+			code = _relock(opts)
 		_:
 			printerr("Unknown command '%s'." % command)
 			_usage()
@@ -83,6 +85,8 @@ func _publish(opts: Dictionary) -> int:
 		var got := _claim(opts)
 		if not got.ok:
 			printerr("claim failed: %s" % str(got.error))
+			if got.error.detail == "version_taken":
+				printerr(_taken_hint(opts))
 			return EXIT_FAILED
 		claim = got.value
 
@@ -193,16 +197,17 @@ func _finish_upload(opts: Dictionary, claim: Dictionary, built: Dictionary) -> i
 		return EXIT_OK
 	print("  manifest    %s" % v["manifest_url"])
 	if opts.has("lock"):
-		return _write_lock(str(opts["lock"]), (built["manifest"] as DotCloudManifest), v, opts, up.site)
+		var m: DotCloudManifest = built["manifest"]
+		return _write_lock(str(opts["lock"]), m.content_id, m.version, v, opts, up.site)
 	return EXIT_OK
 
 
 ## Sets this pack's entry in a JSON lock file: id, version, the signed manifest's sha-256 (from the site), where it lands.
-func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary, opts: Dictionary, site: String) -> int:
+func _write_lock(lock_path: String, content_id: String, version: String, done: Dictionary, opts: Dictionary, site: String) -> int:
 	# The CDN origin is where the site says the manifest is, not the API host (tmcdev.net answers 404 for /content).
 	var origin := site.trim_suffix("/") + "/content"
 	var murl := str(done.get("manifest_url", ""))
-	var cut := murl.find("/%s/%s/manifest.json" % [manifest.content_id, manifest.version])
+	var cut := murl.find("/%s/%s/manifest.json" % [content_id, version])
 	if cut > 0:
 		origin = murl.left(cut)
 	var doc := {"format": 1, "origin": origin, "mirrors": [], "packs": []}
@@ -212,11 +217,11 @@ func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary
 			doc = old
 			doc["format"] = 1  # JSON.parse gives 1.0, which would be written back as "1.0"
 	var packs: Array = []
-	var entry := {"id": manifest.content_id, "version": manifest.version, "manifest_sha256": done["manifest_sha256"],
+	var entry := {"id": content_id, "version": version, "manifest_sha256": done["manifest_sha256"],
 		"into": str(opts.get("into", "")), "kind": str(opts.get("kind", "pack")), "optional": opts.has("lock-optional")}
 	var replaced := false
 	for p: Dictionary in doc["packs"]:
-		if p.get("id") == manifest.content_id:
+		if p.get("id") == content_id:
 			# A republish changes the version and hash only; where it lands and whether it is optional stay unless given.
 			if entry["into"] == "":
 				entry["into"] = p.get("into", "")
@@ -308,12 +313,82 @@ func _claim(opts: Dictionary) -> DotResult:
 			var fa := FileAccess.open(dir.path_join(file), FileAccess.READ)
 			if fa != null:
 				bytes += fa.get_length()
-	var r := up.claim(str(opts["id"]), str(opts.get("version", "0.0.0")), count, bytes)
+	var version := str(opts.get("version", "0.0.0"))
+	var r := up.claim(str(opts["id"]), version, count, bytes)
+	if not r.ok and opts.has("resume") and r.error.detail == "version_taken":
+		# An unfinished claim (neither READY nor HELD) is reused: the site lists only the objects still missing.
+		var open := _find_version(up, str(opts["id"]), version)
+		if open.has("id") and not ["READY", "HELD"].has(str(open.get("status", ""))):
+			print("resuming claim %d for %s@%s" % [int(open["id"]), str(opts["id"]), version])
+			r = DotResult.success({"id": int(open["id"]), "contentId": str(open["contentId"])})
 	if r.ok:
 		var v: Dictionary = r.value
 		v["uploader"] = up
 		return DotResult.success(v)
 	return r
+
+
+## The site's record of [param repo]@[param version] for this account, or {}.
+func _find_version(up: DotCloudUploader, repo: String, version: String) -> Dictionary:
+	var vs := up.versions(repo)
+	if vs.ok:
+		for v: Dictionary in vs.value:
+			if str(v.get("version", "")) == version and str(v.get("contentId", "")).ends_with("/" + repo):
+				return v
+	return {}
+
+
+## What to do about a 409 version_taken, from what the site says that version is.
+func _taken_hint(opts: Dictionary) -> String:
+	var up := DotCloudUploader.new()
+	up.token_file = str(opts["token-file"])
+	if opts.has("site"):
+		up.site = str(opts["site"]).trim_suffix("/")
+	var v := _find_version(up, str(opts["id"]), str(opts.get("version", "0.0.0")))
+	match str(v.get("status", "")):
+		"READY":
+			return "  %s is already published: use --bump patch|minor|major, or `relock` to rewrite the lock line." % str(opts.get("version", ""))
+		"HELD":
+			return "  that version is held for review: once approved run `relock --id %s --lock FILE`." % str(opts["id"])
+		"":
+			return "  the site holds that version but it is not listed for this account: pick another --version."
+	return "  an earlier claim (%s) was left open: re-run with --resume to reuse it, or pick another --version." % str(v["status"])
+
+
+## Rewrites this pack's lock entry from the site's READY record, for a held release that was approved after the publish.
+func _relock(opts: Dictionary) -> int:
+	var missing := _require(opts, ["id", "lock", "token-file"])
+	if missing != "":
+		printerr("relock needs --%s" % missing)
+		return EXIT_USAGE
+	var up := DotCloudUploader.new()
+	up.token_file = str(opts["token-file"])
+	if opts.has("site"):
+		up.site = str(opts["site"]).trim_suffix("/")
+	var want := str(opts.get("version", ""))
+	if want == "" and FileAccess.file_exists(str(opts["lock"])):
+		var old: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(opts["lock"])))
+		if old is Dictionary and old.get("packs") is Array:
+			for p: Dictionary in old["packs"]:
+				if str(p.get("id", "")).ends_with("/" + str(opts["id"])):
+					want = str(p.get("version", ""))
+	var res := up.versions(str(opts["id"]))
+	if not res.ok:
+		printerr("relock failed: %s" % str(res.error))
+		return EXIT_FAILED
+	var found := {}
+	for v: Dictionary in res.value:
+		if not str(v.get("contentId", "")).ends_with("/" + str(opts["id"])):
+			continue
+		if (want == "" or str(v["version"]) == want) and str(v["status"]) == "READY":
+			found = v  # newest first, so the first READY wins
+			break
+	if found.is_empty():
+		printerr("relock: no READY version%s of '%s' on the site yet (still held, or never published)" % [" " + want if want != "" else "", str(opts["id"])])
+		return EXIT_FAILED
+	var done := {"manifest_url": str(found.get("manifestUrl", "")), "manifest_sha256": str(found.get("manifestSha", ""))}
+	print("relocking %s@%s" % [found["contentId"], found["version"]])
+	return _write_lock(str(opts["lock"]), str(found["contentId"]), str(found["version"]), done, opts, up.site)
 
 
 func _keygen(opts: Dictionary) -> int:
@@ -529,6 +604,7 @@ Commands
     --lock FILE          once READY, pin the pack in this content.lock.json
     --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
     --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
+    --resume             a 409 version_taken from an unfinished claim reuses that claim
     --lock-optional      lock entry: bootstrap may skip it
     --bump patch|minor|major  republish: take the next version of the --lock entry for --id
     --meta KEY=VALUE     manifest metadata, e.g. preview=preview.png credit="Kenney" (repeatable)
@@ -537,6 +613,9 @@ Commands
     --id NAME            one pack; omit for all of them
     --token-file PATH    file holding the CLI token                (required)
     --site URL           site origin                               (https://dev.dotgames.org)
+
+  relock    Rewrite the lock entry of a version that was held and is now READY.
+    --id NAME  --lock FILE  --token-file PATH  [--version V] [--into DIR] [--kind store|pack] [--site URL]
 
   keygen    Generate an RSA signing keypair.
     --private PATH       where to write the private key

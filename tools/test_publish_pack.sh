@@ -33,5 +33,27 @@ chk "wrong token fails" "[ $? -ne 0 ]"
 chk "lock untouched by failure" "grep -q '\"version\": \"1.0.1\"' content.lock.json"
 DOT_CLI_TOKEN=x "$HERE/publish_pack.sh" --token abc --source src --id demo >/dev/null 2>&1
 chk "--token refused" "[ $? -eq 2 ]"
+# (b) an unfinished claim: without --resume a clear error, with it the claim is reused
+curl -s -H "Authorization: Bearer secret" -d '{"action":"claim","repoName":"demo","version":"2.0.0","fileCount":1,"byteSize":1}' "$DOT_SITE/api/app/v1/packs" > /dev/null
+pub --version 2.0.0
+chk "open claim without --resume fails" "[ $? -ne 0 ]"
+chk "error names version_taken and --resume" "grep -q version_taken out && grep -q -- '--resume' out"
+pub --version 2.0.0 --resume
+chk "--resume reuses the claim and exits 0" "[ $? -eq 0 ] && grep -q 'resuming claim' out"
+chk "lock now 2.0.0" "grep -q '\"version\": \"2.0.0\"' content.lock.json"
+pub --version 2.0.0
+chk "READY version taken says use --bump" "grep -q -- '--bump' out"
+# (c) a HELD release has no lock line until approved; relock writes it
+rm -f held.lock.json
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1
+chk "held publish exits 0 without a lock" "[ $? -eq 0 ] && grep -q 'held for review' out && [ ! -f held.lock.json ]"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 > "$W/out" 2>&1
+chk "relock before approval fails" "[ $? -ne 0 ] && grep -q 'no READY' out && [ ! -f held.lock.json ]"
+curl -s -X POST "$DOT_SITE/__approve/heldpack/1.0.0" > /dev/null
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 --into .stores/h --kind store > "$W/out" 2>&1
+chk "relock after approval exits 0" "[ $? -eq 0 ]"
+chk "relock wrote the entry with sha, into and kind" "grep -q 'tester/heldpack' held.lock.json && grep -q '\"manifest_sha256\": \"[0-9a-f]\{64\}' held.lock.json && grep -q '\.stores/h' held.lock.json && grep -q '\"store\"' held.lock.json && grep -q 'cdn.test' held.lock.json"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" > "$W/out" 2>&1
+chk "relock with no --version reads it from the lock and keeps into" "[ $? -eq 0 ] && grep -q '\.stores/h' held.lock.json"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

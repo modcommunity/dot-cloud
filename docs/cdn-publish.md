@@ -52,7 +52,7 @@ export DOT_CLI_TOKEN=tmcc_...   # a creator token; or put it in ~/.config/dot/cl
 git add content.lock.json   # origin, id, version, manifest_sha256, into, kind, optional
 ```
 
-`tools/test_publish_pack.sh` runs the command against `tools/test/mock_site.py`, a local stand-in for the site calls and the presigned PUT (no network, no bucket): first publish, `--bump` sending only the changed object, `versions`, a wrong token, `--token` refused. It has not been run against the dev bucket.
+`tools/test_publish_pack.sh` runs the command against `tools/test/mock_site.py`, a local stand-in for the site calls and the presigned PUT (no network, no bucket): first publish, `--bump` sending only the changed object, `versions`, a wrong token, `--token` refused. It also covers `--resume` (a 409 `version_taken` from an unfinished claim: without the flag the error says what the version is, with it the claim is reused; this needs the site's `versions` answer to carry the claim `id` and a non-READY status for open claims), and `relock` (rewrites the lock entry of a version that was HELD and is now READY, from the site's `versions` record). It has not been run against the dev bucket.
 
 ### Republishing one entry
 

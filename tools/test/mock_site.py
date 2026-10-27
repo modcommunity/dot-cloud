@@ -41,6 +41,15 @@ class H(BaseHTTPRequestHandler):
         self._send(200, {})
 
     def do_POST(self):
+        if self.path.startswith("/__approve/"):  # test hook: a reviewer approves a HELD version
+            _, _, repo, ver = self.path.split("/")
+            with LOCK:
+                for v in S["versions"]:
+                    if v["contentId"].endswith("/" + repo) and v["version"] == ver and v["status"] == "HELD":
+                        v["status"] = "READY"
+                        v["manifestUrl"] = "http://cdn.test/%s/%s/manifest.json" % (v["contentId"], ver)
+                        return self._send(200, {})
+            return self._err(404, "not_found", "nothing held")
         if self.headers.get("Authorization") != "Bearer " + TOKEN:
             return self._err(401, "auth", "bad token")
         n = int(self.headers.get("Content-Length", 0))
@@ -50,14 +59,19 @@ class H(BaseHTTPRequestHandler):
         with LOCK:
             if a == "claim":
                 for v in S["versions"]:
-                    if v["contentId"].endswith("/" + b["repoName"]) and v["version"] == b["version"] and v["status"] == "READY":
+                    if v["contentId"].endswith("/" + b["repoName"]) and v["version"] == b["version"]:
                         return self._err(409, "version_taken", "taken")
+                for i, c in S["claims"].items():  # an unfinished claim keeps its version
+                    if c["contentId"].endswith("/" + b["repoName"]) and c["version"] == b["version"] and not c.get("done"):
+                        return self._err(409, "version_taken", "claim open")
                 cid = "tester/" + b["repoName"]
                 i = S["next_id"]; S["next_id"] += 1
                 S["claims"][i] = {"contentId": cid, "version": b["version"], "files": []}
                 return self._send(200, {"ok": True, "data": {"id": i, "contentId": cid}})
             if a == "versions":
                 vs = [v for v in S["versions"] if not b.get("repoName") or v["contentId"].endswith("/" + b["repoName"])]
+                vs += [{"id": i, "contentId": c["contentId"], "version": c["version"], "status": "CLAIMED", "fileCount": 0, "byteSize": 0}
+                       for i, c in S["claims"].items() if not c.get("done") and (not b.get("repoName") or c["contentId"].endswith("/" + b["repoName"]))]
                 return self._send(200, {"ok": True, "data": {"versions": vs[::-1]}})
             c = S["claims"].get(b.get("id"))
             if c is None:
@@ -81,8 +95,13 @@ class H(BaseHTTPRequestHandler):
                 if [h for h in c["shas"] if h not in S["objects"]]:
                     return self._err(409, "missing", "objects missing")
                 sha = hashlib.sha256(c["raw"]).hexdigest()
-                S["versions"].append({"contentId": c["contentId"], "version": c["version"], "status": "READY", "fileCount": len(c["shas"]), "byteSize": 0, "manifestSha": sha, "manifestUrl": ""})
-                return self._send(200, {"ok": True, "data": {"status": "READY", "manifestUrl": "x", "manifestSha256": sha}})
+                c["done"] = True
+                held = c["contentId"].split("/")[-1].startswith("held")
+                S["versions"].append({"contentId": c["contentId"], "version": c["version"], "status": "HELD" if held else "READY", "fileCount": len(c["shas"]), "byteSize": 0, "manifestSha": sha, "manifestUrl": ""})
+                if held:
+                    return self._send(200, {"ok": True, "data": {"status": "HELD", "message": "licence review"}})
+                S["versions"][-1]["manifestUrl"] = "http://cdn.test/%s/%s/manifest.json" % (c["contentId"], c["version"])
+                return self._send(200, {"ok": True, "data": {"status": "READY", "manifestUrl": S["versions"][-1]["manifestUrl"], "manifestSha256": sha}})
             if a == "fail":
                 return self._send(200, {"ok": True, "data": {}})
         self._err(400, "bad_action", str(a))
