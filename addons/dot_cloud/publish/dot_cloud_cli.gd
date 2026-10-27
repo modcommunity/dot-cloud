@@ -182,7 +182,13 @@ func _finish_upload(opts: Dictionary, claim: Dictionary, built: Dictionary) -> i
 
 ## Sets this pack's entry in a JSON lock file: id, version, the signed manifest's sha-256 (from the site), where it lands.
 func _write_lock(lock_path: String, manifest: DotCloudManifest, done: Dictionary, opts: Dictionary, site: String) -> int:
-	var doc := {"format": 1, "origin": site.trim_suffix("/") + "/content", "mirrors": [], "packs": []}
+	# The CDN origin is where the site says the manifest is, not the API host (tmcdev.net answers 404 for /content).
+	var origin := site.trim_suffix("/") + "/content"
+	var murl := str(done.get("manifest_url", ""))
+	var cut := murl.find("/%s/%s/manifest.json" % [manifest.content_id, manifest.version])
+	if cut > 0:
+		origin = murl.left(cut)
+	var doc := {"format": 1, "origin": origin, "mirrors": [], "packs": []}
 	if FileAccess.file_exists(lock_path):
 		var old: Variant = JSON.parse_string(FileAccess.get_file_as_string(lock_path))
 		if old is Dictionary and old.get("packs") is Array:
@@ -223,11 +229,12 @@ func _claim(opts: Dictionary) -> DotResult:
 		up.site = str(opts["site"]).trim_suffix("/")
 	var count := 0
 	var bytes := 0
+	var skip_dirs := _multi(opts, "exclude-dir")
 	var stack: Array[String] = [str(opts["source"])]
 	while not stack.is_empty():
 		var dir: String = stack.pop_back()
 		for sub in DirAccess.get_directories_at(dir):
-			if sub != ".git" and sub != ".godot":
+			if sub != ".git" and sub != ".godot" and not skip_dirs.has(sub):
 				stack.append(dir.path_join(sub))
 		for file in DirAccess.get_files_at(dir):
 			count += 1

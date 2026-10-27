@@ -76,7 +76,10 @@ func _run(man_bytes: PackedByteArray, out_dir: String, claim_id: int, cfg: Strin
 		var puts: Array = page.value.get("puts", [])
 		for p: Dictionary in puts:
 			var h := str(p["sha256"])
-			var put := _put(p, out_dir.path_join("objects/%s/%s" % [h.substr(0, 2), h]))
+			var file := out_dir.path_join("objects/%s/%s" % [h.substr(0, 2), h])
+			if not FileAccess.file_exists(file):
+				file = out_dir.path_join("bundles/%s.zip" % h)
+			var put := _put(p, file)
 			if not put.ok:
 				if put.error.detail.contains("403"):
 					break
