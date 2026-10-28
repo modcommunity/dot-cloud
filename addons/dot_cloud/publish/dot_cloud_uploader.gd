@@ -110,7 +110,7 @@ func _run(man_bytes: PackedByteArray, out_dir: String, claim_id: int, cfg: Strin
 	return DotResult.success({
 		"uploaded": done, "skipped": skipped, "bytes": bytes, "status": str(d.get("status", "")),
 		"manifest_url": str(d.get("manifestUrl", "")), "manifest_sha256": str(d.get("manifestSha256", "")),
-		"message": str(d.get("message", "")),
+		"message": str(d.get("message", "")), "approval_id": int(d.get("approvalId", 0)),
 	})
 
 

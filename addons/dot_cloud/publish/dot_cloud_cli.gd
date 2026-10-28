@@ -193,7 +193,8 @@ func _finish_upload(opts: Dictionary, claim: Dictionary, built: Dictionary) -> i
 	var v: Dictionary = res.value
 	print("  upload      %d objects sent, %d already there (%s), %s" % [int(v["uploaded"]), int(v["skipped"]), DotPaths.format_bytes(int(v["bytes"])), v["status"]])
 	if v["status"] != "READY":
-		print("  held for review: %s (no lock line until it is approved)" % v["message"])
+		var aid := int(v.get("approval_id", 0))
+		print("  HELD for review%s: %s (no lock line until it is approved; then run relock)" % [" (approval #%d)" % aid if aid > 0 else "", v["message"]])
 		return EXIT_OK
 	print("  manifest    %s" % v["manifest_url"])
 	if opts.has("lock"):
