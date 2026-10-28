@@ -75,6 +75,27 @@ A raw asset store (the 1.6 GB, 75,556-file CC0 `.stores` tree) is published exac
 
 Only `CC0-1.0`, `MIT`, `Unlicense`, `public-domain`, `CC-BY-3.0` and `CC-BY-4.0` are accepted. Each `licences` entry is `{paths, licence, author, url, title?}`; a file takes the entry with the longest matching path prefix (`""` matches everything); `author` and an http(s) `url` are required. Anything else (NC, SA, ND, personal-use, an unknown id) or a file no entry covers is a 400 `licence` before any byte moves. There is no private tier: non-redistributable art is reference only and never goes on the CDN. CC-BY work is also credited in the source's README and CREDITS.
 
+### The credited community-map exception
+
+A community map under its author's own licence (NC, SA, ND, or none stated) may be published when it is credited, approved 2026-10-28. It is one named exception, not a weaker gate. An entry opts in with `"exception": "credited-community-map"`:
+
+```json
+[
+  {"paths": [""], "licence": "CC0-1.0", "author": "Kenney", "url": "https://kenney.nl"},
+  {"paths": ["maps/ze_potc"], "licence": "CC-BY-NC-ND-4.0", "exception": "credited-community-map",
+   "title": "Potc", "author": "FreeZe; Kaemon", "source_url": "https://gamebanana.com/mods/130933",
+   "removal_contact": "maps@example.org"}
+]
+```
+
+- `licence` is the map's own licence as stated (free text, at most 64 characters, `"none stated"` allowed); `author`, an http(s) `source_url` and `removal_contact` (an email address, a `mailto:` link or an http(s) link) are required. `url` is optional and defaults to `source_url`; `title` is optional. Any other `exception` value is refused.
+- `paths` must name the map's own prefixes; `""` (everything) is refused.
+- The pack's `provides.kinds` must be exactly maps (`["map"]`, declared, not inferred).
+- Every file the entry wins (longest prefix) must be map data: `.bsp`, `.vmf`, `.map`, `.nav`, `.json`, `.bin`, `.tscn`, `.scn`, `.tres`, `.res`. Images, audio, models and code under the prefix are refused; give them their own longer-prefix entry under an accepted licence (a converted map ships the game's own CC0 materials and props, never the original's).
+- The publishing account must be staff or listed (username or id) in the site setting `uploads.creditedMapAccounts`; anyone else gets a 403 `licence` at `manifest` and again at `finalize`.
+
+Every other check and both review gates still apply. The entry is signed into the manifest as sent, the approval request names it, and the pack download's `LICENCES.txt` and per-file credit (`exception`, `removalContact`) show the exception, the original and the removal contact.
+
 Review has two gates, and a release goes live only when every gate that applies has approved it. **Admins are never held.** The **moderator gate** is the site setting `uploads.cliReview`: `first` (default: the first release of a creator who is not on the app's team waits for a moderator; staff, the app's own team and creators with a READY release go live), `all`, or `none`. The **owner gate** is the app's approval policy (kind `cliPack`): when it is on, releases by anyone but the app's own team wait for the app owner, and it is off for the owner's own releases. The approval policies can add a moderator gate per site or per app on top. A held release opens an approval request of kind `cliPack` that names who is awaited; approving it (a moderator who also manages the app counts for both sides) publishes the held draft, rejecting it makes `finalize` answer 409 `rejected`. The draft is kept for 30 days; after that the creator sends the manifest again and the approval still stands. The game's own approval gate (`PackClaimGate`) still runs at finalize.
 
 **Polish.** The pack manager's Polish button edits one entry of the newest version (name, preview image, credit, licence) and republishes only that entry as the next patch version through the same flow: the other files are copied inside the bucket, unchanged objects are skipped, and the result goes through the gates above (`UNCHANGED` when nothing differs).
