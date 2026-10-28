@@ -116,7 +116,3 @@ The site that answers is the bucket that is written: tmcdev.net writes `tmc-city
 ## Open question for Christian
 
 Does a new creator's first release wait for a moderator (`uploads.cliReview = first`, the default as built) or go live at once (`none`)? It is one setting either way.
-
-## A server's trails as one pack
-
-dot-trail's `DotTrailStore` directory (trails.json, the images, a licence.json with one entry per image) is a pack source like any other: `publish_pack.sh --source <store dir> --id trails-<server>`, or `DotTrailPack.build` from inside the server (it drives `DotCloudPublisher`, no dot-cloud change needed). The server advertises `sv_trail_pack=<id>@<version>` and dot-game's `DotGamePrejoin.trails_fn` ensures it through `DotCloudClient.ensure` before the join. Details: dot-game `docs/trails.md`.
