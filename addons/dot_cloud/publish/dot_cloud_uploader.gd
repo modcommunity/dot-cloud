@@ -135,7 +135,10 @@ func _post(route: String, body: Dictionary, cfg: String) -> DotResult:
 			if status >= 200 and status < 300 and doc is Dictionary and bool(doc.get("ok", false)) and doc.get("data") is Dictionary:
 				DirAccess.remove_absolute(tmp)
 				return DotResult.success(doc["data"])
-			var err: Dictionary = doc.get("error", {}) if doc is Dictionary and doc.get("error") is Dictionary else {}
+			# The site's envelope is flat ({ok, code, message}); a nested {error: {...}} is accepted too.
+			var err: Dictionary = {}
+			if doc is Dictionary:
+				err = doc["error"] if doc.get("error") is Dictionary else doc
 			var why := str(err.get("message", text.left(200)))
 			var kind := DotError.CODE_AUTH if status == 401 else DotError.CODE_FORBIDDEN if status == 403 else DotError.CODE_HTTP
 			last = DotResult.fail(kind, "HTTP %d %s: %s" % [status, str(err.get("code", "")), why], str(err.get("code", "")))

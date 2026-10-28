@@ -27,7 +27,7 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def _err(self, status, code, msg):
-        self._send(status, {"ok": False, "error": {"code": code, "message": msg}})
+        self._send(status, {"ok": False, "code": code, "message": msg})  # the site's flat app-API envelope
 
     def do_PUT(self):
         n = int(self.headers.get("Content-Length", 0))
