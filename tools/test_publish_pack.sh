@@ -55,5 +55,7 @@ chk "relock after approval exits 0" "[ $? -eq 0 ]"
 chk "relock wrote the entry with sha, into and kind" "grep -q 'tester/heldpack' held.lock.json && grep -q '\"manifest_sha256\": \"[0-9a-f]\{64\}' held.lock.json && grep -q '\.stores/h' held.lock.json && grep -q '\"store\"' held.lock.json && grep -q 'cdn.test' held.lock.json"
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" > "$W/out" 2>&1
 chk "relock with no --version reads it from the lock and keeps into" "[ $? -eq 0 ] && grep -q '\.stores/h' held.lock.json"
+env -u DOT_CLI_TOKEN HOME="$W/nohome" DOT_CLI_TOKEN_FILE="$W/none" "$HERE/publish_pack.sh" --source "$W/src" --id demo --version 9.0.0 --out "$W/dry" --dry-run > "$W/out" 2>&1
+chk "--dry-run builds with no token and sends nothing" "[ $? -eq 0 ] && [ -f '$W/dry/manifest.json' ] && ! grep -q '9.0.0' log"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

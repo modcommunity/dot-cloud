@@ -25,7 +25,7 @@ try {
         $TokenFile = Join-Path $tmp 'token'
         [IO.File]::WriteAllText($TokenFile, $env:DOT_CLI_TOKEN)
     }
-    if (-not (Test-Path $TokenFile) -or (Get-Item $TokenFile).Length -eq 0) {
+    if (-not $DryRun -and (-not (Test-Path $TokenFile) -or (Get-Item $TokenFile).Length -eq 0)) {
         Write-Error "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TokenFile)"; exit 2
     }
     $a = @()

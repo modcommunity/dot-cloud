@@ -32,7 +32,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 if [ -n "${DOT_CLI_TOKEN:-}" ]; then
     ( umask 077; printf %s "$DOT_CLI_TOKEN" > "$TMP/token" ); TOKEN_FILE="$TMP/token"
 fi
-[ -s "$TOKEN_FILE" ] || { echo "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TOKEN_FILE)" >&2; exit 2; }
+[ -s "$TOKEN_FILE" ] || { [ "$DRY" ] && [ "$CMD" = publish ]; } || { echo "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TOKEN_FILE)" >&2; exit 2; }
 [ -n "$SITE" ] && ARGS+=(--site "$SITE")
 [ -f "$HERE/.godot/global_script_class_cache.cfg" ] || "$GODOT" --headless --path "$HERE" --import >/dev/null 2>&1 || true
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
