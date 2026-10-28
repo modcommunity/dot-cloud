@@ -600,7 +600,7 @@ Commands
 
     --upload             claim, pack as the site's owner/<id>, send it through the site
     --token-file PATH    file holding the CLI token (never an argument or env)
-    --site URL           site origin                               (https://dev.dotgames.org)
+    --site URL           site origin                               (https://tmcdev.net)
     --lock FILE          once READY, pin the pack in this content.lock.json
     --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
     --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
@@ -612,7 +612,7 @@ Commands
   versions  List the versions of your pack(s) on the site.
     --id NAME            one pack; omit for all of them
     --token-file PATH    file holding the CLI token                (required)
-    --site URL           site origin                               (https://dev.dotgames.org)
+    --site URL           site origin                               (https://tmcdev.net)
 
   relock    Rewrite the lock entry of a version that was held and is now READY.
     --id NAME  --lock FILE  --token-file PATH  [--version V] [--into DIR] [--kind store|pack] [--site URL]

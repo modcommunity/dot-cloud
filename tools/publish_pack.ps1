@@ -4,7 +4,7 @@
 #       [-Out DIR] [-Godot BIN] [-DryRun]
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 # Token: $env:DOT_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:DOT_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
-# argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://dev.dotgames.org.
+# argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://tmcdev.net.
 # Needs curl.exe (ships with Windows 10+) and Godot on PATH or -Godot. Flags map one to one onto publish_pack.sh's --kebab-case ones.
 param([Parameter(Position = 0)][ValidateSet('publish', 'versions')][string]$Command = 'publish',
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',

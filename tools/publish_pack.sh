@@ -7,7 +7,7 @@
 #   publish --resume reuses an unfinished claim instead of failing with 409 version_taken
 #   tools/publish_pack.sh versions [--id NAME] [--site URL] [--token-file FILE]
 # Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
-# an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://dev.dotgames.org.
+# an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

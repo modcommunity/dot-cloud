@@ -10,7 +10,7 @@ extends RefCounted
 const CHANNEL := "dot_cloud.upload"
 
 ## Site origin, no trailing slash.
-var site := "https://dev.dotgames.org"
+var site := "https://tmcdev.net"
 ## Path of a file holding the creator token.
 var token_file := ""
 ## Report progress through this callable(done: int, total: int, bytes_done: int).

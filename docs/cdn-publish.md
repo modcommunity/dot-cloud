@@ -37,7 +37,7 @@ The lock file is `content.lock.json` at the repository root:
 | `--into DIR`, `--kind pack\|store`, `--lock-optional` | the lock entry; a republish keeps the entry's values unless given |
 | `--name TEXT`, `--meta KEY=VALUE` (repeatable) | manifest display name and metadata (`preview`, `credit`, ...) |
 | `--exclude-dir NAME` (repeatable) | leave out any folder of this name |
-| `--site URL`, `--token-file FILE`, `--out DIR`, `--dry-run` | site (`$DOT_SITE`, default `https://dev.dotgames.org`), token file, where the objects are built, build without sending |
+| `--site URL`, `--token-file FILE`, `--out DIR`, `--dry-run` | site (`$DOT_SITE`, default `https://tmcdev.net`; `dev.dotgames.org` is the dev CDN and answers no API), token file, where the objects are built, build without sending |
 
 **The token is never an argument** (`--token` is refused). It comes from `$DOT_CLI_TOKEN`, which is copied to a mode-600 temp file removed on exit, or from the file in `--token-file`, `$DOT_CLI_TOKEN_FILE` or `~/.config/dot/cli-token`. The script sends only missing objects, so running it again after a failure resumes. A `HELD` first release writes no lock line; run it again after the moderator approves (the objects are already there, but a taken version cannot be claimed again, so `--bump`).
 
