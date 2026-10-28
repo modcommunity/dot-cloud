@@ -31,6 +31,7 @@ extends RefCounted
 
 const CHANNEL := "cloud.pub"
 const _Sides := preload("dot_cloud_publisher_sides.gd")
+const _Rewrite := preload("dot_cloud_publisher_rewrite.gd")
 const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
@@ -200,72 +201,11 @@ static func _is_text_resource(rel: String) -> bool:
 	return e == "tscn" or e == "tres" or e == "import"
 
 
-## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/<where this pack put X>` for
-## every X this pack contains, and leaves every other reference exactly as it was.
-##
-## [param inside] maps a reference's path to its path in the pack. Those differ only for
-## an imported output, which moves to [constant IMPORTED_DIR]; for everything else the
-## map is the identity and this is the plain prefixing it always was.
-##
-## Returns the staged file's path, or "" when nothing needed changing -- so the caller
-## keeps hashing the original and no object is written twice for an identical file.
+## Rewrites `res://X` to `res://<mount_root>/<id>/<version>/<where this pack put X>` for every X this pack
+## contains. [param inside] maps a reference's path to its path in the pack (identity except imported outputs).
+## Returns the staged path, or "" when nothing changed, so the caller keeps hashing the original.
 func _rewrite_paths(abs: String, staged: String, inside: Dictionary) -> DotResult:
-	var text := FileAccess.get_file_as_string(abs)
-	if text == "" and FileAccess.get_open_error() != OK:
-		return DotResult.fail(DotError.CODE_IO, "Could not read the file.", abs)
-
-	var prefix := "res://%s/%s/%s/" % [mount_root, content_id, version]
-	var out := ""
-	var i := 0
-	var changed := false
-
-	while true:
-		var at := text.find("res://", i)
-		if at < 0:
-			out += text.substr(i)
-			break
-
-		out += text.substr(i, at - i)
-
-		# The reference ends at the first character that cannot be in a path. Scenes
-		# quote them, but .tres and a stray comment do not always, so this stops at
-		# whitespace and quotes rather than assuming a delimiter.
-		var j := at + 6
-		while j < text.length():
-			var c := text[j]
-			if c == '"' or c == "'" or c == " " or c == "\t" or c == "\n" or c == "\r" or c == ")":
-				break
-			j += 1
-
-		var path := text.substr(at + 6, j - (at + 6))
-
-		# Already namespaced: publishing a directory that was published before, or a
-		# source tree somebody has namespaced by hand. Rewriting it again would bury
-		# the content one level deeper on every republish.
-		if inside.has(path) and not path.begins_with("%s/%s/%s/" % [mount_root, content_id, version]):
-			out += prefix + str(inside[path])
-			changed = true
-		else:
-			out += "res://" + path
-
-		i = j
-
-	if not changed:
-		return DotResult.success("")
-
-	var parent := DotPaths.ensure_parent_dir(staged)
-	if not parent.ok:
-		return parent
-
-	var f := FileAccess.open(staged, FileAccess.WRITE)
-	if f == null:
-		return DotResult.fail(
-			DotError.CODE_IO, "Could not write the rewritten file.", staged
-		)
-	f.store_string(out)
-	f.close()
-
-	return DotResult.success(staged)
+	return _Rewrite.rewrite_paths(abs, staged, inside, mount_root, content_id, version)
 
 
 ## Directory of pre-tokenized scripts (API 11): `<dir>/game/x.gdc` stands in for `game/x.gd`.
@@ -432,12 +372,6 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		return sided
 	var sides: Dictionary = sided.value
 
-	var written := 0
-	var deduped := 0
-	var total_bytes := 0
-	var rewritten := 0
-	var seen := {}
-
 	# Maps where a reference says a file is to where this pack put it (they differ once an imported
 	# output is relocated out of `.godot/`), so a rewrite can tell its own content from the host's.
 	var inside := {}
@@ -456,63 +390,14 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if rewrite_resource_paths:
 		DotPaths.remove_tree(staging)
 
-	for rel in relatives:
-		# `extra` entries come from the project root or [member extra_files]; the rest from the source.
-		var abs: String = extra.get(rel, source_dir.path_join(rel))
-
-		# A scene names its script by absolute path and the pack mounts elsewhere, so rewrite paths to files
-		# this pack contains (not the host build's addons) before hashing, so the manifest covers what mounts.
-		if rewrite_resource_paths and _is_text_resource(rel):
-			var staged := _rewrite_paths(abs, staging.path_join(rel), inside)
-			if not staged.ok:
-				return staged.wrap("Could not rewrite paths in '%s'." % rel)
-			if str(staged.value) != "":
-				abs = str(staged.value)
-				rewritten += 1
-
-		var safe := DotPaths.safe_relative(rel)
-		if not safe.ok:
-			# Refuse rather than skip: a silently missing file surfaces as a missing texture on a player's machine.
-			return safe.wrap("Cannot publish '%s'." % rel)
-
-		var hashed := DotHash.sha256_file(abs)
-		if not hashed.ok:
-			return hashed.wrap("Could not hash '%s'." % rel)
-
-		var digest: String = hashed.value
-		var size := DotPaths.file_size(abs)
-
-		var entry := DotCloudFile.new()
-		entry.path = safe.value
-		entry.sha256 = digest
-		entry.size = size
-		entry.required = not _is_optional(entry.path)
-		entry.groups = _groups_for(entry.path)
-		entry.platforms = _platforms_for(entry.path)
-		entry.side = str(sides.get(rel, DotCloudFile.SIDE_BOTH))
-
-		var checked := entry.validate()
-		if not checked.ok:
-			return checked
-
-		manifest.files.append(entry)
-		total_bytes += size
-
-		if seen.has(digest):
-			deduped += 1
-			continue
-		seen[digest] = true
-
-		var dest := objects_dir.path_join("%s/%s" % [digest.substr(0, 2), digest])
-
-		# Objects are named by their hash, so an existing one is already correct.
-		if FileAccess.file_exists(dest) and DotPaths.file_size(dest) == size:
-			continue
-
-		var copied := _copy(abs, dest)
-		if not copied.ok:
-			return copied
-		written += 1
+	var stored := _store_files(manifest, relatives, extra, source_dir, inside, sides, objects_dir, staging)
+	if not stored.ok:
+		return stored
+	var written: int = stored.value["written"]
+	var deduped: int = stored.value["deduped"]
+	var total_bytes: int = stored.value["bytes"]
+	var rewritten: int = stored.value["rewritten"]
+	var seen: Dictionary = stored.value["seen"]
 
 	var bundled := {}
 	if write_bundle:
@@ -587,6 +472,75 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
 	})
+
+
+## Hashes, rewrites and stores every file; returns {written, deduped, bytes, rewritten, seen}.
+func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extra: Dictionary, source_dir: String, inside: Dictionary, sides: Dictionary, objects_dir: String, staging: String) -> DotResult:
+	var written := 0
+	var deduped := 0
+	var total_bytes := 0
+	var rewritten := 0
+	var seen := {}
+
+	for rel in relatives:
+		# `extra` entries come from the project root or [member extra_files]; the rest from the source.
+		var abs: String = extra.get(rel, source_dir.path_join(rel))
+
+		# A scene names its script by absolute path and the pack mounts elsewhere, so rewrite paths to files
+		# this pack contains (not the host build's addons) before hashing, so the manifest covers what mounts.
+		if rewrite_resource_paths and _is_text_resource(rel):
+			var staged := _rewrite_paths(abs, staging.path_join(rel), inside)
+			if not staged.ok:
+				return staged.wrap("Could not rewrite paths in '%s'." % rel)
+			if str(staged.value) != "":
+				abs = str(staged.value)
+				rewritten += 1
+
+		var safe := DotPaths.safe_relative(rel)
+		if not safe.ok:
+			# Refuse rather than skip: a silently missing file surfaces as a missing texture on a player's machine.
+			return safe.wrap("Cannot publish '%s'." % rel)
+
+		var hashed := DotHash.sha256_file(abs)
+		if not hashed.ok:
+			return hashed.wrap("Could not hash '%s'." % rel)
+
+		var digest: String = hashed.value
+		var size := DotPaths.file_size(abs)
+
+		var entry := DotCloudFile.new()
+		entry.path = safe.value
+		entry.sha256 = digest
+		entry.size = size
+		entry.required = not _is_optional(entry.path)
+		entry.groups = _groups_for(entry.path)
+		entry.platforms = _platforms_for(entry.path)
+		entry.side = str(sides.get(rel, DotCloudFile.SIDE_BOTH))
+
+		var checked := entry.validate()
+		if not checked.ok:
+			return checked
+
+		manifest.files.append(entry)
+		total_bytes += size
+
+		if seen.has(digest):
+			deduped += 1
+			continue
+		seen[digest] = true
+
+		var dest := objects_dir.path_join("%s/%s" % [digest.substr(0, 2), digest])
+
+		# Objects are named by their hash, so an existing one is already correct.
+		if FileAccess.file_exists(dest) and DotPaths.file_size(dest) == size:
+			continue
+
+		var copied := _copy(abs, dest)
+		if not copied.ok:
+			return copied
+		written += 1
+
+	return DotResult.success({"written": written, "deduped": deduped, "bytes": total_bytes, "rewritten": rewritten, "seen": seen})
 
 
 ## Writes `bundles/<sha256>.zip` with every unique object at or under the size cap, each entry

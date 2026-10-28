@@ -12,17 +12,14 @@ extends Node
 ## Directories searched before the network. For development and bundled content.
 @export var local_search_dirs: PackedStringArray = PackedStringArray()
 
-## How a content id and version become a manifest URL, for [method ensure].
-##
-## Half the family addresses content by id and version, not URL, and a catalogue of a hundred maps
-## should not repeat one CDN hostname a hundred times. [code]{base}[/code], [code]{id}[/code] and
-## [code]{version}[/code] are substituted; the default matches what [DotCloudPublisher] writes.
+## How a content id and version become a manifest URL, for [method ensure]: {base}, {id} and {version}
+## are substituted. A catalogue of a hundred maps should not repeat one CDN hostname a hundred times;
+## the default matches what [DotCloudPublisher] writes.
 @export var manifest_url_template: String = "{base}/{id}/{version}/manifest.json"
 
 ## Other shapes to try when [member manifest_url_template] does not answer.
 ##
-## An origin can hold content published before the versioned layout, and a client cannot require a
-## re-publish. Each entry is expanded like the main template and appended after it, per base.
+## For content published before the versioned layout; expanded like the main template, appended per base.
 @export var manifest_url_fallbacks: PackedStringArray = PackedStringArray()
 
 
@@ -58,9 +55,7 @@ func _expand_all(
 
 ## Puts the page's origin on a root-relative base, so it becomes a URL.
 ##
-## [HTTPRequest] parses the URL itself and refuses `/content/x/manifest.json` before the browser sees
-## it, so a same-origin deployment (no CORS to configure) needs [method DotWeb.origin] joined on.
-## Only for HTTP bases: a local search directory beginning with `/` is a real absolute path.
+## HTTPRequest refuses `/content/x/manifest.json` before the browser sees it. HTTP bases only: a local search dir beginning with `/` is a real path.
 static func resolve_base_url(base: String) -> String:
 	return join_origin(DotWeb.origin(), base)
 
@@ -99,9 +94,7 @@ static func _expand_with(
 
 ## Whether a manifest URL names a file on this machine rather than a server.
 ##
-## The three file schemes are local, any other scheme is not, and a bare path is local only if it
-## exists: a root-relative `/content/x/manifest.json` is a same-origin URL on the web, and treating
-## it as a file would break the one CORS-free configuration.
+## A bare path is local only if it exists: a root-relative `/content/x/manifest.json` is a same-origin URL on the web.
 static func is_local_manifest_url(manifest_url: String) -> bool:
 	if manifest_url.begins_with("res://") or manifest_url.begins_with("user://"):
 		return true

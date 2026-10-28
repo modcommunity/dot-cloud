@@ -6,8 +6,7 @@ extends RefCounted
 
 ## The UIDs a pack declares, and the one it may not take.
 ##
-## An imported asset's reference to its sibling is a UID, and registering one the HOST owns would re-point
-## every `load("uid://…")` in the build into downloaded content: the mount prefix escaped by another route.
+## Registering a UID the host owns would re-point every `load("uid://…")` in the build into downloaded content.
 static func uids(h: Node) -> void:
 	h._sections_started += 1
 	h._line("[b]9. the uids a pack declares[/b]")

@@ -2,26 +2,9 @@
 class_name DotCloudClient
 extends "dot_cloud_client_urls.gd"
 
-## The one node a game needs: fetch a manifest, download, verify, mount.
+## The one node a game needs: fetch a manifest, download, verify, mount (usage in docs/client.md).
 ##
-## [codeblock]
-## var cloud := DotCloudClient.new()
-## add_child(cloud)
-## cloud.config = my_config          # or leave null for defaults
-##
-## await cloud.start()
-##
-## cloud.phase_changed.connect(func(p, text): loading_label.text = text)
-## cloud.progress_changed.connect(func(p): bar.value = p.fraction * 100.0)
-##
-## var res := await cloud.acquire("https://cdn.example.com/dm_arena/manifest.json")
-## if res.ok:
-##     get_tree().change_scene_to_file(res.value)   # the entry scene path
-## [/codeblock]
-##
-## Place as many as you like — one per content channel, one per server. There is
-## no singleton, so a client that is downloading the next map in the background
-## while playing the current one is just two of these.
+## No singleton: one per content channel or server, so a background map download is a second client.
 
 const CHANNEL := "cloud"
 const _Prefetch := preload("dot_cloud_client_prefetch.gd")
@@ -65,11 +48,7 @@ signal _acquire_finished(content_key: String, result: DotResult)
 
 ## Content-delivery settings. A default [DotCloudConfig] is created if unset.
 ##
-## [b]Note the default refuses unsigned manifests[/b] and therefore fails
-## validation until [member DotCloudConfig.trusted_keys] has a key or
-## [member DotCloudConfig.require_signed_manifests] is turned off. That is
-## deliberate: a content system that mounts scripts should not be secure-by-
-## accident.
+## The default refuses unsigned manifests, so it fails validation until [member DotCloudConfig.trusted_keys] has a key: a content system that mounts scripts should not be secure by accident.
 @export var config: DotCloudConfig = null
 
 ## Path to a JSON config file layered over [member config]'s defaults.
@@ -84,19 +63,9 @@ signal _acquire_finished(content_key: String, result: DotResult)
 
 @export_group("Service")
 
-## Publish this client in [DotRegistry] so other addons can find it.
+## Publish this client in [DotRegistry] so other addons find it under [constant SERVICE].
 ##
-## [b]Three addons look for it there and none of them imports this one.[/b] dot-server's
-## [code]DotClientLink[/code] asks for it to download a game's content;
-## [code]DotGameManager[/code] asks for it to release the previous game's;
-## [code]DotBuiltinCommands[/code]'s content command reports on it; and
-## dot-user-avatar's [code]DotAvatarCatalogue[/code] asks for it to turn a cosmetic's
-## content id into a path. All four are duck-typed, all four look under
-## [constant SERVICE], and until this existed all four found nothing — so a client could
-## never download content, a game change never released any, and a cosmetic delivered
-## through the cloud was unreachable. Nothing errored: every one of those call sites
-## treats an absent cloud as "this deployment ships its content in the build", which is a
-## legitimate configuration and therefore indistinguishable from the bug.
+## DotClientLink, DotGameManager, the content command and DotAvatarCatalogue duck-type against it; an absent cloud reads as "content ships in the build", so a missing registration errors nowhere.
 @export var register_service: bool = true
 
 ## Suffix for this client's registry name.
@@ -142,19 +111,9 @@ var addon_api: DotAddonApi = DotAddonApi.new()
 var _phase: Phase = Phase.IDLE
 var _http: DotHttp = null
 
-## The client OBJECTS are downloaded through, separate from the manifest's.
+## The client objects are downloaded through, separate from the manifest's.
 ##
-## [b]They need opposite settings, and sharing one node capped the CDN at 8 MiB.[/b]
-## A manifest is small, arrives before anything has been verified, and comes from a host
-## that may be hostile -- so `ManifestHttp` caps the response, and should. An object is
-## the opposite case on every count: its size is declared in a manifest we have ALREADY
-## verified the signature of, and its bytes are hash-checked after they land, so the
-## integrity guarantee never came from the size limit. Capping it only means content
-## larger than the cap cannot be delivered at all.
-##
-## surf_mesa.bin is 11.7 MiB. Against the shared node it failed with "The response was
-## too large", which the downloader reported as "Some required content could not be
-## downloaded" -- a map that publishes perfectly and can never be fetched.
+## The manifest's response cap is right for an unverified document and wrong for an object, whose size is signed and whose bytes are hash-checked: sharing one node left packs over 8 MiB undeliverable.
 var _object_http: DotHttp = null
 
 ## The verified published mirror list (API 13), or null for origin only.
@@ -371,18 +330,8 @@ func acquire(
 	if not fetched.ok:
 		return _fail(fetched.error)
 
-	# [b]A manifest read off the disk is a pack that is ON the disk, and every object
-	# beside it was still being asked for over HTTP.[/b] [method ensure] adopts the
-	# directory it built a candidate URL from; this path takes the URL from the caller and
-	# adopted nothing, so a server whose `game.yml` names `dist/<id>/manifest.json` --
-	# which is exactly where `./server pack` writes, and what the local-first design tells
-	# an operator to do -- verified the manifest from a file and then reported
-	#
-	#     140 missing, first: game/arena_npc_brain.gd — [forbidden] … Not allowed.
-	#
-	# an error about the network, naming a file it was standing on top of. On a box with
-	# no `content_urls` at all there is no source for it to fail over TO, so the whole
-	# pack is unreachable while it sits in the next directory.
+	# A manifest read off the disk is a pack that is on the disk: adopt its directory, or every
+	# object beside it is asked for over HTTP and fails with no source to fail over to.
 	if is_local_manifest_url(manifest_url):
 		_adopt_local_dir(_local_manifest_path(manifest_url).get_base_dir())
 
@@ -390,36 +339,16 @@ func acquire(
 	return await acquire_manifest(manifest, groups)
 
 
-## [method acquire] for a manifest already in hand.
-##
-## dot-server pushes manifests down the game connection rather than making every
-## client fetch the same document over HTTP, so this is the path it uses.
 ## Content being acquired right now, by key.
 ##
-## [b]Two callers wanting the same content at the same time is normal, and it used to
-## fail.[/b] `DotCloudDownloader.sync` refuses a second sync with "This downloader is
-## already syncing" -- correctly, one downloader runs one sync -- and `acquire_manifest`
-## turned that into a failed acquisition for the caller who arrived second. On a server
-## that is a race between the host applying `sv_map` and the game fetching its own
-## initial map: whichever lost reported "no delivered content for this map", the map
-## then missed the catalogue, and the server started on nothing while the download it
-## was waiting for completed seconds later.
-##
-## So the second caller waits for the first and gets its answer, which is what it wanted
-## in the first place.
+## A second caller for the same content waits for the first: the downloader runs one sync at a time, and failing the later caller lost the race between sv_map and a game's initial map.
 var _inflight: Dictionary = {}
 ## manifest URL -> pinned sha256 of the manifest file, set by [method ensure_locked].
 var _pinned: Dictionary = {}
 
-## Whether [member downloader] is running a sync right now, and the signal that it
-## stopped.
+## Whether [member downloader] is running a sync right now, and the signal that it stopped.
 ##
-## [b]Two DIFFERENT packs at once used to fail the second one.[/b] `_inflight` makes two
-## callers of the same content share one acquisition, but the downloader runs one sync
-## at a time, so a map fetched at boot and a game's prefetch of its other maps collided:
-## every prefetch while the boot map downloaded failed with "This downloader is already
-## syncing", logged at ERROR with a backtrace, and the maps were fetched again later on
-## demand. A second sync now waits its turn, which is what its caller wanted.
+## A second sync (a prefetch while the boot map downloads) waits its turn instead of failing.
 var _sync_busy := false
 signal _sync_freed
 
@@ -441,6 +370,7 @@ func _await_inflight(key: String) -> DotResult:
 	)
 
 
+## [method acquire] for a manifest already in hand; dot-server pushes manifests down the game connection.
 func acquire_manifest(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray(),
@@ -634,15 +564,9 @@ func _index_manifest(manifest: DotCloudManifest) -> void:
 		})
 
 
-## Fetches only [code]requires.json[/code] and runs [method check_requirements], so a pack
-## this build cannot run is refused ([constant DotError.CODE_VERSION]) before its payload
-## is downloaded. A manifest without the file behaves as it always did.
+## Fetches only [code]requires.json[/code] and runs [method check_requirements], so a pack this build cannot run is refused ([constant DotError.CODE_VERSION]) before its payload downloads.
 ##
-## A sub-manifest rather than a new downloader call: the downloader already does
-## failover, verification and the busy guard, and it only reads [member
-## DotCloudManifest.files]. A failure to fetch the file is not a refusal -- the full
-## download that follows reports its own network trouble, and the check after it runs
-## as before.
+## A failure to fetch the file is not a refusal: the full download that follows reports its own network trouble.
 func _preflight_requirements(manifest: DotCloudManifest, key: String) -> DotResult:
 	var req: DotCloudFile = null
 	for file in manifest.files:
@@ -669,15 +593,7 @@ func _preflight_requirements(manifest: DotCloudManifest, key: String) -> DotResu
 
 ## Puts every object [param manifest] names into the store, and mounts nothing.
 ##
-## [b]Not every pack is mounted where its manifest says.[/b] An addon pack replaces the
-## build's own copy of that addon at the next boot (see [DotCloudAddonSet]): its files
-## have to land at `res://addons/<addon>/`, in an overlay assembled from the store, and
-## mounting it at its own `res://dot_cloud/<id>/<version>/` first would register nothing
-## useful and leave a second copy of the addon in the tree for the life of the process.
-##
-## The manifest must already be verified -- [method resolve_manifest] and
-## [method fetch_manifest] both do it. No requirements check either: that question is
-## about a pack's scripts compiling against this build, and an addon pack IS the build.
+## An addon pack lands at res://addons/<addon>/ in an overlay, not at its own mount. The manifest must already be verified; no requirements check, since an addon pack is the build.
 func download_manifest(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray()
@@ -785,24 +701,9 @@ func check_requirements(manifest: DotCloudManifest) -> DotResult:
 	return DotResult.success({})
 
 
-## [method acquire] for content addressed by id and version rather than by URL.
+## [method acquire] for content addressed by id and version rather than by URL: the interface DotMapLoader and the rest of the family duck-type against.
 ##
-## [b]This is the interface the rest of the family duck-types against, and until now it
-## did not exist.[/b] [DotMapLoader] has called [code]ensure(content_id, version)[/code]
-## and [code]is_mounted(content_id, version)[/code] on whatever it found under
-## [constant SERVICE] since it was written; this client offered [method acquire] and
-## [method is_ready], which take a URL and a [code]id@version[/code] key. The two ends
-## had never met, so every *delivered* map failed with "the registered cloud client does
-## not speak the content interface" — and no suite could see it, because dot-map's only
-## loader test runs with no cloud client at all, which is the branch that falls back to
-## the disk and passes.
-##
-## Idempotent: content already mounted returns immediately without touching the network.
-##
-## [param manifest_url] overrides [member manifest_url_template] for callers that have a
-## URL of their own. Empty resolves one against [member local_search_dirs] and then
-## [member http_base_urls], in that order — the disk before the network, so a development
-## tree and an offline install work without a server.
+## Idempotent. [param manifest_url] overrides [member manifest_url_template]; empty resolves against [member local_search_dirs] then [member http_base_urls], disk before network.
 func ensure(
 	content_id: StringName,
 	version: String = "",
@@ -817,21 +718,8 @@ func ensure(
 			DotError.CODE_INVALID, "No content id to ensure."
 		)
 
-	# [b]Start first, exactly as [method acquire] does.[/b] This did not, and the way it
-	# failed is the reason the line is here rather than the reason it is obvious.
-	#
-	# [member config_file] is applied in [method start] — that is the only place it is
-	# read. A caller that reached content through `ensure` alone therefore verified the
-	# manifest against a config that had never seen its own file, so
-	# `config.trusted_keys` was empty and the answer came back "No trusted signing keys
-	# are configured", naming the one thing the caller had definitely configured. Every
-	# minute spent on that is spent reading a JSON file that is correct.
-	#
-	# It stayed hidden because the two entry points are used by different callers:
-	# dot-server has a manifest URL and calls `acquire`, which starts; dot-map and
-	# dot-user-avatar have an id and call `ensure`, which did not — and both of those
-	# reach content that also ships in the build, so the failure was somebody else's
-	# fallback path.
+	# Start first, as acquire does: config_file is applied only in start(), so verifying before it
+	# runs reports "No trusted signing keys" against a config that never read its own file.
 	if not _started:
 		var started := await start()
 		if not started.ok:
@@ -902,21 +790,9 @@ func ensure_locked(lock_path: String, opts: Dictionary = {}) -> DotResult:
 	return DotResult.success(report)
 
 
-## [method ensure] for a mount that knows which session it is for and where the content came
-## from. The one call the Workshop mounts through.
+## [method ensure] for a mount that knows its session and source; the one call the Workshop mounts through.
 ##
-## [param session] is [constant DotContentIndex.SESSION_SOLO] or [constant
-## DotContentIndex.SESSION_ONLINE]; [param source] is `&"subscription"`, `&"server"` or
-## `&"game"`. [param options]:
-## [br]- [code]uid_policy: "add_only"[/code]: UIDs the process already knows are left alone and
-## counted ([code]uids_skipped=N[/code] in the mount line). A subscription shipping a resource
-## under the UID of the game's own texture would otherwise redirect the game's references to
-## its copy, in solo and in every later online session of the process.
-## [br]- [code]allow_root: false[/code]: a pack that overlays addons at the root is refused as
-## [constant DotError.CODE_FORBIDDEN].
-## [br]- [code]manifest_url[/code]: where the manifest is, as for [method ensure].
-## [br]A subscription is never mounted for an online session; that is refused here as well as
-## by the caller, because a subscription pack's code must not reach a server's game.
+## [param session] is a [constant DotContentIndex] session tag, [param source] `&"subscription"`, `&"server"` or `&"game"`. [param options]: `uid_policy: "add_only"` leaves UIDs the process knows alone, `allow_root: false` refuses an addon overlay at the root, `manifest_url` as for [method ensure]. A subscription is never mounted for an online session.
 func ensure_for_session(
 	content_id: StringName,
 	version: String,
@@ -1015,15 +891,9 @@ func resolve_manifest(
 			)
 			continue
 
-		# [b]A published directory holds a manifest AND the objects it names.[/b]
-		# [DotCloudPublisher] writes `manifest.json` beside `objects/`, so a base that
-		# answered for the manifest is by construction where the content is — and
-		# without this the id-and-version form found a manifest it could not then
-		# fetch a single file for, failing with "Content is not in any local source
-		# directory" while the bytes sat next to the document that named them.
-		#
-		# The URL form does not need it: a caller with a URL has configured the
-		# sources to match it. This one built the URL itself, so it knows.
+		# A published directory holds the manifest and the objects it names, so a base that answered
+		# for the manifest is where the content is. The URL form does not need this: its caller
+		# configured the sources.
 		if is_local_manifest_url(candidate):
 			_adopt_local_dir(_local_manifest_path(candidate).get_base_dir())
 
@@ -1088,16 +958,7 @@ static func mount_prefix_for(content_id: StringName, version: String = "") -> St
 
 ## Downloads and verifies a manifest without acting on it.
 ##
-## Signature verification runs over the bytes as received, never a
-## re-serialisation — see [DotCloudSignature].
-##
-## [b]A local path is read rather than requested.[/b] [DotCloudSourceLocal] already
-## serves a published tree off the disk — that is what [member local_search_dirs] is —
-## but the manifest at the top of that tree was still going through [DotHttp], and
-## [HTTPRequest] cannot fetch a [code]res://[/code] or [code]user://[/code] path. So a
-## deployment whose content is on disk beside the executable, and every test that
-## publishes into a temporary directory, could reach every object in a pack and not the
-## one document naming them.
+## Signatures verify over the bytes as received. A local path is read, not requested: HTTPRequest cannot fetch res:// or user://.
 func fetch_manifest(manifest_url: String) -> DotResult:
 	var bytes: PackedByteArray
 
@@ -1107,21 +968,8 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 			return read.wrap("Could not read the content manifest.")
 		bytes = read.value
 	elif not manifest_url.contains("://"):
-		# [b]A local search directory that does not hold this pack.[/b]
-		# `manifest_urls_for` builds a candidate from every local dir AND every http
-		# base, and `is_local_manifest_url` answers false for a bare path whose file is
-		# not there -- correctly, it is not a local manifest. It is not a URL either,
-		# and handing it to HTTPRequest produced
-		#
-		#     ERROR: Invalid URL scheme: ''.  at: _parse_url (http_request.cpp:66)
-		#
-		# an engine error naming nothing an operator configured, followed by "Could not
-		# download the content manifest" about a path that was never a download. On a
-		# server with no `http_base_urls` at all -- which is every deployment that has
-		# not been told where its content lives -- that is the ONLY thing it prints.
-		#
-		# Refused cleanly instead, so `ensure` moves to the next candidate and the error
-		# that survives is the one that names the real problem: nowhere to fetch from.
+		# A local search directory that does not hold this pack: not a URL either, so refuse cleanly
+		# and let `ensure` try the next candidate, instead of an engine "Invalid URL scheme" error.
 		return DotResult.fail(
 			DotError.CODE_STATE,
 			"No manifest at '%s'." % manifest_url,
@@ -1150,25 +998,9 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 	if not checked.ok:
 		return checked
 
-	# [b]A pack's objects live beside its manifest, so where the manifest came from is
-	# always a valid mirror.[/b] Added here rather than assumed downstream, because
-	# nothing else in the client knows the URL by the time the objects are fetched.
-	#
-	# Without it a pack published the way `DotCloudPublisher` writes one -- manifest and
-	# `objects/` together under a per-content directory -- is unreachable unless somebody
-	# remembered `--mirror` at publish time. `DotCloudSourceHttp` builds
-	# `<base>/objects/<aa>/<hash>` from the CONFIGURED base, which for a client pointed
-	# at a content root is missing the content id: the manifest fetches from
-	# `<root>/<id>/manifest.json` and every object is then asked for at `<root>/objects/`,
-	# one directory too high. On S3 that answers 403 rather than 404 -- a missing key
-	# with no `ListBucket` permission is indistinguishable from a forbidden one -- so it
-	# reads as a credentials problem on a public bucket, which is where the time goes.
-	#
-	# Measured: surf_mesa@1.0.0, manifest verified, 12 objects needed, all 13 URLs
-	# returning 200 to curl and every one of them 403 to the client.
-	#
-	# Appended, never prepended: a mirror the publisher named is a statement about where
-	# the operator wants load to land, and this is only the fallback that is always true.
+	# A pack's objects live beside its manifest, so where it came from is always a valid mirror;
+	# without it a client pointed at a content root asks for objects one directory too high.
+	# Appended, never prepended: a mirror the publisher named is where the operator wants load.
 	if not is_local_manifest_url(manifest_url):
 		var here := manifest_url.get_base_dir()
 

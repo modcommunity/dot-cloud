@@ -3,9 +3,7 @@ extends RefCounted
 
 ## Sends a published pack (`manifest.json` + `objects/`) through the site, which holds the bucket credentials and is the only writer.
 ##
-## claim -> manifest (the site names what it lacks) -> next (presigned PUTs, a page at a time) -> PUT -> finalize. Re-running
-## after a failure resumes: the site lists only what is still missing. The CLI token is read from a file and handed to curl in a
-## config file, so it is on neither the command line nor the environment. Contract: docs/publishing.md ("Uploading").
+## claim, manifest, next (presigned PUTs), PUT, finalize; a re-run resumes. The token goes to curl in a config file, never argv or environment. See docs/publishing.md ("Uploading").
 
 const CHANNEL := "dot_cloud.upload"
 

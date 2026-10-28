@@ -59,9 +59,8 @@ static func provides_for(
 	return DotResult.success(provides)
 
 
-## Each pack path's side, from `side_rules` and the source's `sides.json`; a path in no rule is absent
-## (both sides). [param owners] maps a relocated imported output to the source asset it stands for.
-static func sides_for(pub: DotCloudPublisher, source_dir: String, relatives: PackedStringArray, owners: Dictionary) -> DotResult:
+## The side rules from [member DotCloudPublisher.side_rules] and the source's sides.json, as pattern -> side.
+static func _load_rules(pub: DotCloudPublisher, source_dir: String) -> DotResult:
 	var rules := {}
 	for pattern: Variant in pub.side_rules:
 		rules[str(pattern)] = str(pub.side_rules[pattern])
@@ -93,11 +92,11 @@ static func sides_for(pub: DotCloudPublisher, source_dir: String, relatives: Pac
 						"%s: '%s' is listed for both sides." % [DotCloudPublisher.SIDES_FILE, p]
 					)
 				rules[p] = str(key)
+	return DotResult.success(rules)
 
-	var out := {}
-	if rules.is_empty():
-		return DotResult.success(out)
 
+## Refuses a rule with an unknown side or a pattern that is not a pack path.
+static func _validate_rules(rules: Dictionary) -> DotResult:
 	for pattern: String in rules:
 		var want: String = rules[pattern]
 		if not want in [DotCloudFile.SIDE_CLIENT, DotCloudFile.SIDE_SERVER]:
@@ -112,6 +111,24 @@ static func sides_for(pub: DotCloudPublisher, source_dir: String, relatives: Pac
 				"Side rule '%s' is not a pack path." % pattern,
 				"patterns are relative to the source root, like lightmaps/ or maps/*.res"
 			)
+	return DotResult.success()
+
+
+## Each pack path's side, from `side_rules` and the source's `sides.json`; a path in no rule is absent
+## (both sides). [param owners] maps a relocated imported output to the source asset it stands for.
+static func sides_for(pub: DotCloudPublisher, source_dir: String, relatives: PackedStringArray, owners: Dictionary) -> DotResult:
+	var loaded := _load_rules(pub, source_dir)
+	if not loaded.ok:
+		return loaded
+	var rules: Dictionary = loaded.value
+
+	var out := {}
+	if rules.is_empty():
+		return DotResult.success(out)
+
+	var valid := _validate_rules(rules)
+	if not valid.ok:
+		return valid
 
 	var hits := {}
 	for rel in relatives:

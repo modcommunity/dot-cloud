@@ -91,6 +91,43 @@ func _publish(opts: Dictionary) -> int:
 		claim = got.value
 
 	var pub := DotCloudPublisher.new()
+	var configured := _apply_options(pub, opts, claim)
+	if configured != EXIT_OK:
+		return configured
+
+	var res := pub.publish(str(opts["source"]), str(opts["out"]))
+
+	if not res.ok:
+		printerr("publish failed: %s" % str(res.error))
+		if not claim.is_empty():
+			(claim["uploader"] as DotCloudUploader).fail_claim(int(claim["id"]), str(res.error))
+		return EXIT_FAILED
+
+	var d: Dictionary = res.value
+	print("")
+	print("published %s" % (d["manifest"] as DotCloudManifest).key())
+	print("  manifest    %s" % d["manifest_path"])
+	print("  files       %d" % int(d["files"]))
+	print("  objects     %d (%d written, %d deduplicated)" % [
+		int(d["objects"]), int(d["objects_written"]), int(d["deduped"])
+	])
+	print("  sources     %d left out (imported form shipped)" % int(d["sources_dropped"]))
+	print("  size        %s" % DotPaths.format_bytes(int(d["bytes"])))
+	print("  signed      %s" % ("yes" if bool(d["signed"]) else "NO"))
+
+	if not bool(d["signed"]):
+		print("")
+		print("  A client with default settings will REFUSE this content.")
+		print("  Sign it with --key, or set require_signed_manifests = false.")
+
+	if opts.has("upload"):
+		return _finish_upload(opts, claim, d)
+
+	return EXIT_OK
+
+
+## Fills [param pub] from the parsed options; returns EXIT_OK or the exit code to quit with.
+func _apply_options(pub: DotCloudPublisher, opts: Dictionary, claim: Dictionary) -> int:
 	pub.content_id = str(claim.get("contentId", opts["id"]))
 	pub.version = str(opts.get("version", "0.0.0"))
 	pub.display_name = str(opts.get("name", ""))
@@ -149,34 +186,6 @@ func _publish(opts: Dictionary) -> int:
 		else:
 			printerr("--platform expects prefix=tag[,tag], got '%s'" % rule)
 			return EXIT_USAGE
-
-	var res := pub.publish(str(opts["source"]), str(opts["out"]))
-
-	if not res.ok:
-		printerr("publish failed: %s" % str(res.error))
-		if not claim.is_empty():
-			(claim["uploader"] as DotCloudUploader).fail_claim(int(claim["id"]), str(res.error))
-		return EXIT_FAILED
-
-	var d: Dictionary = res.value
-	print("")
-	print("published %s" % (d["manifest"] as DotCloudManifest).key())
-	print("  manifest    %s" % d["manifest_path"])
-	print("  files       %d" % int(d["files"]))
-	print("  objects     %d (%d written, %d deduplicated)" % [
-		int(d["objects"]), int(d["objects_written"]), int(d["deduped"])
-	])
-	print("  sources     %d left out (imported form shipped)" % int(d["sources_dropped"]))
-	print("  size        %s" % DotPaths.format_bytes(int(d["bytes"])))
-	print("  signed      %s" % ("yes" if bool(d["signed"]) else "NO"))
-
-	if not bool(d["signed"]):
-		print("")
-		print("  A client with default settings will REFUSE this content.")
-		print("  Sign it with --key, or set require_signed_manifests = false.")
-
-	if opts.has("upload"):
-		return _finish_upload(opts, claim, d)
 
 	return EXIT_OK
 
