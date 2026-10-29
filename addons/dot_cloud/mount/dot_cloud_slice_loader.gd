@@ -3,8 +3,6 @@ extends RefCounted
 
 ## Loads a list of resources a few at a time across frames, so a loading cover keeps animating.
 
-const CHANNEL := "cloud.slice"
-
 ## Emitted after each resource; drive the cover's bar from it.
 signal progress(done: int, total: int, path: String)
 

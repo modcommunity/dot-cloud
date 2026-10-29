@@ -4,7 +4,6 @@ extends RefCounted
 ## A repository's `content.lock.json` read the way dot-bootstrap/tools/fetch_lock.sh reads it: which packs to fetch and
 ## from where. [method DotCloudClient.ensure_locked] mounts the result. Format and rules: docs/cdn-publish.md.
 
-const CHANNEL := "dot_cloud.lock"
 const DEFAULT_ORIGIN := "https://dotgames.org/content"
 
 ## Parsed `packs` entries that are wanted: {id, version, manifest_sha256, into, kind, optional}.
