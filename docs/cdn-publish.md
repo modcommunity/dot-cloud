@@ -101,6 +101,10 @@ Review has two gates, and a release goes live only when every gate that applies 
 
 **Polish.** The pack manager's Polish button edits one entry of the newest version (name, preview image, credit, licence) and republishes only that entry as the next patch version through the same flow: the other files are copied inside the bucket, unchanged objects are skipped, and the result goes through the gates above (`UNCHANGED` when nothing differs).
 
+## Downloading a release
+
+Every published version also has a browser download on the site: `/api/packs/download?id=OWNER/REPO&version=V` streams the whole pack as one zip built from the manifest objects (each checked against its sha256), `/api/packs/info` lists the files with their hashes for a per-file link, and the pack manager, the asset page and the Workshop panel show the link next to the author, licence and source credit (`LICENCES.txt` is inside the zip). The signed manifest and `objects/` stay the path for a game client and `fetch_lock`; the zip is for people. `scripts/verify-pack-download.ts` in website-city unzips a download and checks it against the manifest.
+
 ## Retention
 
 A version published through the CLI is pinned by somebody's lock file, possibly in a repository's history, so the retention sweep never removes one (`source: CLI` is excluded from `SweepPack`). Such a version leaves only when its owner deletes it. Objects are per version, so deleting one version never breaks another.
