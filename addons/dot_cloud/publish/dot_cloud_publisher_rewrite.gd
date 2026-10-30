@@ -35,16 +35,22 @@ static func rewrite_paths(abs: String, staged: String, inside: Dictionary, mount
 
 		var path := text.substr(at + 6, j - (at + 6))
 
-		# Already namespaced: publishing a directory that was published before, or a
-		# source tree somebody has namespaced by hand. Rewriting it again would bury
-		# the content one level deeper on every republish.
-		if inside.has(path) and not path.begins_with("%s/%s/%s/" % [mount_root, content_id, version]):
+		# Already under this version: leave it, or a republish buries the content a level deeper.
+		var stale := _strip_other_version(path, mount_root, content_id, version)
+		if stale != "" and inside.has(stale):
+			out += prefix + str(inside[stale])
+			changed = true
+		elif inside.has(path) and not path.begins_with("%s/%s/%s/" % [mount_root, content_id, version]):
 			out += prefix + str(inside[path])
 			changed = true
 		else:
 			out += "res://" + path
 
 		i = j
+
+	var other := foreign_version(out, mount_root, content_id, version)
+	if other != "":
+		return DotResult.fail(DotError.CODE_INVALID, "'%s' still names pack version %s while publishing %s." % [abs, other, version], abs)
 
 	if not changed:
 		return DotResult.success("")
@@ -62,3 +68,30 @@ static func rewrite_paths(abs: String, staged: String, inside: Dictionary, mount
 	f.close()
 
 	return DotResult.success(staged)
+
+
+## The path under another version of this pack ("" when it is not one): `dot_cloud/arena/0.1.24/a.gd` gives `a.gd`.
+static func _strip_other_version(path: String, mount_root: String, content_id: String, version: String) -> String:
+	var head := "%s/%s/" % [mount_root, content_id]
+	if not path.begins_with(head) or path.begins_with(head + version + "/"):
+		return ""
+	var rest := path.substr(head.length())
+	var slash := rest.find("/")
+	return "" if slash < 0 else rest.substr(slash + 1)
+
+
+## The first other version of this pack that [param text] names, or "". A pack that mounts must name only its own.
+static func foreign_version(text: String, mount_root: String, content_id: String, version: String) -> String:
+	var head := "res://%s/%s/" % [mount_root, content_id]
+	var i := 0
+	while true:
+		var at := text.find(head, i)
+		if at < 0:
+			return ""
+		var start := at + head.length()
+		var slash := text.find("/", start)
+		var v := text.substr(start, (slash if slash >= 0 else text.length()) - start)
+		if v != version:
+			return v
+		i = start
+	return ""

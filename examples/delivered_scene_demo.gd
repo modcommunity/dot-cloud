@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 39
+const CHECKS := 43
 
 
 func _ready() -> void:
@@ -171,6 +171,7 @@ script = ExtResource("1")
 
 	_check_imported_outputs(str(pair["private"]))
 	_check_extra_files(str(pair["private"]))
+	_check_republish(str(pair["private"]))
 	await _check_requirements(str(pair["private"]), cloud)
 
 	_done()
@@ -411,6 +412,37 @@ func _check_extra_files(key_pem: String) -> void:
 	pub.extra_files = {"../escape.txt": outside.path_join("winner.txt")}
 	var escaping := pub.publish(src, WORK.path_join("extra_escape"))
 	_check(not escaping.ok, "and so does a pack path out of the pack", str(escaping.error))
+
+
+## A source that still names the previous version of its own pack is rebased onto the one published; one that cannot be fails.
+func _check_republish(key_pem: String) -> void:
+	_line("")
+	_line("[b]republish under a new version[/b]")
+	var src := WORK.path_join("republish_source")
+	DotPaths.ensure_dir(src.path_join("game"))
+	DotPaths.write_text(src.path_join("game/thing.gd"), "extends Node\n")
+	var old := "res://dot_cloud/republished/0.1.24/game/thing.gd"
+	DotPaths.write_text(src.path_join("w.tscn"), "[gd_scene format=3]\n\n[ext_resource type=\"Script\" path=\"%s\" id=\"1\"]\n\n[node name=\"W\" type=\"Node\"]\nscript = ExtResource(\"1\")\n" % old)
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "republished"
+	pub.version = "0.1.25"
+	pub.signing_key_pem = key_pem
+	var out := WORK.path_join("republish_out")
+	var res := pub.publish(src, out)
+	_check(res.ok, "a source naming the previous version publishes", str(res.error) if not res.ok else "")
+	var scene := ""
+	var bytes := DotPaths.read_bytes(out.path_join("manifest.json"))
+	if res.ok and bytes.ok:
+		var manifest := DotCloudManifest.from_json_bytes(bytes.value)
+		if manifest.ok:
+			for entry in (manifest.value as DotCloudManifest).files:
+				if entry.path == "w.tscn":
+					scene = _published_text(out, entry.sha256)
+	_check(scene.contains("res://dot_cloud/republished/0.1.25/game/thing.gd"), "its reference is rebased to the new version")
+	_check(not scene.contains("0.1.24"), "and nothing in the built scene names another version")
+	DotPaths.write_text(src.path_join("w.tscn"), "[ext_resource path=\"res://dot_cloud/republished/0.1.24/gone.gd\"]\n")
+	var bad := pub.publish(src, WORK.path_join("republish_bad"))
+	_check(not bad.ok, "a reference to another version that cannot be rebased fails the build", str(bad.error))
 
 
 ## Publish [param source] and return the manifest's file paths as a set.
