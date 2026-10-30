@@ -46,7 +46,7 @@ chk "READY version taken says use --bump" "grep -q -- '--bump' out"
 # (c) a HELD release has no lock line until approved; relock writes it
 rm -f held.lock.json
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1
-chk "held publish exits 0 without a lock" "[ $? -eq 0 ] && grep -q 'held for review' out && [ ! -f held.lock.json ]"
+chk "held publish exits 0 without a lock" "[ $? -eq 0 ] && grep -qi 'held for review' out && [ ! -f held.lock.json ]"
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 > "$W/out" 2>&1
 chk "relock before approval fails" "[ $? -ne 0 ] && grep -q 'no READY' out && [ ! -f held.lock.json ]"
 curl -s -X POST "$DOT_SITE/__approve/heldpack/1.0.0" > /dev/null
