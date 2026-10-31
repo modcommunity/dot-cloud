@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 43
+const CHECKS := 44
 
 
 func _ready() -> void:
@@ -283,6 +283,22 @@ func _check_imported_outputs(key_pem: String) -> void:
 	_check(from_sub.has(landed),
 		"published from a subdirectory, the output still comes with it",
 		", ".join(PackedStringArray(from_sub.keys())))
+
+	# A tree never imported (a fresh clone) has markers and no outputs; skipping them shipped 180 textures that never loaded.
+	var raw := WORK.path_join("unimported")
+	DotPaths.ensure_dir(raw.path_join("textures"))
+	DotPaths.write_text(raw.path_join("project.godot"), "config_version=5\n")
+	DotPaths.write_text(raw.path_join("textures/tile.png"), "not really a png")
+	DotPaths.write_text(raw.path_join("textures/tile.png.import"), "[remap]\n\npath=\"res://%s\"\n" % ctex)
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "unimported"
+	pub.version = "1.0.0"
+	pub.signing_key_pem = key_pem
+	var refused := pub.publish(raw, WORK.path_join("pub_unimported"))
+	_check(not refused.ok and refused.error.code == DotError.CODE_INVALID
+			and str(refused.error).contains("--import"),
+		"a marker naming an output the project never imported refuses the publish",
+		str(refused.error))
 
 
 ## [b]A pack that needs a newer addon than this build has is refused BEFORE it mounts.[/b]

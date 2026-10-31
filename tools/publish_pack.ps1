@@ -1,7 +1,7 @@
 # Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.sh.
 #   .\tools\publish_pack.ps1 [publish] -Source DIR -Id NAME [-Version V | -Bump patch|minor|major] [-Lock content.lock.json]
 #       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
-#       [-Out DIR] [-Godot BIN] [-DryRun]
+#       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport]
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 # Token: $env:DOT_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:DOT_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
 # argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://tmcdev.net.
@@ -10,7 +10,7 @@ param([Parameter(Position = 0)][ValidateSet('publish', 'versions')][string]$Comm
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
       [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional,
       [string]$Name, [string[]]$Meta = @(), [string[]]$ExcludeDir = @(), [string]$Site, [string]$TokenFile, [string]$Out,
-      [string]$Godot, [switch]$DryRun)
+      [string]$Godot, [switch]$DryRun, [switch]$NoImport)
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $PSScriptRoot
 if (-not $Godot) { $Godot = if ($env:GODOT) { $env:GODOT } else { 'godot' } }
@@ -40,6 +40,16 @@ try {
         exit $LASTEXITCODE
     }
     if (-not $Source) { Write-Error 'publish_pack: -Source is required'; exit 1 }
+    # A fresh clone has .import markers but no .godot/imported outputs; the publisher refuses those.
+    if (-not $NoImport) {
+        $p = (Resolve-Path (Full $Source)).Path
+        while ($p -and -not (Test-Path (Join-Path $p 'project.godot'))) { $p = Split-Path -Parent $p }
+        if ($p) {
+            Write-Host "publish_pack: importing $p"
+            & $Godot --headless --path $p --import *> $null
+            if ($LASTEXITCODE -ne 0) { Write-Error "publish_pack: import of $p failed"; exit 1 }
+        }
+    }
     if (-not $Out) { $Out = Join-Path $tmp 'out' }
     $a += '--source', (Full $Source), '--out', (Full $Out)
     if ($Version) { $a += '--version', $Version }

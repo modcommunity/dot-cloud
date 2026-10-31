@@ -305,6 +305,12 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	# An imported asset's output lives at the project root, which may be outside the published directory;
 	# without it the pack ships `.import` markers pointing at files it does not contain.
 	var imported := _imported_outputs_for(source_dir, relatives)
+	var missing: PackedStringArray = imported["missing"]
+	if not missing.is_empty():
+		return DotResult.fail(DotError.CODE_INVALID, (
+			"%d .import marker(s) name an output the project has not imported (first: %s); "
+			+ "run `godot --headless --path <project> --import` before publishing"
+		) % [missing.size(), ", ".join(missing.slice(0, 3))])
 	var extra: Dictionary = imported["files"]
 	var remap: Dictionary = imported["remap"]
 
@@ -769,7 +775,8 @@ func _imported_outputs_for(
 	var remap := {}
 	var sources := {}
 	var owners := {}
-	var empty := {"files": out, "remap": remap, "sources": sources, "owners": owners}
+	var missing := PackedStringArray()
+	var empty := {"files": out, "remap": remap, "sources": sources, "owners": owners, "missing": missing}
 
 	if not include_imported:
 		return empty
@@ -791,7 +798,9 @@ func _imported_outputs_for(
 		for hit in _res_paths_in(text):
 			if not hit.begins_with(".godot/"):
 				continue
+			# Skipping it would ship a marker naming a file the pack lacks: an asset that never loads.
 			if not FileAccess.file_exists(root.path_join(hit)):
+				missing.append("%s -> %s" % [rel, hit])
 				continue
 			var landed := "%s/%s" % [IMPORTED_DIR, hit.get_file()]
 			out[landed] = root.path_join(hit)
@@ -799,7 +808,7 @@ func _imported_outputs_for(
 			sources[rel.trim_suffix(".import")] = true
 			owners[landed] = rel.trim_suffix(".import")
 
-	return {"files": out, "remap": remap, "sources": sources, "owners": owners}
+	return {"files": out, "remap": remap, "sources": sources, "owners": owners, "missing": missing}
 
 
 ## Every `res://…` path in a text blob, as paths relative to the project root.

@@ -2,7 +2,7 @@
 # Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.ps1.
 #   tools/publish_pack.sh [publish] --source DIR --id NAME [--version V | --bump patch|minor|major] [--lock content.lock.json]
 #                         [--into DIR] [--kind pack|store] [--lock-optional] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
-#                         [--host-addons FILE|DIR|LOCK]... [--site URL] [--token-file FILE] [--out DIR] [--godot BIN] [--dry-run]
+#                         [--host-addons FILE|DIR|LOCK]... [--site URL] [--token-file FILE] [--out DIR] [--godot BIN] [--dry-run] [--no-import]
 #   tools/publish_pack.sh relock --id NAME [--version V] [--lock FILE]   (rewrite the lock line of a held version once approved)
 #   publish --resume reuses an unfinished claim instead of failing with 409 version_taken
 #   tools/publish_pack.sh versions [--id NAME] [--site URL] [--token-file FILE]
@@ -11,12 +11,13 @@
 # plain list of names, one per line. Names match with - and _ alike. Without it every addon under the source's addons/ is packed.
 # Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
 # an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
+# The source's project is imported first (--no-import skips it): a fresh clone has .import markers but no .godot/imported outputs.
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD=publish; [ "${1:-}" = publish ] || [ "${1:-}" = versions ] || [ "${1:-}" = relock ] && { CMD=$1; shift; }
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
-SRC=""; HOST=(); OUT=""; LOCK="content.lock.json"; DRY=""; ARGS=()
+SRC=""; HOST=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
 abs() { case $1 in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 while [ $# -gt 0 ]; do
     case $1 in
@@ -28,6 +29,7 @@ while [ $# -gt 0 ]; do
         --source) SRC="$(abs "${2:?}")"; ARGS+=(--source "$SRC"); shift 2 ;;
         --host-addons) HOST+=("${2:?}"); shift 2 ;;
         --dry-run) DRY=1; shift ;;
+        --no-import) IMPORT=""; shift ;;
         --token) echo "publish_pack: the token is never an argument; set DOT_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
         *) ARGS+=("$1"); shift ;;
     esac
@@ -61,6 +63,13 @@ if [ -n "${DOT_CLI_TOKEN:-}" ]; then
 fi
 [ -s "$TOKEN_FILE" ] || { [ "$DRY" ] && [ "$CMD" = publish ]; } || { echo "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TOKEN_FILE)" >&2; exit 2; }
 [ -n "$SITE" ] && ARGS+=(--site "$SITE")
+if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ "$IMPORT" ]; then
+    P="$SRC"; while [ "$P" != / ] && [ ! -f "$P/project.godot" ]; do P="$(dirname "$P")"; done
+    if [ -f "$P/project.godot" ]; then
+        echo "publish_pack: importing $P" >&2
+        timeout 1800 "$GODOT" --headless --path "$P" --import >"$TMP/import.log" 2>&1 || { tail -20 "$TMP/import.log" >&2; echo "publish_pack: import of $P failed" >&2; exit 1; }
+    fi
+fi
 [ -f "$HERE/.godot/global_script_class_cache.cfg" ] || "$GODOT" --headless --path "$HERE" --import >/dev/null 2>&1 || true
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
 if [ "$CMD" = versions ]; then
