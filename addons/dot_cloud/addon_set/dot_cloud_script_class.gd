@@ -33,6 +33,12 @@ const LANGUAGE := &"GDScript"
 ## script's header is read -- the declarations GDScript allows before the first member --
 ## and comments, blank lines and `##` docs between them are skipped, as the parser does.
 static func read_header(source: String) -> Dictionary:
+	var out := _read_any_header(source)
+	return {} if out["class"] == "" else out
+
+
+## [method read_header] for any script, with or without a `class_name`.
+static func _read_any_header(source: String) -> Dictionary:
 	var out := {
 		"class": "", "extends": "", "extends_path": "",
 		"is_tool": false, "is_abstract": false, "icon": "",
@@ -77,9 +83,6 @@ static func read_header(source: String) -> Dictionary:
 		# `extends` after a member.
 		break
 
-	if out["class"] == "":
-		return {}
-
 	return out
 
 
@@ -93,7 +96,7 @@ static func entries_for(scripts: Dictionary, known: Dictionary = {}) -> Array[Di
 	var headers := {}
 
 	for path: String in scripts:
-		var header := read_header(str(scripts[path]))
+		var header := _read_any_header(str(scripts[path]))
 		header["path"] = path
 		headers[path] = header
 
@@ -199,8 +202,10 @@ static func _base_of(header: Dictionary, headers: Dictionary, depth: int) -> Str
 	if str((parent as Dictionary).get("class", "")) != "":
 		return str((parent as Dictionary)["class"])
 
-	# The engine records "" when the parent it extends by path has no class_name, whatever that
-	# parent extends; dot_cloud_client.gd extends a base layer this way.
+	# A class_name-less parent: by a res:// path the engine records that parent's own base
+	# (DotHttp: Node), by a relative path it records "" (dot_cloud_client.gd).
+	if by_path.begins_with("res://"):
+		return _base_of(parent, headers, depth + 1)
 	return ""
 
 
