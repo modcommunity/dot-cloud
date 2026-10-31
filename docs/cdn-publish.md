@@ -37,6 +37,7 @@ The lock file is `content.lock.json` at the repository root:
 | `--into DIR`, `--kind pack\|store`, `--lock-optional` | the lock entry; a republish keeps the entry's values unless given |
 | `--name TEXT`, `--meta KEY=VALUE` (repeatable) | manifest display name and metadata (`preview`, `credit`, ...) |
 | `--exclude-dir NAME` (repeatable) | leave out any folder of this name |
+| `--host-addons FILE\|DIR\|LOCK` (repeatable, `publish_pack.sh` only) | leave out the `addons/<name>` folders the host already owns. Takes an `addons.lock` (`repo<TAB>ref`), a directory of addon folders (dot-server-deploy's `addons/`) or one holding `addons.lock`, or a plain list of names. `-` and `_` match alike. It logs which addons were left out and which ship; without the flag it says so and packs every addon, as before |
 | `--site URL`, `--token-file FILE`, `--out DIR`, `--dry-run` | site (`$DOT_SITE`, default `https://tmcdev.net`; `dev.dotgames.org` is the dev CDN and answers no API), token file, where the objects are built, build without sending |
 
 **The token is never an argument** (`--token` is refused). It comes from `$DOT_CLI_TOKEN`, which is copied to a mode-600 temp file removed on exit, or from the file in `--token-file`, `$DOT_CLI_TOKEN_FILE` or `~/.config/dot/cli-token`. The script sends only missing objects, so running it again after a failure resumes. A `HELD` first release writes no lock line; run it again after the moderator approves (the objects are already there, but a taken version cannot be claimed again, so `--bump`).
@@ -120,3 +121,7 @@ The site that answers is the bucket that is written: tmcdev.net writes `tmc-city
 ## Open question for Christian
 
 Does a new creator's first release wait for a moderator (`uploads.cliReview = first`, the default as built) or go live at once (`none`)? It is one setting either way.
+
+### Host-owned addons
+
+A pack that carries an addon the host (server or client shell) already ships makes the host refuse it (`refused=635 uids`, or `Class X hides a global script class`). Pass `--host-addons ~/godot/dot-server-deploy/addons.lock` and the publisher adds `--exclude-dir` for each `addons/<name>` of the source that the list names, instead of hand-building a worktree. `tools/test_publish_pack.sh` proves it with a source holding `addons/dot_core` and `addons/zz_x`. The PowerShell script has no equivalent yet; use `-ExcludeDir`.

@@ -57,5 +57,19 @@ DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/hel
 chk "relock with no --version reads it from the lock and keeps into" "[ $? -eq 0 ] && grep -q '\.stores/h' held.lock.json"
 env -u DOT_CLI_TOKEN HOME="$W/nohome" DOT_CLI_TOKEN_FILE="$W/none" "$HERE/publish_pack.sh" --source "$W/src" --id demo --version 9.0.0 --out "$W/dry" --dry-run > "$W/out" 2>&1
 chk "--dry-run builds with no token and sends nothing" "[ $? -eq 0 ] && [ -f '$W/dry/manifest.json' ] && ! grep -q '9.0.0' log"
+# (d) --host-addons: addons/dot_core is host-owned and left out, addons/zz_x stays; without the flag both ship
+mkdir -p "$W/h/addons/dot_core" "$W/h/addons/zz_x" "$W/hostdir/dot_core" "$W/hostdir/other"; echo c > "$W/h/addons/dot_core/c.gd"; echo x > "$W/h/addons/zz_x/x.gd"; echo r > "$W/h/root.txt"
+printf '# lock\ndot-core\tv1\n' > "$W/addons.lock"
+hp() { "$HERE/publish_pack.sh" --source "$W/h" --id hostdemo --version 1.0.0 --out "$W/ho" --dry-run "$@" > "$W/out" 2>&1; }
+hp
+chk "no --host-addons packs both and says so" "[ $? -eq 0 ] && grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json && grep -q 'no --host-addons' out"
+rm -rf ho; hp --host-addons "$W/addons.lock"
+chk "lock: dot_core left out, zz_x kept, logged" "[ $? -eq 0 ] && ! grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json && grep -q 'left out 1 host-owned addon(s): dot_core' out"
+rm -rf ho; hp --host-addons "$W/hostdir"
+chk "directory form excludes dot_core" "[ $? -eq 0 ] && ! grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json"
+rm -rf ho; printf 'dot-core\n' > "$W/names.txt"; hp --host-addons "$W/names.txt"
+chk "name-list form excludes dot_core" "[ $? -eq 0 ] && ! grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json"
+hp --host-addons "$W/missing"
+chk "missing --host-addons argument fails" "[ $? -ne 0 ]"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
