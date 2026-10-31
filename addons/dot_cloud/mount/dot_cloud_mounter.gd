@@ -140,7 +140,7 @@ func mount(
 	# A pack already built is what gets mounted, and it was assembled from objects verified when
 	# they were committed. Re-hashing every object on each refresh cost seconds of a tab's main
 	# thread (no worker threads on web) to re-prove what the pack's name already fingerprints.
-	var pack_cached := FileAccess.file_exists(pack_path)
+	var pack_cached := pack_intact(pack_path)
 	if config.verify_before_mount and scheduler != null and not pack_cached:
 		var verified := await _verify_objects(wanted, store, scheduler)
 		if not verified.ok:
@@ -447,23 +447,25 @@ func _build_pack(
 	files: Array[DotCloudFile],
 	pack_path: String
 ) -> DotResult:
-	# A pack already built for this exact content is byte-identical, and now the path
-	# says so: [method _pack_path] fingerprints the file list, so reuse here means the
-	# same paths mapped to the same hashes. It used to mean only the same id and version,
-	# which is a claim about the publisher's discipline rather than about these bytes --
-	# and republishing one version from a corrected source is how a game gets fixed.
-	if FileAccess.file_exists(pack_path):
+	# The path fingerprints paths and hashes, so an intact pack there is this content.
+	if pack_intact(pack_path):
 		DotLog.debug(
 			CHANNEL, "reusing cached pack", {"pack": pack_path.get_file()}
 		)
 		return DotResult.success(pack_path)
+	if FileAccess.file_exists(pack_path):
+		DotLog.warn(CHANNEL, "cached pack is incomplete; rebuilding", {"pack": pack_path.get_file()})
+		DirAccess.remove_absolute(pack_path)
 
 	var parent := DotPaths.ensure_parent_dir(pack_path)
 	if not parent.ok:
 		return parent
 
+	# Written aside and renamed when complete: a pack cut short has no file table, and the
+	# engine reads its header as a count of about a billion entries and never returns.
+	var part_path := pack_path + ".part"
 	var packer := PCKPacker.new()
-	var err := packer.pck_start(pack_path)
+	var err := packer.pck_start(part_path)
 	if err != OK:
 		return DotResult.failure(
 			DotError.from_engine(err, "creating pack '%s'" % pack_path)
@@ -493,6 +495,12 @@ func _build_pack(
 		return DotResult.failure(
 			DotError.from_engine(err, "writing pack '%s'" % pack_path)
 		)
+	packer = null
+	err = DirAccess.rename_absolute(part_path, pack_path)
+	if err != OK:
+		return DotResult.failure(
+			DotError.from_engine(err, "renaming pack '%s'" % pack_path)
+		)
 
 	DotWeb.sync_filesystem()
 
@@ -507,6 +515,22 @@ func _build_pack(
 	)
 
 	return DotResult.success(pack_path)
+
+
+## Whether [param path] is a whole PCK: from format 3 on, the header's directory offset is
+## written last, so a pack whose build was cut short has it at zero (or past the end).
+static func pack_intact(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	var length := f.get_length()
+	if length < 40 or f.get_32() != 0x43504447:
+		return false
+	if f.get_32() < 3:
+		return true
+	f.seek(32)
+	var dir_offset := f.get_64()
+	return dir_offset >= 40 and dir_offset + 4 <= length
 
 
 func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:

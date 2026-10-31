@@ -27,7 +27,7 @@ const _Sections := preload("res://examples/selftest/mount_sections.gd")
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 110
+const CHECKS := 113
 
 var _failures: int = 0
 var _checks: int = 0
@@ -145,6 +145,31 @@ func _section_republished_version() -> void:
 		FileAccess.file_exists("res://dot_cloud/republished/1.0.0/b.txt"),
 		"the cached pack was reused for content that changed"
 	)
+
+	# A pack whose build was killed keeps its placeholder header (directory offset 0); the
+	# engine read that as ~1e9 entries and spun forever. It must be rebuilt, not reused.
+	var cut := _blob("cut-short", 512)
+	_store.put_bytes(cut, DotHash.sha256_bytes(cut))
+	var m3 := _manifest("cutshort", "1.0.0", [["c.txt", cut, true]])
+	var m3_mounter := DotCloudMounter.new(_config)
+	var stale: String = m3_mounter._pack_path(m3, m3.wanted_files())
+	DotPaths.ensure_parent_dir(stale)
+	var w := FileAccess.open(stale, FileAccess.WRITE)
+	w.store_buffer("GDPC".to_ascii_buffer())
+	for v in [4, 4, 7, 2, 2]:
+		w.store_32(v)
+	w.store_64(128)
+	w.store_64(0)
+	w.store_buffer(_blob("pad", 200))
+	w.close()
+	_check("a cut-short pack is not intact", not DotCloudMounter.pack_intact(stale))
+	var r3: DotResult = await m3_mounter.mount(m3, _store, _scheduler)
+	_check(
+		"and is rebuilt rather than mounted",
+		r3.ok and FileAccess.file_exists("res://dot_cloud/cutshort/1.0.0/c.txt"),
+		str(r3.error) if not r3.ok else ""
+	)
+	_check("the rebuilt pack is intact", DotCloudMounter.pack_intact(stale))
 
 	_line("")
 	_sections_finished += 1
