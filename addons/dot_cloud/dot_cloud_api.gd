@@ -33,5 +33,7 @@ extends RefCounted
 #     newest accepted (replay of an old mirror list).
 # 15: DotCloudManifest.dependencies (signed {id, version} list), DotCloudPublisher.dependencies / CLI --depends;
 #     DotCloudClient acquires them first (skipped when mounted or already in the store). An older build ignores the field.
-const LEVEL := 15
+# 16: DotCloudSuggested, DotCloudWorkshop.suggested, workshop_suggested (config), DotCloudWorkshopDevice.suggested_mode:
+#     a game's suggested packs (its map packs) mount by default for a solo session, with opt-outs.
+const LEVEL := 16
 const OLDEST := 1

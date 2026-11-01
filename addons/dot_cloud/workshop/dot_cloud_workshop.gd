@@ -80,6 +80,10 @@ var force_platform: String = ""
 
 var device: DotCloudWorkshopDevice = null
 
+## Packs the game suggests, as [method DotCloudSuggested.from_ids] builds them. Mounted for the
+## solo session, signed in or not, unless the mode (see [DotCloudSuggested]) turns them off.
+var suggested: Array[Dictionary] = []
+
 var _http: DotHttp = null
 var _prepared: bool = false
 var _platform_refusal_logged: bool = false
@@ -199,6 +203,7 @@ func describe() -> Dictionary:
 		"items": _list.items().size() if _list != null else 0,
 		"device_off": device.off_ids() if device != null else PackedStringArray(),
 		"ran_code": _ran_code,
+		"suggested": _summary.get("suggested", {}),
 	}
 	if not _summary.is_empty():
 		d["last"] = {
@@ -240,6 +245,7 @@ func _run(game: String, cloud_client: DotCloudClient, summary: Dictionary) -> Do
 		summary["guest"] = true
 		summary["reason"] = "guest"
 		_list = null
+		await _mount_all(null, cloud_client, summary)
 		return DotResult.success(null)
 
 	var cached := _read_cache(game)
@@ -272,6 +278,7 @@ func _run(game: String, cloud_client: DotCloudClient, summary: Dictionary) -> Do
 			summary["reason"] = "guest"
 			_list = null
 			DotLog.info(CHANNEL, "token refused, treating as a guest", {"game": game})
+			await _mount_all(null, cloud_client, summary)
 			return DotResult.success(null)
 		summary["offline"] = true
 		var level_fields := {"game": game, "why": err.code, "message": err.message}
@@ -282,6 +289,7 @@ func _run(game: String, cloud_client: DotCloudClient, summary: Dictionary) -> Do
 		if list == null:
 			summary["reason"] = "offline_no_cache"
 			_list = null
+			await _mount_all(null, cloud_client, summary)
 			return DotResult.success(null)
 		summary["from_cache"] = true
 
@@ -332,13 +340,13 @@ func _post_scope(body: Dictionary) -> DotResult:
 
 
 func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summary: Dictionary) -> void:
-	var accepts := list.accepts()
+	var accepts := list.accepts() if list != null else {}
 	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
 	var skipped: Array = summary["skipped"]
 	var failed: Array = summary["failed"]
 	var candidates: Array[Dictionary] = []
 
-	for item in list.items():
+	for item in (list.items() if list != null else []):
 		var pack := DotCloudWorkshopList.pack_of(item)
 		var id: String = str(pack.get("contentId", ""))
 		var version: String = str(pack.get("version", ""))
@@ -365,6 +373,8 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 			continue
 		candidates.append({"id": id, "version": version, "item": item, "pack": pack, "title": str(item.get("name", id))})
 
+	await _add_suggested(candidates, skipped)
+
 	# Plan: each manifest is fetched and verified before anything large is downloaded, so the
 	# size checks below are about the bytes this device is actually missing.
 	var planned: Array[Dictionary] = []
@@ -383,7 +393,7 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 				_fail_pack(failed, id, version, resolved.error)
 				continue
 			var manifest: DotCloudManifest = resolved.value
-			if not config.workshop_key_ids.has(manifest.signature_key_id):
+			if not bool(c.get("suggested", false)) and not config.workshop_key_ids.has(manifest.signature_key_id):
 				_fail_pack(failed, id, version, DotError.make(
 					DotError.CODE_FORBIDDEN, "The manifest is signed with a key a subscription does not trust.",
 					manifest.signature_key_id
@@ -444,6 +454,70 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		else:
 			_fail_pack(failed, id, version, mounted.error)
 		progress.emit(done, total, bytes_done, bytes_total, str(c["title"]))
+
+
+## Appends the game's suggested packs the mode keeps. They are the game's own choice, so the
+## client's trusted keys (checked in resolve_manifest) decide, not the subscription key list.
+func _add_suggested(candidates: Array[Dictionary], skipped: Array) -> void:
+	var groups := DotCloudSuggested.groups_of(suggested)
+	var mode := effective_suggested_mode(groups)
+	var chosen := DotCloudSuggested.select(suggested, mode)
+	_summary["suggested"] = {"mode": mode, "declared": suggested.size(), "kept": chosen.size()}
+	if chosen.is_empty():
+		return
+	var have := {}
+	for c in candidates:
+		have[c["id"]] = true
+	for e in chosen:
+		var id := str(e["id"])
+		if have.has(id):
+			continue
+		have[id] = true
+		var version := str(e.get("version", ""))
+		if version == "":
+			var latest := await _latest_version(id)
+			if latest == "":
+				_fail_pack(_summary["failed"], id, "", DotError.make(
+					DotError.CODE_HTTP, "No published version of the suggested pack.", id
+				))
+				continue
+			version = latest
+		if device.is_off(id):
+			skipped.append(_skip(id, version, REASON_DEVICE_OFF))
+		elif candidates.size() >= config.workshop_max_packs:
+			skipped.append(_skip(id, version, REASON_TOO_MANY))
+		else:
+			candidates.append({
+				"id": id, "version": version, "item": e, "pack": {"manifestUrl": ""},
+				"title": id.get_slice("/", 1), "suggested": true,
+			})
+
+
+## The mode in force: command line, then this device's override, then the config.
+func effective_suggested_mode(groups: PackedStringArray) -> String:
+	var base := device.suggested_mode() if device != null else ""
+	if base == "":
+		base = config.workshop_suggested
+	var args := PackedStringArray()
+	args.append_array(OS.get_cmdline_args())
+	args.append_array(OS.get_cmdline_user_args())
+	return DotCloudSuggested.mode_from_args(args, groups, base)
+
+
+func _latest_version(id: String) -> String:
+	var cloud_client := _cloud()
+	if cloud_client == null:
+		return ""
+	_http.base_url = ""
+	_http.timeout_sec = config.workshop_timeout_sec
+	for base in cloud_client.resolved_http_base_urls():
+		var got := await _http.get_json("%s/%s/latest.json" % [base.rstrip("/"), id])
+		if not got.ok:
+			continue
+		var parsed := DotCloudAutoUpdate.follow_pointer(id, got.value, 1)
+		if parsed.ok and str(parsed.value["version"]) != "":
+			return str(parsed.value["version"])
+	return ""
 
 
 ## Whether this launch may download [param bytes] bytes: decided once for the whole set.

@@ -12,6 +12,7 @@ const CHANNEL := "dot.cloud.workshop"
 var path: String = ""
 var _off: Dictionary = {}
 var _metered: String = ""
+var _suggested: String = ""
 
 
 func _init(p_path: String = "") -> void:
@@ -23,6 +24,7 @@ func _init(p_path: String = "") -> void:
 func load_file() -> DotResult:
 	_off = {}
 	_metered = ""
+	_suggested = ""
 	if path == "" or not FileAccess.file_exists(path):
 		return DotResult.success(self)
 	var read := DotPaths.read_json(path)
@@ -38,6 +40,9 @@ func load_file() -> DotResult:
 		var m := str(d.get("metered", ""))
 		if ["ask", "allow", "never"].has(m):
 			_metered = m
+		var sg := str(d.get("suggested", ""))
+		if sg != "" and DotCloudSuggested.valid_mode(sg):
+			_suggested = sg
 	return DotResult.success(self)
 
 
@@ -50,6 +55,8 @@ func save_file() -> DotResult:
 	var data := {"off": off}
 	if _metered != "":
 		data["metered"] = _metered
+	if _suggested != "":
+		data["suggested"] = _suggested
 	return DotPaths.write_json(path, data)
 
 
@@ -82,3 +89,15 @@ func off_ids() -> PackedStringArray:
 		out.append(str(k))
 	out.sort()
 	return out
+
+
+## This device's suggested-packs mode ("" follows the config).
+func suggested_mode() -> String:
+	return _suggested
+
+
+func set_suggested_mode(mode: String) -> DotResult:
+	if mode != "" and not DotCloudSuggested.valid_mode(mode):
+		return DotResult.fail(DotError.CODE_INVALID, "Unknown suggested mode.", mode)
+	_suggested = mode
+	return DotResult.success(null)

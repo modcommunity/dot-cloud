@@ -38,6 +38,10 @@ extends DotConfig
 ## The most packs one launch will mount.
 @export var workshop_max_packs: int = 200
 
+## Whether the game's suggested packs (its map packs) are mounted: [code]all[/code], [code]none[/code]
+## or a comma list of groups. See [DotCloudSuggested] for the full precedence.
+@export var workshop_suggested: String = "all"
+
 
 func env_prefix() -> String:
 	return "DOT_CLOUD_"
@@ -56,6 +60,11 @@ func validate() -> DotResult:
 	if not ["ask", "allow", "never"].has(workshop_metered):
 		return DotResult.fail(
 			DotError.CODE_INVALID, "workshop_metered must be ask, allow or never.", workshop_metered
+		)
+	if not DotCloudSuggested.valid_mode(workshop_suggested):
+		return DotResult.fail(
+			DotError.CODE_INVALID, "workshop_suggested must be all, none or a comma list of groups.",
+			workshop_suggested
 		)
 	if workshop_max_packs < 0:
 		return DotResult.fail(DotError.CODE_INVALID, "workshop_max_packs must not be negative.")

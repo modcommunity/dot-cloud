@@ -14,7 +14,7 @@ extends Node
 
 const WORK := "user://dot_cloud_workshop_sync_demo"
 const GAME := "gamemann/game-playground"
-const CHECKS := 92
+const CHECKS := 109
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -103,6 +103,7 @@ func _ready() -> void:
 	await _check_device_and_policy()
 	await _check_metered_and_quota()
 	await _check_guest_and_disabled()
+	await _check_suggested()
 	await _check_online_refused()
 	await _check_scope_write()
 	_check_reporting()
@@ -462,6 +463,59 @@ func _check_guest_and_disabled() -> void:
 	var no_cloud := await lonely.sync(GAME)
 	_check(not no_cloud.ok and no_cloud.error.code == DotError.CODE_STATE, "so is no cloud client")
 	lonely.queue_free()
+
+
+func _check_suggested() -> void:
+	_line("")
+	_line("[b]suggested packs: on by default, off by mode, one by one[/b]")
+	_check(DotCloudSuggested.wants("all", "maps") and not DotCloudSuggested.wants("none", "maps"), "all and none")
+	_check(DotCloudSuggested.wants("maps,props", "props") and not DotCloudSuggested.wants("maps", "props"), "a list names groups")
+	var argv := PackedStringArray(["--no-suggested-maps"])
+	_check(DotCloudSuggested.mode_from_args(argv, PackedStringArray(["maps", "props"]), "all") == "props", "--no-suggested-maps drops that group only")
+	_check(DotCloudSuggested.mode_from_args(PackedStringArray(["--suggested=none"]), PackedStringArray(["maps"]), "all") == "none", "--suggested=none")
+	_check(DotCloudSuggested.mode_from_args(PackedStringArray(["--no-suggested"]), PackedStringArray(["maps"]), "all") == "none", "--no-suggested")
+	_check(DotCloudSuggested.mode_from_args(PackedStringArray(), PackedStringArray(["maps"]), "none") == "none", "no flag keeps the fallback")
+	_check(not DotCloudSuggested.valid_mode("a b") and DotCloudSuggested.valid_mode("maps,props"), "modes are validated")
+
+	_make_pack("ws_s1", "map")
+	_make_pack("ws_s2", "map")
+	for id in ["ws_s1", "ws_s2"]:
+		DotPaths.write_text(str(_content.root).path_join(id).path_join("latest.json"), JSON.stringify({"version": "1.0.0"}))
+	_cloud.http_base_urls = PackedStringArray([_content.base_url()])
+	_cloud.manifest_url_template = "{base}/{id}/manifest.json"
+	_ws.suggested = DotCloudSuggested.from_ids("maps", PackedStringArray(["ws_s1", "ws_s2"]))
+	_token = ""
+	var on := await _ws.sync(GAME)
+	var ids: Array = []
+	for m in on.value["mounted"]:
+		ids.append(m["content_id"])
+	_check(on.ok and ids.has("ws_s1") and ids.has("ws_s2"), "a guest gets the suggested packs by default", str(on.value))
+	_check(_cloud.is_mounted(&"ws_s1", "1.0.0"), "and they are mounted")
+	_check(int(on.value.get("suggested", _ws.describe()["suggested"]).get("kept", -1)) == 2 or _ws.describe()["suggested"]["kept"] == 2, "the summary says two were kept")
+
+	_make_pack("ws_s3", "map")
+	DotPaths.write_text(str(_content.root).path_join("ws_s3").path_join("latest.json"), JSON.stringify({"version": "1.0.0"}))
+	_ws.suggested = DotCloudSuggested.from_ids("maps", PackedStringArray(["ws_s3"]))
+	_ws.config.workshop_suggested = "none"
+	var none := await _ws.sync(GAME)
+	_check(none.ok and none.value["mounted"].is_empty() and not _cloud.is_mounted(&"ws_s3", "1.0.0"), "mode none: nothing suggested is fetched")
+	_ws.config.workshop_suggested = "all"
+	_ws.device.set_suggested_mode("props")
+	var dev := await _ws.sync(GAME)
+	_check(dev.ok and dev.value["mounted"].is_empty(), "a device mode without the group turns it off")
+	_ws.device.set_suggested_mode("")
+	_ws.set_device_off("ws_s3", true)
+	var one := await _ws.sync(GAME)
+	var reasons: Array = []
+	for sk in one.value["skipped"]:
+		reasons.append(sk["reason"])
+	_check(one.ok and one.value["mounted"].is_empty() and reasons.has("device_off"), "one pack switched off by hand is skipped")
+	_ws.set_device_off("ws_s3", false)
+	_ws.suggested = DotCloudSuggested.from_ids("maps", PackedStringArray(["ws_s_missing"]))
+	var gone := await _ws.sync(GAME)
+	_check(gone.ok and (gone.value["failed"] as Array).size() == 1, "an unpublished suggested pack is a failure, not an abort")
+	_ws.suggested = []
+	_token = "tok-alice"
 
 
 func _check_online_refused() -> void:

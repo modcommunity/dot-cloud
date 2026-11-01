@@ -197,6 +197,10 @@ On the web, the cached list and the device file are written through `DotPaths` a
 - `user://dot_cloud/workshop/<game slug>.json`: `{account, revision, fetched_at, response}`, the last list for that game. The site owns it; the device never edits it.
 - `user://dot_cloud/workshop/device.json`: `{off: ["<content_id>"], metered: "ask|allow|never"}`, this device's overrides. **Overrides stay on the device**: "off on this phone" is not a subscription change and never reaches the site. Anything that should follow the player to another device is a scope change and goes through `set_scope` / `set_all_games`.
 
+### Suggested packs
+
+A game can suggest packs it never requires, such as its separate map packs: `workshop.suggested = DotCloudSuggested.from_ids("maps", ids)`. They mount in a solo `sync()` whether or not the player is signed in, newest published version (`<base>/<id>/latest.json`), through the client's own trusted keys. Players still pick maps one by one with the per-pack device switch. The mode is `all`, `none` or a comma list of groups, and the strongest source wins: the command line (`--no-suggested`, `--no-suggested-<group>`, `--suggested=<mode>`), then the device (`DotCloudWorkshopDevice.set_suggested_mode`, saved in `device.json`), then `workshop_suggested` (defaults, JSON, `DOT_CLOUD_WORKSHOP_SUGGESTED`, `--cloud-workshop-suggested`). The server side reads the same list from the game's `game.yml` (dot-server-deploy). `describe()` reports `suggested: {mode, declared, kept}`.
+
 ### Metered connections
 
 There is no engine API for it. `DotCloudWorkshop.is_metered()` is true when the browser reports `navigator.connection.saveData` or a `type` of `cellular`, read through `DotWeb`, or when `DotPlatform.is_mobile()` and nothing says otherwise. A platform that later exposes a real answer replaces that one method.
