@@ -16,6 +16,11 @@ var frames_yielded: int = 0
 ## leaves the cache, and the load() this loader was meant to speed up would do it again.
 var loaded: Array[Resource] = []
 
+## The slowest loads of the last load_all, as [ms, path], longest first (at most [constant SLOWEST_KEPT]).
+var slowest: Array = []
+
+const SLOWEST_KEPT := 8
+
 
 ## Loads every path, yielding between slices. Threaded where [param threaded] says so (default:
 ## the platform can); a browser without threads loads on the main thread, a slice per frame.
@@ -23,6 +28,7 @@ var loaded: Array[Resource] = []
 func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPlatform.has_threads()) -> DotResult:
 	frames_yielded = 0
 	loaded.clear()
+	slowest.clear()
 	var total := paths.size()
 
 	if threaded:
@@ -32,7 +38,9 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 	var slice_start := Time.get_ticks_msec()
 
 	for path in paths:
+		var t_load := Time.get_ticks_msec()
 		var res: Resource = load(path) if ResourceLoader.exists(path) else null
+		_note_slow(Time.get_ticks_msec() - t_load, path)
 		if res == null:
 			return DotResult.fail(DotError.CODE_IO, "could not load a resource", path)
 
@@ -46,6 +54,15 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 			slice_start = Time.get_ticks_msec()
 
 	return DotResult.success(done)
+
+
+func _note_slow(ms: int, path: String) -> void:
+	if slowest.size() >= SLOWEST_KEPT and ms <= int(slowest[-1][0]):
+		return
+	slowest.append([ms, path])
+	slowest.sort_custom(func(a: Array, b: Array) -> bool: return a[0] > b[0])
+	if slowest.size() > SLOWEST_KEPT:
+		slowest.resize(SLOWEST_KEPT)
 
 
 func _load_threaded(tree: SceneTree, paths: PackedStringArray) -> DotResult:

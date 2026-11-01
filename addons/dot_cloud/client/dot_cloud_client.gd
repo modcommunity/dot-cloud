@@ -1263,6 +1263,9 @@ func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false,
 		"scan_ms": scan_ms, "ms": Time.get_ticks_msec() - t0, "frames": loader.frames_yielded,
 		"ok": res.ok, "why": "" if res.ok else str(res.error),
 	})
+	# Which scripts cost the join its seconds; read at DEBUG so a slow web join can be diagnosed from its log.
+	for entry in loader.slowest:
+		DotLog.debug(CHANNEL, "slow script", {"ms": entry[0], "path": entry[1]})
 	return loader
 
 

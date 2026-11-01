@@ -51,7 +51,10 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ -d "$SRC/addons" ]; then
         LEFT=(); KEPT=()
         for d in "$SRC"/addons/*/; do
             n="$(basename "$d")"
-            if printf '%s\n' "$NAMES" | grep -qxF "$n"; then LEFT+=("$n"); ARGS+=(--exclude-dir "$n"); else KEPT+=("$n"); fi
+            # A repo's name is not always its addon folder (zee-dot-weapons ships addons/zee_weapons): a linked
+            # addon is also matched by the repository it links into.
+            repo="$(readlink -f "${d%/}" | sed -n 's|.*/\([^/]*\)/addons/[^/]*$|\1|p' | tr - _)"
+            if printf '%s\n' "$NAMES" | grep -qxF "$n" || { [ -n "$repo" ] && printf '%s\n' "$NAMES" | grep -qxF "$repo"; }; then LEFT+=("$n"); ARGS+=(--exclude-dir "$n"); else KEPT+=("$n"); fi
         done
         echo "publish_pack: --host-addons left out ${#LEFT[@]} host-owned addon(s): ${LEFT[*]:-none}" >&2
         echo "publish_pack: packing ${#KEPT[@]} other addon(s): ${KEPT[*]:-none}" >&2
