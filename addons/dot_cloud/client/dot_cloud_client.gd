@@ -1220,6 +1220,10 @@ func manifest_for(content_key: String) -> DotCloudManifest:
 	return _acquired.get(content_key)
 
 
+## Top-level pack folders whose scripts are not warmed.
+const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
+
+
 ## Compiles the scripts of the mounted packs [param keys], and the addon classes they name,
 ## a slice per frame, so the load() of their scene that follows is a cache hit. Without
 ## threads that load() compiles the whole closure in one frame. Keep the returned loader
@@ -1238,6 +1242,10 @@ func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false,
 		if manifest == null:
 			continue
 		for file in manifest.files:
+			# Tooling and examples are never loaded by a running game; warming them cost ~12 s of a join.
+			var top := file.path.get_slice("/", 0)
+			if file.path.contains("/") and WARM_SKIP_DIRS.has(top):
+				continue
 			var path := manifest.resource_path(file)
 			# A tokenized script ships as x.gdc behind x.gd.remap; load the .gd path either way.
 			if path.get_extension() == "gdc":

@@ -285,8 +285,9 @@ func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> D
 			continue
 		objects += 1
 		bytes += body.size()
-		# Hashing thousands of entries in one frame freezes a browser tab.
-		if tree != null and Time.get_ticks_msec() - slice_start > 8:
+		# Hashing thousands of entries in one frame freezes a browser tab; 8 ms slices made the
+		# unpack frame-rate bound (7 s for 758 objects), so spend most of a frame per slice.
+		if tree != null and Time.get_ticks_msec() - slice_start > 24:
 			await tree.process_frame
 			slice_start = Time.get_ticks_msec()
 	zip.close()
