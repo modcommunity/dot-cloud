@@ -35,5 +35,7 @@ extends RefCounted
 #     DotCloudClient acquires them first (skipped when mounted or already in the store). An older build ignores the field.
 # 16: DotCloudSuggested, DotCloudWorkshop.suggested, workshop_suggested (config), DotCloudWorkshopDevice.suggested_mode:
 #     a game's suggested packs (its map packs) mount by default for a solo session, with opt-outs.
-const LEVEL := 16
+# 17: DotCloudSuggested.MODE_ASK / asks / device_choice / mode_for_choice, DotCloudWorkshop.set_device_suggested_mode:
+#     the per-device Off / Ask / Auto switch for suggested packs; ask prompts once through ask_fn and a refusal skips only those.
+const LEVEL := 17
 const OLDEST := 1

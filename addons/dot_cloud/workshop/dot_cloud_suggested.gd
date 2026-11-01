@@ -13,6 +13,8 @@ extends RefCounted
 
 const MODE_ALL := "all"
 const MODE_NONE := "none"
+## Like all, but the player is asked before any suggested pack is downloaded (declining skips only those).
+const MODE_ASK := "ask"
 
 
 ## A declaration for [param ids] of one [param group]; versions are looked up when synced.
@@ -57,7 +59,7 @@ static func mode_from_args(args: PackedStringArray, groups: PackedStringArray, f
 ## Whether [param mode] includes [param group].
 static func wants(mode: String, group: String) -> bool:
 	var m := mode.strip_edges().to_lower()
-	if m == MODE_ALL or m == "":
+	if m == MODE_ALL or m == MODE_ASK or m == "":
 		return true
 	if m == MODE_NONE:
 		return false
@@ -85,6 +87,31 @@ static func groups_of(declared: Array) -> PackedStringArray:
 	var out := PackedStringArray(seen.keys())
 	out.sort()
 	return out
+
+
+## Whether [param mode] asks before downloading suggested packs.
+static func asks(mode: String) -> bool:
+	return mode.strip_edges().to_lower() == MODE_ASK
+
+
+## The three choices a menu shows for this device: off, ask, auto. Anything else (a group list) reads as auto.
+static func device_choice(mode: String) -> String:
+	var m := mode.strip_edges().to_lower()
+	if m == MODE_NONE:
+		return "off"
+	if m == MODE_ASK:
+		return "ask"
+	return "auto"
+
+
+## The mode a menu choice (off, ask, auto) stands for; auto is "" so the device follows the config.
+static func mode_for_choice(choice: String) -> String:
+	match choice:
+		"off":
+			return MODE_NONE
+		"ask":
+			return MODE_ASK
+	return ""
 
 
 static func valid_mode(mode: String) -> bool:

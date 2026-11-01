@@ -30,6 +30,7 @@ const REASON_SCRIPT_POLICY := "script_policy"
 const REASON_QUOTA := "quota"
 const REASON_TOO_MANY := "too_many"
 const REASON_INCOMPATIBLE := "incompatible"
+const REASON_SUGGESTED_DECLINED := "suggested_declined"
 
 ## [param done] of [param total] packs, and the bytes of what had to be downloaded. [param current]
 ## is the pack being worked on, for a loading bar.
@@ -191,6 +192,17 @@ func set_device_off(content_id: String, off: bool) -> DotResult:
 	if not prepared.ok:
 		return prepared
 	device.set_off(content_id, off)
+	return device.save_file()
+
+
+## Saves this device's suggested-packs mode ("" follows the config; none, ask, all or a group list).
+func set_device_suggested_mode(mode: String) -> DotResult:
+	var prepared := _prepare()
+	if not prepared.ok:
+		return prepared
+	var set_res := device.set_suggested_mode(mode)
+	if not set_res.ok:
+		return set_res
 	return device.save_file()
 
 
@@ -418,6 +430,9 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		c["missing"] = missing
 		planned.append(c)
 
+	if DotCloudSuggested.asks(str((_summary.get("suggested", {}) as Dictionary).get("mode", ""))):
+		cum = await _ask_suggested(planned, skipped, cum)
+
 	var allow_downloads := true
 	if cum > 0:
 		allow_downloads = await _may_download(planned, cum)
@@ -454,6 +469,32 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		else:
 			_fail_pack(failed, id, version, mounted.error)
 		progress.emit(done, total, bytes_done, bytes_total, str(c["title"]))
+
+
+## Mode "ask": one question for the suggested packs that need a download. A refusal (or no
+## [member ask_fn], as on a headless client) drops only those; the subscribed set goes on. Returns the new byte total.
+func _ask_suggested(planned: Array[Dictionary], skipped: Array, cum: int) -> int:
+	var packs: Array = []
+	var bytes := 0
+	for c in planned:
+		if bool(c.get("suggested", false)) and int(c["missing"]) > 0:
+			packs.append({"content_id": c["id"], "version": c["version"], "title": c["title"], "bytes": c["missing"]})
+			bytes += int(c["missing"])
+	if packs.is_empty():
+		return cum
+	var yes := false
+	if ask_fn.is_valid():
+		yes = (await ask_fn.call({"bytes": bytes, "metered": is_metered(), "packs": packs, "suggested": true})) == true
+	if yes:
+		return cum
+	var keep: Array[Dictionary] = []
+	for c in planned:
+		if bool(c.get("suggested", false)) and int(c["missing"]) > 0:
+			skipped.append(_skip(c["id"], c["version"], REASON_SUGGESTED_DECLINED))
+		else:
+			keep.append(c)
+	planned.assign(keep)
+	return cum - bytes
 
 
 ## Appends the game's suggested packs the mode keeps. They are the game's own choice, so the

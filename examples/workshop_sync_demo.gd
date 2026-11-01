@@ -12,9 +12,10 @@ extends Node
 ## godot --headless --path . res://examples/workshop_sync_demo.tscn
 ## [/codeblock]
 
-const WORK := "user://dot_cloud_workshop_sync_demo"
+## Per process: two runs at once (the heavy queue allows two) would otherwise delete each other's files.
+var WORK := "user://dot_cloud_workshop_sync_demo_%d" % OS.get_process_id()
 const GAME := "gamemann/game-playground"
-const CHECKS := 109
+const CHECKS := 115
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -51,12 +52,14 @@ func _ready() -> void:
 	_content = preload("res://examples/http_test_server.gd").new()
 	add_child(_content)
 	_content.root = WORK.path_join("pub")
-	_content.start(0)
+	var content_up: DotResult = _content.start(0)
+	_check(content_up.ok, "the content server listens", str(content_up.error))
 
 	_bb = preload("res://examples/workshop_backbone.gd").new()
 	add_child(_bb)
 	_bb.handler = _site
-	_bb.start()
+	var bb_up: DotResult = _bb.start()
+	_check(bb_up.ok, "the fake site listens", str(bb_up.error))
 
 	_cloud = DotCloudClient.new()
 	_cloud.name = "Cloud"
@@ -503,6 +506,29 @@ func _check_suggested() -> void:
 	_ws.device.set_suggested_mode("props")
 	var dev := await _ws.sync(GAME)
 	_check(dev.ok and dev.value["mounted"].is_empty(), "a device mode without the group turns it off")
+	_ws.device.set_suggested_mode("ask")
+	var asked_s: Array = []
+	var yes_s := [false]
+	_ws.ask_fn = func(summary: Dictionary) -> bool:
+		asked_s.append(summary)
+		return yes_s[0]
+	var no_ask := await _ws.sync(GAME)
+	_check(asked_s.size() == 1 and asked_s[0].get("suggested", false) and no_ask.value["mounted"].is_empty()
+		and _reasons(no_ask.value["skipped"]) == "ws_s3:suggested_declined" and not _cloud.is_mounted(&"ws_s3", "1.0.0"),
+		"mode ask: declining skips the suggested pack and downloads nothing")
+	_ws.ask_fn = Callable()
+	var no_fn := await _ws.sync(GAME)
+	_check(no_fn.value["mounted"].is_empty(), "mode ask with nobody to ask (headless) mounts nothing")
+	yes_s[0] = true
+	_ws.ask_fn = func(summary: Dictionary) -> bool:
+		asked_s.append(summary)
+		return yes_s[0]
+	var yes_r := await _ws.sync(GAME)
+	_check(_ids(yes_r.value["mounted"]) == PackedStringArray(["ws_s3"]), "mode ask: accepting mounts it")
+	_ws.ask_fn = Callable()
+	_check(DotCloudSuggested.device_choice("none") == "off" and DotCloudSuggested.device_choice("ask") == "ask"
+		and DotCloudSuggested.device_choice("") == "auto" and DotCloudSuggested.mode_for_choice("auto") == ""
+		and DotCloudSuggested.mode_for_choice("off") == "none", "the menu's off/ask/auto map to modes and back")
 	_ws.device.set_suggested_mode("")
 	_ws.set_device_off("ws_s3", true)
 	var one := await _ws.sync(GAME)
