@@ -7,7 +7,7 @@ extends RefCounted
 signal progress(done: int, total: int, path: String)
 
 ## Longest a frame may spend loading before it yields, when not threaded.
-var budget_msec: int = 8
+var budget_msec: int = 16
 
 ## Frames that passed while the last load_all ran.
 var frames_yielded: int = 0
@@ -109,7 +109,8 @@ func _load_threaded(tree: SceneTree, paths: PackedStringArray) -> DotResult:
 ## The global-class scripts that the sources at [param paths] name, not yet cached, in
 ## class-list order. Load them before [param paths]: compiling one pack script otherwise
 ## compiles every addon class it names in the same frame (244 of them, 3.2 s, in a browser).
-static func named_class_scripts(paths: PackedStringArray) -> PackedStringArray:
+## [param read_from], when given, holds the file to read for each path (a pack not yet mounted).
+static func named_class_scripts(paths: PackedStringArray, read_from: PackedStringArray = PackedStringArray()) -> PackedStringArray:
 	var classes := ProjectSettings.get_global_class_list()
 	var by_name := {}
 	for entry in classes:
@@ -121,8 +122,9 @@ static func named_class_scripts(paths: PackedStringArray) -> PackedStringArray:
 
 	var named := {}
 	var words := RegEx.create_from_string("\\b[A-Z][A-Za-z0-9_]+\\b")
-	for path in paths:
-		for found in words.search_all(FileAccess.get_file_as_string(path)):
+	for i in range(paths.size()):
+		var source := read_from[i] if read_from.size() == paths.size() else paths[i]
+		for found in words.search_all(FileAccess.get_file_as_string(source)):
 			var script_path: String = by_name.get(found.get_string(), "")
 			if script_path != "" and not own.has(script_path):
 				named[script_path] = true

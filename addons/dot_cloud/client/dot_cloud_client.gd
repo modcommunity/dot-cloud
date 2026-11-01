@@ -222,6 +222,7 @@ func start() -> DotResult:
 	downloader.scheduler = scheduler
 	downloader.sources = sources
 	downloader.progress_changed.connect(_on_progress)
+	downloader.bundle_unpacked.connect(_prewarm_classes)
 	add_child(downloader)
 
 	_started = true
@@ -1220,6 +1221,12 @@ func manifest_for(content_key: String) -> DotCloudManifest:
 	return _acquired.get(content_key)
 
 
+## The addon classes a pack names, compiled while its big objects still download.
+var _prewarm: DotCloudSliceLoader
+var _prewarming := false
+signal _prewarm_done
+
+
 ## Top-level pack folders whose scripts are not warmed.
 const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 
@@ -1229,6 +1236,29 @@ const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 ## threads that load() compiles the whole closure in one frame. Keep the returned loader
 ## until that load() is done: it holds what it loaded. Skipped where there are threads.
 ## [param on_progress] is called with (done, total) after each resource, for a loading bar.
+func _prewarm_classes(manifest: DotCloudManifest) -> void:
+	if DotPlatform.has_threads() or _prewarming or not is_inside_tree():
+		return
+	var names := PackedStringArray()
+	var files := PackedStringArray()
+	for file in manifest.files:
+		var top := file.path.get_slice("/", 0)
+		if file.path.get_extension() != "gd" or (file.path.contains("/") and WARM_SKIP_DIRS.has(top)):
+			continue
+		var object := store.path_for(file.sha256)
+		if FileAccess.file_exists(object):
+			names.append(file.path)
+			files.append(object)
+	_prewarming = true
+	_prewarm = DotCloudSliceLoader.new()
+	var t0 := Time.get_ticks_msec()
+	var classes := DotCloudSliceLoader.named_class_scripts(names, files)
+	var res := await _prewarm.load_all(get_tree(), classes, false)
+	DotLog.info(CHANNEL, "addon classes prewarmed", {"classes": classes.size(), "ms": Time.get_ticks_msec() - t0, "ok": res.ok})
+	_prewarming = false
+	_prewarm_done.emit()
+
+
 func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false, on_progress: Callable = Callable()) -> DotCloudSliceLoader:
 	var loader := DotCloudSliceLoader.new()
 	if on_progress.is_valid():
@@ -1253,6 +1283,8 @@ func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false,
 			if path.get_extension() == "gd" and ResourceLoader.exists(path) and not scripts.has(path):
 				scripts.append(path)
 
+	while _prewarming:
+		await _prewarm_done
 	var t0 := Time.get_ticks_msec()
 	var named := DotCloudSliceLoader.named_class_scripts(scripts)
 	var scan_ms := Time.get_ticks_msec() - t0

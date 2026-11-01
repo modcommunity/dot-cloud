@@ -41,6 +41,9 @@ signal file_finished(file: DotCloudFile, result: DotResult)
 ## Everything finished. The result carries [code]{fetched, skipped, failed}[/code].
 signal sync_finished(result: DotResult)
 
+## The bundle's objects are in the store, while larger objects may still be downloading.
+signal bundle_unpacked(manifest: DotCloudManifest)
+
 ## Internal: one pool worker has drained the queue and returned.
 ##
 ## Exists because GDScript offers no way to await a coroutine you did not await
@@ -215,29 +218,13 @@ func sync(
 		sync_finished.emit(done)
 		return done
 
-	# One request for the long tail of small files, when enough of them are missing.
-	var from_bundle := await _try_bundle(manifest, todo)
-	if from_bundle > 0:
-		var left: Array[DotCloudFile] = []
-		for f in todo:
-			if store.has(f.sha256):
-				_done_files += 1
-				_note_bytes(f.size)
-			else:
-				left.append(f)
-		todo = left
-		skipped += from_bundle
-		if todo.is_empty():
-			store.add_refs(manifest.key(), manifest.unique_hashes())
-			store.flush_index()
-			_running = false
-			var all_done := DotResult.success({
-				"fetched": from_bundle, "skipped": skipped - from_bundle, "failed": 0,
-				"bytes": _done_bytes,
-			})
-			_emit_progress(true)
-			sync_finished.emit(all_done)
-			return all_done
+	# The bundle (one request, CPU-bound unpack) and the objects too big for it share the join's time:
+	# the big ones download while the bundle unpacks.
+	var plan := _bundle_plan(manifest, todo)
+	var big: Array[DotCloudFile] = []
+	var small: Array[DotCloudFile] = []
+	for f in todo:
+		(small if plan.has(f.sha256) else big).append(f)
 
 	# Make room before starting rather than discovering the cache is full at
 	# byte 900,000,000. A shortfall we cannot meet is reported now, while the
@@ -249,26 +236,23 @@ func sync(
 		sync_finished.emit(failed)
 		return failed
 
-	# Largest first. Long tasks started last are what makes a parallel download
-	# finish long after it looks nearly done.
-	todo.sort_custom(func(a: DotCloudFile, b: DotCloudFile) -> bool:
-		return a.size > b.size
-	)
-
 	var results := {}
-	var next := 0
 	var slots := maxi(1, config.parallel_downloads)
-
-	# A worker pool, not a batch barrier: one 400 MB file would hold up five idle slots. GDScript has no
-	# task handle, so each worker is a bare call that runs to its first `await`; completions are counted in
-	# a member because a synchronous source never suspends and its signals fire before anything awaits.
-	var worker_count := mini(slots, todo.size())
 	_workers_finished = 0
+	# Big objects download while the bundle unpacks, and addon classes prewarm once it has.
+	var started_workers := _start_pool(big, results, manifest, slots)
+	if not plan.is_empty():
+		skipped += await _run_bundle(manifest, plan)
+		var left: Array[DotCloudFile] = []
+		for f in small:
+			if store.has(f.sha256):
+				_done_files += 1
+				_note_bytes(f.size)
+			else:
+				left.append(f)
+		started_workers += _start_pool(left, results, manifest, slots)
 
-	for _i in range(worker_count):
-		_worker(todo, results, manifest)
-
-	while _workers_finished < worker_count:
+	while _workers_finished < started_workers:
 		await _worker_done
 
 	store.flush_index()
@@ -370,12 +354,28 @@ func sync(
 	return outcome
 
 
-## Fetches the manifest's bundle when it would carry enough of what is missing, and returns
-## how many objects it put in the store (0: not used, or it failed and per-file takes over).
-func _try_bundle(manifest: DotCloudManifest, todo: Array[DotCloudFile]) -> int:
+## Starts a worker pool over [param files] (largest first) and returns how many workers it started.
+## A worker pool, not a batch barrier: one 400 MB file would hold up five idle slots. GDScript has no
+## task handle, so each worker is a bare call that runs to its first `await`; completions are counted in
+## a member because a synchronous source never suspends and its signals fire before anything awaits.
+func _start_pool(files: Array[DotCloudFile], results: Dictionary, manifest: DotCloudManifest, slots: int) -> int:
+	# Largest first. Long tasks started last are what makes a parallel download
+	# finish long after it looks nearly done.
+	files.sort_custom(func(a: DotCloudFile, b: DotCloudFile) -> bool:
+		return a.size > b.size
+	)
+	var count := mini(slots, files.size())
+	for _i in range(count):
+		_worker(files, results, manifest)
+	return count
+
+
+## The hashes the bundle would carry, or empty when it is not used: no usable bundle, or it
+## would not carry enough of what is missing.
+func _bundle_plan(manifest: DotCloudManifest, todo: Array[DotCloudFile]) -> Dictionary:
 	var decl := manifest.usable_bundle()
 	if decl.is_empty() or not config.use_bundles:
-		return 0
+		return {}
 	var cap := int(decl["max_object_bytes"])
 	var wanted := {}
 	var bytes := 0
@@ -385,7 +385,13 @@ func _try_bundle(manifest: DotCloudManifest, todo: Array[DotCloudFile]) -> int:
 			bytes += f.size
 	# A refresh that lacks three files should ask for three files, not a whole archive.
 	if wanted.size() < config.bundle_min_missing or bytes * 2 < int(decl["size"]):
-		return 0
+		return {}
+	return wanted
+
+
+## Fetches the bundle for [param wanted] and returns how many objects it put in the store (0:
+## it failed and per-file takes over).
+func _run_bundle(manifest: DotCloudManifest, wanted: Dictionary) -> int:
 	_active_files.append("content bundle")
 	_emit_progress(true)
 	var got := 0
@@ -399,6 +405,8 @@ func _try_bundle(manifest: DotCloudManifest, todo: Array[DotCloudFile]) -> int:
 		DotLog.warn(CHANNEL, "bundle failed; fetching files one by one", {"why": str(res.error)})
 	_active_files.erase("content bundle")
 	DotLog.info(CHANNEL, "bundle", {"content": manifest.key(), "objects": got, "of": wanted.size()})
+	if got > 0:
+		bundle_unpacked.emit(manifest)
 	return got
 
 
