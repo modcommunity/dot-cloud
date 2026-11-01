@@ -58,6 +58,7 @@ var bytes_sent: int = 0
 
 var _server: TCPServer = null
 var _clients: Array[Dictionary] = []
+var _reply := PackedByteArray()
 
 
 ## Binds and starts accepting. Returns a [DotResult] carrying the bound port.
@@ -126,6 +127,9 @@ func _pump(c: Dictionary) -> bool:
 	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 		return false
 
+	if c.has("out"):
+		return _drain(c)
+
 	var available := peer.get_available_bytes()
 	if available > 0:
 		var got := peer.get_data(available)
@@ -140,9 +144,30 @@ func _pump(c: Dictionary) -> bool:
 	if not text.contains("\r\n\r\n"):
 		return true
 
+	_reply = PackedByteArray()
 	_respond(peer, text)
-	peer.disconnect_from_host()
-	return false
+	c["out"] = _reply
+	c["pos"] = 0
+	return _drain(c)
+
+
+## put_data would block on a body bigger than the socket buffer, and the client that
+## reads it runs on this same thread, so a large object hung the whole example.
+func _drain(c: Dictionary) -> bool:
+	var peer: StreamPeerTCP = c["peer"]
+	var out: PackedByteArray = c["out"]
+	var pos: int = c["pos"]
+	while pos < out.size():
+		var res := peer.put_partial_data(out.slice(pos, pos + 65536))
+		var sent := int(res[1])
+		if int(res[0]) != OK or sent <= 0:
+			break
+		pos += sent
+	c["pos"] = pos
+	if pos >= out.size():
+		peer.disconnect_from_host()
+		return false
+	return true
 
 
 func _respond(peer: StreamPeerTCP, request: String) -> void:
@@ -254,8 +279,6 @@ func _send(
 
 	head += "\r\n"
 
-	peer.put_data(head.to_utf8_buffer())
-
-	if not body.is_empty():
-		peer.put_data(body)
-		bytes_sent += body.size()
+	_reply.append_array(head.to_utf8_buffer())
+	_reply.append_array(body)
+	bytes_sent += body.size()

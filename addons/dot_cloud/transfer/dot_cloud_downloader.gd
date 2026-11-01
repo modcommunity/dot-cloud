@@ -347,6 +347,12 @@ func sync(
 		store.flush_index()
 		outcome = DotResult.success(payload)
 
+	if outcome.ok:
+		# The last object's save must have landed before the pack counts as cached.
+		var flushed := await DotWeb.flush_filesystem(get_tree())
+		if not flushed.ok:
+			DotLog.warn(CHANNEL, "browser storage did not keep the download; it will be fetched again next visit", {"content": manifest.key()})
+
 	DotLog.info(
 		CHANNEL,
 		"sync finished" if outcome.ok else "sync failed",
