@@ -83,7 +83,7 @@ invalid UID: 'uid://reboanwombd2' - using text path instead:
 Resource file not found: res://assets/kenney/survival/Textures/colormap.png
 ```
 
-Both lines are **warnings**: the pack verified, mounted and loaded, the meshes appeared, and the art did not. `ResourceUID` is writable at runtime and every `.import` marker names a UID and its file (already moved onto the mount), so `DotCloudMounter._register_uids` points each id at the mounted copy and the binary reference resolves untouched. "The art is white" and "the art is missing" are the same picture and different causes; the `uids=N` in the mount's log line tells them apart.
+Both lines are **warnings**: the pack verified, mounted and loaded, the meshes appeared, and the art did not. `ResourceUID` is writable at runtime and every `.import` marker names a UID and its file (already moved onto the mount), so `dot_cloud_mounter_uids.gd` (`register`, called by `DotCloudMounter`) points each id at the mounted copy and the binary reference resolves untouched. "The art is white" and "the art is missing" are the same picture and different causes; the `uids=N` in the mount's log line tells them apart.
 
 `examples/delivered_scene_demo.tscn` is the only suite here that publishes a scene **with a script**; every other publishes data.
 

@@ -201,30 +201,7 @@ func _check_imported_outputs(key_pem: String) -> void:
 
 	var root := WORK.path_join("project")
 	var ctex := ".godot/imported/tile.png-abc123.ctex"
-
-	DotPaths.ensure_dir(root.path_join("textures"))
-	DotPaths.ensure_dir(root.path_join(".godot/imported"))
-	DotPaths.ensure_dir(root.path_join("screenshots"))
-
-	DotPaths.write_text(root.path_join("project.godot"), "config_version=5\n")
-	DotPaths.write_text(root.path_join("textures/tile.png"), "not really a png")
-	DotPaths.write_text(root.path_join("textures/tile.png.import"),
-		"[remap]\n\npath=\"res://%s\"\n" % ctex)
-	DotPaths.write_text(root.path_join(ctex), "the imported form")
-	# Imported as "keep": no output, so the file is the asset and must ship.
-	DotPaths.write_text(root.path_join("textures/raw.bin"), "kept as is")
-	DotPaths.write_text(root.path_join("textures/raw.bin.import"), "[remap]\n\nimporter=\"keep\"\n")
-	# A scene naming the source path: the marker is what that path resolves through.
-	DotPaths.write_text(root.path_join("textures/uses.tscn"),
-		"[gd_scene format=3]\n\n[ext_resource type=\"Texture2D\" path=\"res://textures/tile.png\" id=\"1\"]\n\n[node name=\"S\" type=\"Sprite2D\"]\ntexture = ExtResource(\"1\")\n")
-
-	# An asset in a directory the publisher was told to skip. Its marker used to be kept
-	# whatever the exclusions said -- markers were decided before them -- and once a marker
-	# is in the pack the output it names follows it in.
-	DotPaths.write_text(root.path_join("screenshots/shot.png"), "not really a png")
-	DotPaths.write_text(root.path_join("screenshots/shot.png.import"),
-		"[remap]\n\npath=\"res://.godot/imported/shot.png-def456.ctex\"\n")
-	DotPaths.write_text(root.path_join(".godot/imported/shot.png-def456.ctex"), "excluded")
+	_write_import_fixture(root, ctex)
 
 	var landed := "_imported/tile.png-abc123.ctex"
 	var from_root := _publish_paths(root, WORK.path_join("pub_root"), "from_root", key_pem)
@@ -284,6 +261,37 @@ func _check_imported_outputs(key_pem: String) -> void:
 		"published from a subdirectory, the output still comes with it",
 		", ".join(PackedStringArray(from_sub.keys())))
 
+	_check_unimported_refused(key_pem, ctex)
+
+
+## A project with an imported texture, a keep-imported asset, a scene using the texture and an excluded directory.
+func _write_import_fixture(root: String, ctex: String) -> void:
+	DotPaths.ensure_dir(root.path_join("textures"))
+	DotPaths.ensure_dir(root.path_join(".godot/imported"))
+	DotPaths.ensure_dir(root.path_join("screenshots"))
+
+	DotPaths.write_text(root.path_join("project.godot"), "config_version=5\n")
+	DotPaths.write_text(root.path_join("textures/tile.png"), "not really a png")
+	DotPaths.write_text(root.path_join("textures/tile.png.import"),
+		"[remap]\n\npath=\"res://%s\"\n" % ctex)
+	DotPaths.write_text(root.path_join(ctex), "the imported form")
+	# Imported as "keep": no output, so the file is the asset and must ship.
+	DotPaths.write_text(root.path_join("textures/raw.bin"), "kept as is")
+	DotPaths.write_text(root.path_join("textures/raw.bin.import"), "[remap]\n\nimporter=\"keep\"\n")
+	# A scene naming the source path: the marker is what that path resolves through.
+	DotPaths.write_text(root.path_join("textures/uses.tscn"),
+		"[gd_scene format=3]\n\n[ext_resource type=\"Texture2D\" path=\"res://textures/tile.png\" id=\"1\"]\n\n[node name=\"S\" type=\"Sprite2D\"]\ntexture = ExtResource(\"1\")\n")
+
+	# An asset in a directory the publisher was told to skip. Its marker used to be kept
+	# whatever the exclusions said -- markers were decided before them -- and once a marker
+	# is in the pack the output it names follows it in.
+	DotPaths.write_text(root.path_join("screenshots/shot.png"), "not really a png")
+	DotPaths.write_text(root.path_join("screenshots/shot.png.import"),
+		"[remap]\n\npath=\"res://.godot/imported/shot.png-def456.ctex\"\n")
+	DotPaths.write_text(root.path_join(".godot/imported/shot.png-def456.ctex"), "excluded")
+
+
+func _check_unimported_refused(key_pem: String, ctex: String) -> void:
 	# A tree never imported (a fresh clone) has markers and no outputs; skipping them shipped 180 textures that never loaded.
 	var raw := WORK.path_join("unimported")
 	DotPaths.ensure_dir(raw.path_join("textures"))

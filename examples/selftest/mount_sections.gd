@@ -125,3 +125,44 @@ static func slice_loader(h: Node) -> void:
 		named.has(device) == (not ResourceLoader.has_cached(device)) and named.size() <= 1, str(named))
 	DirAccess.remove_absolute(probe)
 	h._sections_finished += 1
+
+
+## A mount refused for an object that rotted after it was committed, and accepted with the check off.
+static func corrupt_object(h: Node) -> void:
+	h._sections_started += 1
+	h._line("[b]6. an object that rotted after it was committed[/b]")
+
+	# commit_partial is the only place a hash is checked, so nothing re-reads an
+	# object once it is in the cache. verify_before_mount is the only thing
+	# standing between a bad sector and a mounted pack of wrong bytes, and it
+	# was reached by no test.
+	var body: PackedByteArray = h._blob("will-rot", 640)
+	var hash := DotHash.sha256_bytes(body)
+	h._store.put_bytes(body, hash)
+
+	var m: DotCloudManifest = h._manifest("rotten", "1.0.0", [["data.txt", body, true]])
+
+	var corrupted := DotPaths.write_bytes(h._store.path_for(hash), h._blob("not-it", 640))
+	h._check("object corrupted underneath the cache", corrupted.ok)
+
+	var mounter := DotCloudMounter.new(h._config)
+	var res: DotResult = await mounter.mount(m, h._store, h._scheduler)
+	h._check(
+		"mount refused",
+		not res.ok and res.error.code == DotError.CODE_INTEGRITY,
+		str(res.error.code) if not res.ok else "MOUNTED"
+	)
+	h._check("nothing was mounted", not mounter.is_mounted(m.key()))
+
+	# With the check off, the same mount goes through. Asserting this is what
+	# stops verify_before_mount from being quietly ineffective: if it were, the
+	# check above would pass for the wrong reason and this one would too.
+	h._config.verify_before_mount = false
+	var mounter2 := DotCloudMounter.new(h._config)
+	var res2: DotResult = await mounter2.mount(m, h._store, h._scheduler)
+	h._check("without the check it mounts (so the check is what caught it)", res2.ok,
+		str(res2.error) if not res2.ok else "")
+	h._config.verify_before_mount = true
+
+	h._line("")
+	h._sections_finished += 1

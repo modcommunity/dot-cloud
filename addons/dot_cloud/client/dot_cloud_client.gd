@@ -8,6 +8,7 @@ extends "dot_cloud_client_urls.gd"
 
 const CHANNEL := "cloud"
 const _Prefetch := preload("dot_cloud_client_prefetch.gd")
+const _Warm := preload("dot_cloud_client_warm.gd")
 
 ## Registry name the rest of the family looks this up under.
 const SERVICE := &"dot_cloud_client"
@@ -1237,68 +1238,11 @@ const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 ## until that load() is done: it holds what it loaded. Skipped where there are threads.
 ## [param on_progress] is called with (done, total) after each resource, for a loading bar.
 func _prewarm_classes(manifest: DotCloudManifest) -> void:
-	if DotPlatform.has_threads() or _prewarming or not is_inside_tree():
-		return
-	var names := PackedStringArray()
-	var files := PackedStringArray()
-	for file in manifest.files:
-		var top := file.path.get_slice("/", 0)
-		if file.path.get_extension() != "gd" or (file.path.contains("/") and WARM_SKIP_DIRS.has(top)):
-			continue
-		var object := store.path_for(file.sha256)
-		if FileAccess.file_exists(object):
-			names.append(file.path)
-			files.append(object)
-	_prewarming = true
-	_prewarm = DotCloudSliceLoader.new()
-	var t0 := Time.get_ticks_msec()
-	var classes := DotCloudSliceLoader.named_class_scripts(names, files)
-	var res := await _prewarm.load_all(get_tree(), classes, false)
-	DotLog.info(CHANNEL, "addon classes prewarmed", {"classes": classes.size(), "ms": Time.get_ticks_msec() - t0, "ok": res.ok})
-	_prewarming = false
-	_prewarm_done.emit()
+	await _Warm.prewarm_classes(self, manifest)
 
 
 func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false, on_progress: Callable = Callable()) -> DotCloudSliceLoader:
-	var loader := DotCloudSliceLoader.new()
-	if on_progress.is_valid():
-		loader.progress.connect(func(done: int, total: int, _path: String) -> void: on_progress.call(done, total))
-	if DotPlatform.has_threads() and not force:
-		return loader
-
-	var scripts := PackedStringArray()
-	for key in keys:
-		var manifest := manifest_for(key)
-		if manifest == null:
-			continue
-		for file in manifest.files:
-			# Tooling and examples are never loaded by a running game; warming them cost ~12 s of a join.
-			var top := file.path.get_slice("/", 0)
-			if file.path.contains("/") and WARM_SKIP_DIRS.has(top):
-				continue
-			var path := manifest.resource_path(file)
-			# A tokenized script ships as x.gdc behind x.gd.remap; load the .gd path either way.
-			if path.get_extension() == "gdc":
-				path = path.trim_suffix("c")
-			if path.get_extension() == "gd" and ResourceLoader.exists(path) and not scripts.has(path):
-				scripts.append(path)
-
-	while _prewarming:
-		await _prewarm_done
-	var t0 := Time.get_ticks_msec()
-	var named := DotCloudSliceLoader.named_class_scripts(scripts)
-	var scan_ms := Time.get_ticks_msec() - t0
-	var res := await loader.load_all(tree, named + scripts, false)
-
-	DotLog.info(CHANNEL, "scripts warmed", {
-		"content": ",".join(keys), "pack_scripts": scripts.size(), "addon_classes": named.size(),
-		"scan_ms": scan_ms, "ms": Time.get_ticks_msec() - t0, "frames": loader.frames_yielded,
-		"ok": res.ok, "why": "" if res.ok else str(res.error),
-	})
-	# Which scripts cost the join its seconds; read at DEBUG so a slow web join can be diagnosed from its log.
-	for entry in loader.slowest:
-		DotLog.debug(CHANNEL, "slow script", {"ms": entry[0], "path": entry[1]})
-	return loader
+	return await _Warm.warm_content(self, tree, keys, force, on_progress)
 
 
 func _ready_result(manifest: DotCloudManifest) -> DotResult:

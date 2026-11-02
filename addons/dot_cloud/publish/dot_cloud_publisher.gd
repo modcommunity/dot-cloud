@@ -32,6 +32,7 @@ extends RefCounted
 const CHANNEL := "cloud.pub"
 const _Sides := preload("dot_cloud_publisher_sides.gd")
 const _Rewrite := preload("dot_cloud_publisher_rewrite.gd")
+const _Finish := preload("dot_cloud_publisher_finish.gd")
 const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
@@ -335,18 +336,9 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		relatives = tokened.value
 
 	# After the imported outputs, so a file named on purpose wins a collision.
-	for named: Variant in extra_files:
-		var from := str(extra_files[named])
-		var safe_named := DotPaths.safe_relative(str(named))
-		if not safe_named.ok:
-			return safe_named.wrap("Cannot publish the extra file '%s'." % named)
-		if not FileAccess.file_exists(from):
-			return DotResult.fail(
-				DotError.CODE_IO,
-				"An extra file for the pack does not exist.",
-				"%s -> %s" % [named, from]
-			)
-		extra[str(safe_named.value)] = from
+	var added := _Finish.add_extra_files(extra, extra_files)
+	if not added.ok:
+		return added
 
 	for rel: String in extra:
 		if not relatives.has(rel):
@@ -414,26 +406,10 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		manifest.bundle = bundled
 
 	# Written verbatim, signed or not, so the bytes a client verifies are the bytes hashed here.
-	var payload := manifest.payload_bytes()
-	var document := payload
-
-	if signing_key_pem != "":
-		var sig := DotCloudSignature.sign(payload, signing_key_pem)
-		if not sig.ok:
-			return sig.wrap("Could not sign the manifest.")
-
-		manifest.signature = sig.value
-		manifest.signature_key_id = signing_key_id
-
-		document = DotCloudEnvelope.wrap(
-			payload, str(sig.value), signing_key_id
-		).to_utf8_buffer()
-	else:
-		DotLog.warn(
-			CHANNEL,
-			"publishing UNSIGNED content — a default-configured client will refuse it",
-			{"content": manifest.key()}
-		)
+	var signed_doc := _Finish.signed_document(manifest, signing_key_pem, signing_key_id)
+	if not signed_doc.ok:
+		return signed_doc
+	var document: PackedByteArray = signed_doc.value
 
 	var manifest_path := out_dir.path_join("manifest.json")
 	var saved := DotPaths.write_bytes(manifest_path, document)
@@ -445,25 +421,10 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		DotPaths.remove_tree(staging)
 	DotPaths.remove_tree(out_dir.path_join(".tokens"))
 
-	DotLog.info(
-		CHANNEL,
-		"published",
-		{
-			"content": manifest.key(),
-			"files": manifest.files.size(),
-			"objects": seen.size(),
-			"deduped": deduped,
-			"sources_dropped": dropped.size(),
-			"sided": sides.size(),
-			"provides": manifest.provides.get("entries", []).size() if not manifest.provides.is_empty() else -1,
-			"runs_code": bool(manifest.provides.get("runs_code", false)),
-			"written": written,
-			"bytes": DotPaths.format_bytes(total_bytes),
-			"rewritten": rewritten,
-			"signed": manifest.signature != "",
-			"out": out_dir,
-		}
-	)
+	_Finish.log_published(manifest, out_dir, {
+		"objects": seen.size(), "deduped": deduped, "dropped": dropped.size(), "sided": sides.size(),
+		"written": written, "bytes": total_bytes, "rewritten": rewritten,
+	})
 
 	return DotResult.success({
 		"manifest": manifest,

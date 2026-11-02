@@ -348,38 +348,9 @@ func _post_scope(body: Dictionary) -> DotResult:
 
 
 func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summary: Dictionary) -> void:
-	var accepts := list.accepts() if list != null else {}
-	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
 	var skipped: Array = summary["skipped"]
 	var failed: Array = summary["failed"]
-	var candidates: Array[Dictionary] = []
-
-	for item in (list.items() if list != null else []):
-		var pack := DotCloudWorkshopList.pack_of(item)
-		var id: String = str(pack.get("contentId", ""))
-		var version: String = str(pack.get("version", ""))
-		if id == "" or version == "":
-			continue
-		var kinds: Array = pack.get("kinds", []) if pack.get("kinds", []) is Array else []
-		if not accepted_kinds.is_empty() and not kinds.is_empty() and not _any_in(kinds, accepted_kinds):
-			skipped.append(_skip(id, version, REASON_INCOMPATIBLE))
-			continue
-		if device.is_off(id):
-			skipped.append(_skip(id, version, REASON_DEVICE_OFF))
-			continue
-		var key_id: String = str(pack.get("keyId", ""))
-		if not config.workshop_key_ids.has(key_id):
-			_fail_pack(failed, id, version, DotError.make(
-				DotError.CODE_FORBIDDEN, "The pack is signed with a key a subscription does not trust.", key_id
-			))
-			continue
-		if not _script_allowed(bool(pack.get("runsCode", false)), bool(pack.get("approved", false))):
-			skipped.append(_skip(id, version, REASON_SCRIPT_POLICY))
-			continue
-		if candidates.size() >= config.workshop_max_packs:
-			skipped.append(_skip(id, version, REASON_TOO_MANY))
-			continue
-		candidates.append({"id": id, "version": version, "item": item, "pack": pack, "title": str(item.get("name", id))})
+	var candidates := _candidates(list, skipped, failed)
 
 	await _add_suggested(candidates, skipped)
 
@@ -465,6 +436,42 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		else:
 			_fail_pack(failed, id, version, mounted.error)
 		progress.emit(done, total, bytes_done, bytes_total, str(c["title"]))
+
+
+## The subscribed packs worth planning: each one the list names, minus those the device, the key, the
+## script policy, the accepted kinds or the pack cap rule out (recorded in [param skipped] or [param failed]).
+func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> Array[Dictionary]:
+	var accepts := list.accepts() if list != null else {}
+	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
+	var candidates: Array[Dictionary] = []
+
+	for item in (list.items() if list != null else []):
+		var pack := DotCloudWorkshopList.pack_of(item)
+		var id: String = str(pack.get("contentId", ""))
+		var version: String = str(pack.get("version", ""))
+		if id == "" or version == "":
+			continue
+		var kinds: Array = pack.get("kinds", []) if pack.get("kinds", []) is Array else []
+		if not accepted_kinds.is_empty() and not kinds.is_empty() and not _any_in(kinds, accepted_kinds):
+			skipped.append(_skip(id, version, REASON_INCOMPATIBLE))
+			continue
+		if device.is_off(id):
+			skipped.append(_skip(id, version, REASON_DEVICE_OFF))
+			continue
+		var key_id: String = str(pack.get("keyId", ""))
+		if not config.workshop_key_ids.has(key_id):
+			_fail_pack(failed, id, version, DotError.make(
+				DotError.CODE_FORBIDDEN, "The pack is signed with a key a subscription does not trust.", key_id
+			))
+			continue
+		if not _script_allowed(bool(pack.get("runsCode", false)), bool(pack.get("approved", false))):
+			skipped.append(_skip(id, version, REASON_SCRIPT_POLICY))
+			continue
+		if candidates.size() >= config.workshop_max_packs:
+			skipped.append(_skip(id, version, REASON_TOO_MANY))
+			continue
+		candidates.append({"id": id, "version": version, "item": item, "pack": pack, "title": str(item.get("name", id))})
+	return candidates
 
 
 ## Mode "ask": one question for the suggested packs that need a download. A refusal (or no

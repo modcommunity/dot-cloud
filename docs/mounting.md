@@ -46,7 +46,7 @@ A manifest entry may carry `"side": "client"` or `"side": "server"` (`DotCloudFi
 
 ## UIDs at mount
 
-An imported asset's binary form refers to its dependencies by UID with the authored absolute path as a fallback, and neither survives being mounted somewhere else. `DotCloudMounter._register_uids` walks the pack's `.import` markers after the mount and points each UID at the mounted copy; see [publishing.md](publishing.md#binary-imports-are-fixed-at-mount). The count is in the mount's log line (`uids=N`).
+An imported asset's binary form refers to its dependencies by UID with the authored absolute path as a fallback, and neither survives being mounted somewhere else. `dot_cloud_mounter_uids.gd` (`register`, called by `DotCloudMounter`) walks the pack's `.import` markers after the mount and points each UID at the mounted copy; see [publishing.md](publishing.md#binary-imports-are-fixed-at-mount). The count is in the mount's log line (`uids=N`).
 
 `ResourceUID.set_id` when the host already knows an id, `add_id` when it does not: they are separate calls and the wrong one is an error, which a host that has mounted an earlier version of the same pack will hit.
 

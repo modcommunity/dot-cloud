@@ -73,7 +73,7 @@ func _run() -> void:
 	await _section_two_versions()
 	await _section_unmount_and_remount()
 	await _section_republished_version()
-	await _section_corrupt_object()
+	await _Sections.corrupt_object(self)
 	await _section_queries()
 	await _Sections.uids(self)
 	await _section_two_publishers()
@@ -607,48 +607,6 @@ func _section_unmount_and_remount() -> void:
 	_check("ref taken again", _store.ref_count(hash) > 0)
 	var reread := DotPaths.read_bytes(m.mount_prefix().path_join("map.txt"))
 	_check("still the right bytes", reread.ok and (reread.value as PackedByteArray) == body)
-
-	_line("")
-	_sections_finished += 1
-
-
-# --- 6. verify_before_mount actually verifies -------------------------------
-
-func _section_corrupt_object() -> void:
-	_sections_started += 1
-	_line("[b]6. an object that rotted after it was committed[/b]")
-
-	# commit_partial is the only place a hash is checked, so nothing re-reads an
-	# object once it is in the cache. verify_before_mount is the only thing
-	# standing between a bad sector and a mounted pack of wrong bytes, and it
-	# was reached by no test.
-	var body := _blob("will-rot", 640)
-	var hash := DotHash.sha256_bytes(body)
-	_store.put_bytes(body, hash)
-
-	var m := _manifest("rotten", "1.0.0", [["data.txt", body, true]])
-
-	var corrupted := DotPaths.write_bytes(_store.path_for(hash), _blob("not-it", 640))
-	_check("object corrupted underneath the cache", corrupted.ok)
-
-	var mounter := DotCloudMounter.new(_config)
-	var res: DotResult = await mounter.mount(m, _store, _scheduler)
-	_check(
-		"mount refused",
-		not res.ok and res.error.code == DotError.CODE_INTEGRITY,
-		str(res.error.code) if not res.ok else "MOUNTED"
-	)
-	_check("nothing was mounted", not mounter.is_mounted(m.key()))
-
-	# With the check off, the same mount goes through. Asserting this is what
-	# stops verify_before_mount from being quietly ineffective: if it were, the
-	# check above would pass for the wrong reason and this one would too.
-	_config.verify_before_mount = false
-	var mounter2 := DotCloudMounter.new(_config)
-	var res2: DotResult = await mounter2.mount(m, _store, _scheduler)
-	_check("without the check it mounts (so the check is what caught it)", res2.ok,
-		str(res2.error) if not res2.ok else "")
-	_config.verify_before_mount = true
 
 	_line("")
 	_sections_finished += 1

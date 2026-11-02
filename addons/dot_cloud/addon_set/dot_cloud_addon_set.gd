@@ -31,6 +31,8 @@ extends RefCounted
 ## already handles, and following a server DOWN would let any server pin its players to a
 ## version with a bug that was fixed. Only signed packs from [member namespaces] are taken.
 
+const _Overlay := preload("dot_cloud_addon_set_overlay.gd")
+
 const CHANNEL := "cloud.addons"
 
 ## Where the overlay and its plan live. Fixed, and outside the content cache, because the
@@ -587,7 +589,7 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	# Named by content, not `id@version`: a republished version must not reuse a stale file.
 	# Reuse is required: the file may be the overlay this process has mounted, and rewriting
 	# a mounted pack corrupts what it reads next.
-	var pack_path := _overlay_path(manifests, fingerprint)
+	var pack_path := _Overlay.path(DIR, manifests, fingerprint)
 	var reuse := FileAccess.file_exists(pack_path)
 	var scratch := DIR.path_join("staging")
 	DotPaths.remove_tree(scratch)
@@ -623,28 +625,14 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 					return DotResult.failure(DotError.from_engine(err, "adding %s" % target))
 
 			var ext := f.path.get_extension().to_lower()
-
 			if ext in REMAPPED and not reuse:
-				var remap := scratch.path_join("r%d.remap" % remap_index)
+				err = _Overlay.add_remap(packer, scratch.path_join("r%d.remap" % remap_index), target)
 				remap_index += 1
-				var w := FileAccess.open(remap, FileAccess.WRITE)
-				w.store_string("[remap]\n\npath=\"%s\"\n" % target)
-				w.close()
-				err = packer.add_file(target + ".remap", remap)
 				if err != OK:
 					return DotResult.failure(DotError.from_engine(err, "adding %s.remap" % target))
-
 			if ext == "gd":
 				scripts[target] = FileAccess.get_file_as_string(source)
-
-				# The script confirm_boot loads to see which copy is running: the addon's
-				# API file when it has one -- constants, nothing that runs on load -- and
-				# otherwise the first by path, so the choice is the same every build.
-				var api := "%s_api.gd" % dir
-				if f.path == api:
-					probes[dir] = target
-				elif not _has_file(manifest, api) and (not probes.has(dir) or target < str(probes[dir])):
-					probes[dir] = target
+				_Overlay.note_probe(probes, dir, manifest, f.path, target)
 			elif ext == "uid":
 				var uid := FileAccess.get_file_as_string(source).strip_edges()
 				if uid.begins_with("uid://"):
@@ -669,18 +657,6 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	DotWeb.sync_filesystem()
 
 	return DotResult.success({"pack": pack_path, "uids": uids, "probes": probes, "classes": added.size()})
-
-
-# --- Internals -----------------------------------------------------------------
-
-## The overlay's file name, from what is in it (see [method _assemble]).
-static func _overlay_path(manifests: Dictionary, fingerprint: String) -> String:
-	var lines := PackedStringArray([fingerprint])
-	for dir: String in manifests:
-		for f in (manifests[dir] as DotCloudManifest).files:
-			lines.append("%s/%s:%s" % [dir, f.path, f.sha256])
-	lines.sort()
-	return DIR.path_join("overlay-%s.pck" % "\n".join(lines).sha256_text().substr(0, 16))
 
 
 ## Writes the merged class list into [param scratch]; returns the entries this set added.
