@@ -111,7 +111,6 @@ static func verify(
 	return DotResult.success(true)
 
 
-# --- Trusted keys, and what each one is trusted FOR ------------------------
 #
 # [b]A key used to be trusted for every content id there is, and with one key that is a
 # distinction without a difference.[/b] The moment a deployment adds a second publisher it

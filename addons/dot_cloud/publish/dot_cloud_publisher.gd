@@ -1,31 +1,19 @@
 class_name DotCloudPublisher
 extends RefCounted
 
-## Turns a directory of content into a manifest plus a content-addressed object
-## tree, ready to serve over HTTP.
-##
-## Output layout — deliberately identical to what [DotCloudSourceHttp] expects, so
-## the publish target is a static directory you can drop behind any web server or
-## CDN with no configuration:
-##
+## Turns a directory of content into a manifest plus a content-addressed object tree, ready to serve over HTTP.
+## The layout is what [DotCloudSourceHttp] expects, so the target is a static directory behind any CDN:
 ## [codeblock]
 ## <out>/manifest.json              the signed manifest
 ## <out>/objects/<aa>/<full-hash>   one file per unique content hash
 ## <out>/bundles/<hash>.zip         the small objects in one archive (see [member write_bundle])
 ## [/codeblock]
-##
-## Content addressing on the server side too, for the same reasons it works on the
-## client: identical files across versions are stored and transferred once, paths
-## are immutable so a CDN can cache them forever with no invalidation, and
-## republishing a game with one changed texture uploads one object.
-##
+## Paths are immutable, so a CDN caches them forever and a republish with one changed texture uploads one object.
 ## [codeblock]
 ## var pub := DotCloudPublisher.new()
 ## pub.content_id = "dm_arena"
 ## pub.version = "1.2.0"
-## pub.entry_scene = "arena.tscn"
 ## pub.signing_key_pem = FileAccess.get_file_as_string("res://keys/content.key")
-##
 ## var res := pub.publish("res://content/dm_arena", "user://published/dm_arena")
 ## [/codeblock]
 
@@ -56,10 +44,7 @@ var dependencies: Array[Dictionary] = []
 ## Base URLs written into the manifest, so clients know where to fetch from.
 var mirrors: PackedStringArray = PackedStringArray()
 
-## Private key PEM. Leave empty to publish unsigned.
-##
-## Unsigned content is refused by a default-configured client, which is the point.
-## Publishing unsigned is for local development.
+## Private key PEM. Leave empty to publish unsigned (local development; a default client refuses it).
 var signing_key_pem: String = ""
 
 var signing_key_id: String = "default"
@@ -67,10 +52,7 @@ var signing_key_id: String = "default"
 ## Passed through to the manifest untouched, for a host project's own use.
 var metadata: Dictionary = {}
 
-## Glob-ish suffixes never included.
-##
-## Godot's [code].import[/code] sidecars and editor droppings would otherwise ship
-## as content — harmless but wasteful, and confusing to anyone reading a manifest.
+## Glob-ish suffixes never included (import sidecars and editor droppings).
 var exclude_suffixes: PackedStringArray = PackedStringArray([
 	".import", ".gd.uid", ".tmp", ".DS_Store", "Thumbs.db",
 	# Documentation: a repository's README, CLAUDE.md and docs/*.md are loaded by
@@ -83,99 +65,42 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 	".git", ".godot", ".svn", "__pycache__",
 ])
 
-## Where an imported output lives inside a pack.
-##
-## [b]Not `.godot/imported/`, which is where it lives in the project.[/b] Shipping it at
-## its real path put the engine's own reserved directory name inside delivered content,
-## and a web export cannot read it back:
-##
-##     ERR cloud  A required file is not readable after mounting.
-##     res://dot_cloud/g2gfast/0.1.0/.godot/imported/character-m.glb-ceef4a4….scn
-##
-## Linux reads it perfectly, which is the trap -- a headless mount of the same pack lists
-## the directory and loads every file in it, so the one check that could have caught this
-## passes on the platform that does not matter and the game will not start on the one
-## that does.
-##
-## The name is arbitrary as far as the loader is concerned: a `.import` marker names its
-## output by absolute path, so the output can live anywhere as long as the marker says
-## where. [method _rewrite_paths] moves both, together.
+## Where an imported output lives inside a pack, instead of `.godot/imported/` as in the project.
+## A web export cannot read files under the engine's reserved `.godot` name, though Linux can, so a
+## headless mount check passes while the game fails on the web.
+## A `.import` marker names its output by absolute path, so the output can live anywhere;
+## [method _rewrite_paths] moves both together.
 const IMPORTED_DIR := "_imported"
 
-## Ship the engine's imported form of assets that have one.
-##
-## [b]Without this a pack can carry a .glb or a .png and deliver nothing.[/b] Those are
-## not loadable resources: the editor imports them into [code].godot/imported/[/code] and
-## every load of the source path is redirected there by the [code].import[/code] marker
-## beside it. Nothing imports at runtime, on any platform -- so a pack built from a source
-## tree, with `.import` in [member exclude_suffixes] and `.godot` in
-## [member exclude_dirs], ships the bytes of an asset that no [method @GDScript.load] can
-## open. Measured, on a real pack:
-##
-## [codeblock]
-## character-a.glb    exists=false file=true  load=null
-## arena.tscn         exists=true  file=true  load=PackedScene
-## [/codeblock]
-##
-## `file=true` is the trap: the bytes are right there, so nothing reports a missing file.
-##
-## With this on, the markers and [code].godot/imported/[/code] come too, and the rewrite
-## moves the three absolute paths inside each marker onto the mount. The [code].md5[/code]
-## companions are left behind: they exist so the EDITOR can tell whether a reimport is
-## needed, and nothing at runtime reads one.
-##
-## Costs what the imported form costs -- for a game whose assets are 18 character meshes,
-## about the size of the meshes again. Turn it off for a pack that is all scenes and
-## scripts, where there is nothing to import.
+## Ship the engine's imported form of assets that have one (.glb, .png...).
+## Nothing imports at runtime and every load of a source path is redirected through its `.import` marker,
+## so a pack of bare sources has bytes no [method @GDScript.load] can open, and nothing reports a missing file.
+## With this on, markers and [code].godot/imported/[/code] come too, and the rewrite moves the three absolute
+## paths in each marker onto the mount. The [code].md5[/code] companions stay behind (editor-only).
+## Costs about the size of the meshes again; turn it off for a pack of only scenes and scripts.
 var include_imported: bool = true
 
-## Ship the source file beside its imported form ([code]tile.png[/code] next to
-## [code]tile.png.import[/code] and its [code].ctex[/code]). Off by default.
-##
-## [b]Nothing at runtime reads an imported asset's source.[/b] Every load follows the
-## marker to the imported output, and an exported build carries no sources at all, so a
-## game that works exported already works without them. They were most of a pack: the
-## reference deathmatch shipped 3.5 MB of `.glb` and 0.5 MB of `.png` beside the
-## `.scn` and `.ctex` that were actually loaded -- half its bytes and a quarter of its
-## fetches, for files no client ever opened.
-##
-## Only a source whose marker named an imported output this pack ships is left out; an
-## asset imported as "keep" or "skip" has no output and its file IS the asset, so it
-## stays. A scene that names the source path still has it rebased onto the mount, because
-## the marker is what that path resolves through. Turn this on for content that reads
-## its own files raw ([code]Image.load_from_file[/code], [code]GLTFDocument[/code]).
+## Ship the source file beside its imported form ([code]tile.png[/code] next to its [code].import[/code]). Off by default.
+## Nothing at runtime reads an imported asset's source, and sources were half the bytes of the reference pack.
+## Only a source whose marker names a shipped output is left out; "keep"/"skip" assets ARE their file and stay.
+## Turn on for content that reads its own files raw ([code]Image.load_from_file[/code], [code]GLTFDocument[/code]).
 var ship_import_sources: bool = false
 
-## Files the pack carries that are not under the source directory, as
-## [code]pack path -> file[/code] (an absolute OS path, or `res://` / `user://`).
-##
-## [b]For a file a build step derives and the source tree must not be written to.[/b] The
-## source of a publish is often somebody's checkout; a derived file written into it for the
-## length of a publish is an untracked file in their tree whenever the run is killed.
-## dot-server-deploy's packer adds the `requires.json` it derives this way.
-##
-## Each entry is added exactly like an imported output: hashed, copied into `objects/`,
-## listed in the manifest, and path-rewritten if it is a text resource. A pack path that
-## the source also has is replaced by the extra file. The exclusions do not apply -- the
-## file was named on purpose. A missing file or an unsafe pack path (`..`, absolute)
-## fails the publish rather than shipping a pack without it.
-##
+## Files the pack carries that are not under the source directory, as [code]pack path -> file[/code]
+## (absolute OS path, `res://` or `user://`).
+## For a file a build step derives, so the publish never writes into somebody's checkout.
+## Added like an imported output (hashed, listed, path-rewritten if text); replaces a source file at the
+## same pack path; exclusions do not apply. A missing file or unsafe pack path fails the publish.
 ## [codeblock]
 ## pub.extra_files = {"requires.json": "/tmp/build/requires.json"}
 ## [/codeblock]
 var extra_files: Dictionary = {}
 
-## Assigns groups to files by path prefix, as [code]prefix -> group[/code].
-##
-## Lets a publisher mark [code]"hd/"[/code] as an optional download without
-## hand-editing the manifest.
+## Assigns groups to files by path prefix, as [code]prefix -> group[/code] (e.g. `"hd/"` as an optional download).
 var group_rules: Dictionary = {}
 
 ## Rewrite `res://` references inside .tscn / .tres to the mount prefix.
-##
-## On by default, because a pack whose scenes still name their authored paths mounts
-## and then fails to find its own scripts. Turn it off for content that is pure data
-## and references nothing, or for a publisher that has already done this itself.
+## On by default: scenes naming their authored paths mount, then cannot find their own scripts.
 @export var rewrite_resource_paths: bool = true
 
 ## Also writes every object up to [member bundle_max_object_bytes] into one ZIP and names it in
@@ -187,16 +112,9 @@ var group_rules: Dictionary = {}
 @export var bundle_min_objects: int = 8
 
 ## Text resources whose `res://` references have to move with the pack.
-##
-## .tscn and .tres only. A .scn or .res is the binary form of the same thing and
-## cannot be rewritten by string substitution -- a project that saves binary scenes
-## has to publish them already namespaced, and nothing here can tell it so. Godot
-## writes text by default and this family uses text everywhere.
-##
-## [b].import too, and that is what makes [member include_imported] work.[/b] An import
-## marker is three absolute paths -- the imported resource, the source file, and the
-## dest_files list -- and all three name the project the asset was authored in. Rewritten
-## like any other reference, they name the mount instead.
+## .tscn and .tres only: a binary .scn or .res cannot be rewritten by string substitution.
+## .import too, which is what makes [member include_imported] work: its three absolute paths
+## name the authoring project and are rewritten to the mount like any reference.
 static func _is_text_resource(rel: String) -> bool:
 	var e := rel.get_extension().to_lower()
 	return e == "tscn" or e == "tres" or e == "import"
@@ -209,17 +127,11 @@ func _rewrite_paths(abs: String, staged: String, inside: Dictionary) -> DotResul
 	return _Rewrite.rewrite_paths(abs, staged, inside, mount_root, content_id, version)
 
 
-## Directory of pre-tokenized scripts (API 11): `<dir>/game/x.gdc` stands in for `game/x.gd`.
-## Empty (the default) ships the `.gd` text as before.
-##
-## A script shipped as binary tokens skips the tokenizer when the client compiles it, about
-## 40% off loading a 100-script game (2.8 s to 1.7 s headless). Tokens can only be made by
-## the engine's exporter (see [code]tools/tokenize_scripts.sh[/code]) and are tied to the
-## exact engine version that wrote them, so tokenize with the engine the clients run.
-## Each swapped script ships as [code]x.gdc[/code] plus an [code]x.gd.remap[/code] naming it,
-## the pair an export makes; a script with no `.gdc` in the directory stays text.
-## A [code]engine.txt[/code] in the directory (written by the tool) is compared with the running
-## engine; on a mismatch the scripts ship as text, which loads everywhere.
+## Directory of pre-tokenized scripts (API 11): `<dir>/game/x.gdc` stands in for `game/x.gd`. Empty ships `.gd` text.
+## Tokens skip the tokenizer on the client (about 40% off loading 100 scripts) but are tied to the exact
+## engine version that wrote them (see [code]tools/tokenize_scripts.sh[/code]). Each swapped script ships as
+## `x.gdc` plus an `x.gd.remap`; a script with no `.gdc` stays text.
+## An `engine.txt` in the directory is compared with the running engine; on a mismatch scripts ship as text.
 var script_tokens_dir: String = ""
 
 ## Marks files optional by path prefix.
@@ -228,29 +140,18 @@ var optional_prefixes: PackedStringArray = PackedStringArray()
 ## Restricts files to platforms by path prefix, as [code]prefix -> [tags][/code].
 var platform_rules: Dictionary = {}
 
-## Files only one side of a game fetches, as [code]pattern -> "client" | "server"[/code]
-## (API 8), merged with the source's [constant SIDES_FILE]. Written into each entry's
-## [member DotCloudFile.side], inside the signed payload.
-##
-## A pattern ending in [code]/[/code] is a directory prefix; anything else is a
-## [method String.match] glob over the pack path, where [code]*[/code] crosses
-## [code]/[/code]. An imported asset's marker and its relocated output take the side of the
-## source asset, so [code]"textures/hd/"[/code] covers the [code]_imported/[/code] file
-## too.
-##
-## [b]In the source tree rather than in one publisher's config,[/b] because a game is packed
-## by more than one tool (this class's CLI, a server's packer, the site's release sync) and
-## the source is the one thing all of them read. Refused at publish: a pattern that matches
-## nothing (a typo would ship the files to both sides and say nothing), a file two patterns
-## put on different sides, a file [member side_needs] says the other side reads, and a
-## text resource on one side (or both) that references a file only the other side gets.
+## Files only one side of a game fetches, as [code]pattern -> "client" | "server"[/code] (API 8), merged
+## with the source's [constant SIDES_FILE] and written into [member DotCloudFile.side] inside the signed payload.
+## A pattern ending in `/` is a directory prefix; any other is a [method String.match] glob over the pack path.
+## An imported asset's marker and relocated output take its source's side.
+## Lives in the source tree because several tools pack a game and all read the source.
+## Refused: a pattern matching nothing (a typo would ship to both sides silently), a file on two sides,
+## a file [member side_needs] says the other side reads, and a text resource referencing a file only the other side gets.
 var side_rules: Dictionary = {}
 
-## Pack paths a side must have, as [code]path -> "client" | "server" | "both"[/code]; a
-## side rule that takes one of them away from a side that needs it is refused at publish
-## (API 8). [code]requires.json[/code] and [code]provides.json[/code] are always both and
-## [member entry_scene] always client; a packer adds what its own loader opens, such as a
-## server's game descriptor and module. Add with [method need_on_side], which merges.
+## Pack paths a side must have, as [code]path -> "client" | "server" | "both"[/code]; a side rule removing one
+## from a side that needs it is refused at publish (API 8).
+## `requires.json` and `provides.json` are always both and [member entry_scene] client; add with [method need_on_side].
 var side_needs: Dictionary = {}
 
 
@@ -263,12 +164,8 @@ func need_on_side(path: String, side: String) -> void:
 	side_needs[path] = side if held == side else "both"
 
 
-# --- Publishing ------------------------------------------------------------
-
 ## Builds a manifest and object tree from [param source_dir] into [param out_dir].
-##
-## Synchronous and unapologetically so: this runs in a build step or a CLI, not in
-## a frame. It hashes every file with [method DotHash.sha256_file], which blocks.
+## Synchronous: for a build step or CLI, not a frame; [method DotHash.sha256_file] blocks.
 func publish(source_dir: String, out_dir: String) -> DotResult:
 	if content_id == "":
 		return DotResult.fail(
@@ -603,13 +500,10 @@ func _swap_in_script_tokens(
 	return DotResult.success(kept)
 
 
-## Refuses a text resource that references a file its own side will not have: a scene both
-## sides load naming a client-only lightmap, or a client-only resource naming a server-only
-## one. Godot loads a scene's [code]ext_resource[/code] entries unconditionally, so the
-## scene would fail on the side that skipped the file, after a clean publish, fetch and
-## mount. Scripts are not scanned: a path in code is loaded when the code decides to, and
-## gating that by side is the game's job (a server that never draws never asks for a
-## lightmap). An imported asset's side is its marker's.
+## Refuses a text resource that references a file its own side will not have (a scene both sides load naming a
+## client-only lightmap): Godot loads `ext_resource` entries unconditionally, so it would fail after a clean mount.
+## Scripts are not scanned; a path in code is loaded when the code decides to, and gating that is the game's job.
+## An imported asset's side is its marker's.
 func _check_side_references(
 	relatives: PackedStringArray,
 	extra: Dictionary,
@@ -650,22 +544,10 @@ func _collect(source_dir: String) -> PackedStringArray:
 	var out := PackedStringArray()
 
 	for rel in DotPaths.list_files_recursive(source_dir):
-		# The engine's imported form, and the markers that point at it. Decided before the
-		# exclusions rather than after, because both of the rules below would drop it:
-		# `.godot` is an excluded directory and `.import` an excluded suffix, and they are
-		# right to be for everything else in there.
-		# [b]An output is kept whatever directory it is in; a MARKER is not.[/b] The
-		# output's directory is `.godot/`, which is excluded and has to be -- that is the
-		# whole reason for this branch. A marker's directory is the asset's own, so a
-		# marker under `screenshots/` or `maps/imported/` belongs to a file this pack is
-		# not shipping, and keeping it shipped 241 `.import` files naming content that is
-		# not in the pack -- along with, once `_imported_outputs_for` follows them, every
-		# texture behind the exclusion the publisher was asked for.
-		# [b]Never from the walk, whatever the platform lists.[/b] An imported output
-		# reaches a pack only through `_imported_outputs_for`, which puts it under
-		# [constant IMPORTED_DIR] -- so there is exactly one route in, and it is the one
-		# that also rewrites the marker pointing at it. This branch used to be that route
-		# and shipped the path verbatim.
+		# The engine's imported form and its markers are decided before the exclusions, because `.godot` (excluded dir)
+		# and `.import` (excluded suffix) would drop them. An output is kept from any directory; a MARKER is not,
+		# since its directory is the asset's own and keeping one for a file not shipped drags in its textures.
+		# Never from the walk: outputs reach a pack only through `_imported_outputs_for`, which also rewrites the marker.
 		if rel.begins_with(".godot/"):
 			continue
 
@@ -679,10 +561,8 @@ func _collect(source_dir: String) -> PackedStringArray:
 		if skip:
 			continue
 
-		# The suffix rules below would drop a marker, and they are right to for
-		# everything else: `.import` is in `exclude_suffixes` because a pack that is all
-		# scenes and scripts has no use for one. Decided here, after the directory rules
-		# rather than before them.
+		# The suffix rules below would drop a marker; decided here, after the directory rules, because
+		# `.import` is excluded for packs of only scenes and scripts.
 		if include_imported and rel.ends_with(".import"):
 			out.append(rel)
 			continue
@@ -700,35 +580,12 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 
 ## Imported outputs an `.import` marker in this pack points at.
-##
-## Returns `{"files": {pack_rel: absolute}, "remap": {project_rel: pack_rel},
-## "sources": {source_rel: true}}` (the assets a shipped output stands in for) — the
-## second is what lets [method _rewrite_paths] send a marker to where the output actually
-## landed, which is [constant IMPORTED_DIR] and not where the marker says.
-##
-## Empty only when the source is not inside a Godot project at all, which is a legitimate
-## thing to publish and simply has no imported anything.
-##
-## [b]It used to return empty for a source that IS a project root, on the grounds that
-## `_collect` had already found them. `_collect` never found one.[/b]
-## [method DotPaths.list_files_recursive] lists through [method DirAccess.list_dir_begin],
-## which skips hidden entries unless asked otherwise -- and `.godot` is hidden. So a pack
-## published from a project root carried the `.import` markers and not one of the
-## `.ctex`, `.mesh` or `.scn` files they point at, which is the exact failure
-## [member include_imported] exists to prevent:
-##
-##     ERROR: Unable to open file: res://.godot/imported/floor.png-6c859f4….ctex
-##      at: _load_data (scene/resources/compressed_texture.cpp:45)
-##
-## Every delivered game was published that way. It survived unnoticed because the ONE
-## shape that was tested -- an imported map, published from a subdirectory -- is the one
-## shape this function already handled, and because a dedicated server does not draw
-## anything: the textures it could not load cost it nothing, and the client that could
-## not draw them is a different process reading a different log.
-##
-## Resolving from the markers rather than by listing `.godot/imported/` wholesale is also
-## the smaller pack: a project's imported directory holds an output for every asset it
-## has ever imported, including the ones this pack excludes and the ones it deleted.
+## Returns `{"files": {pack_rel: absolute}, "remap": {project_rel: pack_rel}, "sources": {source_rel: true}}`;
+## the remap lets [method _rewrite_paths] send a marker to [constant IMPORTED_DIR], where the output landed.
+## Empty only when the source is not inside a Godot project.
+## Resolved from the markers, not by listing `.godot/imported/`, because that directory holds an output
+## for every asset ever imported. [method DotPaths.list_files_recursive] skips hidden entries, so `_collect`
+## never finds `.godot`, and a pack from a project root would otherwise carry markers without their `.ctex`.
 func _imported_outputs_for(
 	source_dir: String, relatives: PackedStringArray
 ) -> Dictionary:
@@ -858,10 +715,9 @@ func _platforms_for(path: String) -> PackedStringArray:
 	return vram_platforms(path) if tag_vram_textures else PackedStringArray()
 
 
-## Tag a VRAM-compressed texture's per-format output (`.s3tc.ctex`, `.etc2.ctex`, and the `.bptc` / `.astc` ones) with
-## the platforms that use it (API 15), so a desktop client does not download the phone copy and the reverse. A
-## browser gets both: which format it uses depends on the GPU, which no feature tag says. macOS gets both too
-## (Apple GPUs read ETC2/ASTC, Intel ones S3TC). A rule from [member platform_rules] wins.
+## Tag a VRAM-compressed texture's per-format output (`.s3tc.ctex`, `.etc2.ctex`, `.bptc`, `.astc`) with
+## the platforms that use it (API 15), so a desktop client does not download the phone copy.
+## A browser and macOS get both, since the format depends on the GPU. A rule from [member platform_rules] wins.
 var tag_vram_textures: bool = true
 
 
@@ -873,13 +729,9 @@ static func vram_platforms(path: String) -> PackedStringArray:
 	return PackedStringArray()
 
 
-# --- Keys ------------------------------------------------------------------
-
 ## Generates a signing keypair and writes both halves.
-##
-## The private half is written with whatever permissions the platform defaults
-## to, which is not good enough for a key that authorises code execution on every
-## player's machine. Move it into a secrets manager and delete the file.
+## The private half gets default permissions, not enough for a key that authorises code on every player's
+## machine: move it into a secrets manager and delete the file.
 static func generate_keys(private_path: String, public_path: String) -> DotResult:
 	var pair := DotCloudSignature.generate_keypair()
 	if not pair.ok:

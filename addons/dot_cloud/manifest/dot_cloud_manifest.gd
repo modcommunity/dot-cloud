@@ -3,17 +3,10 @@ class_name DotCloudManifest
 extends Resource
 
 ## The description of one downloadable content set.
-##
-## A server hands a client a manifest URL; the client fetches this document,
-## works out what it is missing, downloads it, verifies it, and mounts it. The
-## manifest is therefore the whole trust boundary — everything downstream trusts
-## the hashes in here, so the document itself has to be trustworthy. See
-## [DotCloudSignature].
-##
-## [b]The mount prefix is the load-bearing field.[/b] Content mounts at
-## [code]res://<mount_root>/<content_id>/<version>/[/code], and that namespacing
-## is what makes hot-swapping content possible at all — see [DotCloudMounter] for
-## why, and [DotCloudPacker] for the packing side that has to agree with it.
+## A client fetches it, works out what it is missing, downloads, verifies and mounts. It is the whole trust
+## boundary, since everything downstream trusts its hashes (see [DotCloudSignature]).
+## [b]The mount prefix is load-bearing[/b]: content mounts at [code]res://<mount_root>/<content_id>/<version>/[/code],
+## which is what makes hot-swapping possible (see [DotCloudMounter], and [DotCloudPacker] for the packing side).
 
 # No log channel: the trust boundary is a document, and a document returns DotResult.
 # DotCloudClient, which fetched it, fails the acquisition with it and logs that at ERROR.
@@ -26,68 +19,50 @@ const FORMAT_VERSION := 1
 ## Slug-safe: it becomes a path component. Validated on parse.
 @export var content_id: String = ""
 
-## Version of this content. Any string, but semver sorts usefully.
-##
-## Part of the mount path, so publishing a new version mounts alongside the old
-## one rather than trying to replace it in place.
+## Version of this content; any string, semver sorts usefully.
+## Part of the mount path, so a new version mounts alongside the old one.
 @export var version: String = "0.0.0"
 
 ## Human-readable name for progress UI and server listings.
 @export var display_name: String = ""
 
-## Where content mounts under [code]res://[/code].
-##
-## Kept out of the way of a host project's own [code]res://[/code] tree so
-## downloaded content can never shadow shipped content — which would otherwise
-## be an obvious attack: publish a manifest containing
-## [code]scripts/autoload.gd[/code] and wait.
+## Where content mounts under [code]res://[/code], away from the host's own tree so downloaded content
+## cannot shadow shipped scripts.
 @export var mount_root: String = "dot_cloud"
 
-## Base URLs content is fetched from, tried in order.
-##
-## Several means failover. The first that responds is preferred for subsequent
-## files, so one slow mirror does not halve throughput.
+## Base URLs content is fetched from, tried in order; the first that responds is preferred afterwards.
 @export var mirrors: PackedStringArray = PackedStringArray()
 
 ## Files in this content set.
 @export var files: Array[DotCloudFile] = []
 
-## Entry scene, relative to the mount prefix.
-##
-## What dot-server tells clients to load once content is ready. Empty for
-## manifests that are pure assets with no scene of their own.
+## Entry scene, relative to the mount prefix; what dot-server tells clients to load. Empty for pure assets.
 @export var entry_scene: String = ""
 
-## Minimum Godot version this content needs.
-##
-## Checked before mounting. A pack built against a newer engine can fail to load
-## a scene in ways that look like content corruption, so refusing early with an
-## accurate reason is worth the field.
+## Minimum Godot version this content needs, checked before mounting: a newer-engine pack can fail
+## in ways that look like corruption.
 @export var min_engine_version: String = ""
 
 ## Free-form metadata passed through untouched, for a host project's own use.
 @export var metadata: Dictionary = {}
 
-## What the pack offers a game: the author's `provides.json` plus the computed `runs_code`
-## (see [DotCloudProvides]). Empty for every pack published before the Workshop. Signed with
-## the rest of the payload, because the manifest is the only document verified before
-## anything is downloaded.
+## What the pack offers a game: the author's `provides.json` plus the computed `runs_code` (see
+## [DotCloudProvides]). Empty for packs older than the Workshop. Signed, as the manifest is the only
+## document verified before anything is downloaded.
 @export var provides: Dictionary = {}
 
 ## Who made what, and under which licence: `[{paths, licence, author, url}]`, the publisher's `licence.json`.
 ## The site refuses a pack whose files are not all covered by an allowed licence. Empty for older packs.
 @export var licences: Array = []
 
-## One archive holding every small object, so a first load is one request instead of
-## thousands: `{sha256, size, count, max_object_bytes, url_path}`. Empty when the publisher wrote
-## none. A ZIP of objects each named by its own hash; the client verifies the archive and then
-## every entry, so it adds no trust. Signed with the rest of the payload.
+## One archive holding every small object, so a first load is one request: `{sha256, size, count,
+## max_object_bytes, url_path}`. Empty when none. Entries are named by hash and verified after the
+## archive, so it adds no trust. Signed.
 @export var bundle: Dictionary = {}
 
-## Content this one needs mounted first, each `{id, version}`; empty for most packs. A shared store
-## (textures, models) is its own content, so a client that already has it skips it and a pack is
-## not rebuilt when the store grows. The version is exact: a mounted pack never unmounts, so a pack
-## names the store revision it was built against. Signed with the rest of the payload.
+## Content this one needs mounted first, each `{id, version}`; empty for most packs.
+## A shared store is its own content, so a client that has it skips it. The version is exact because a
+## mounted pack never unmounts. Signed.
 @export var dependencies: Array[Dictionary] = []
 
 ## Most dependencies a manifest may name (a typo or a hostile list must not start a hundred downloads).
@@ -97,45 +72,26 @@ const MAX_DEPENDENCIES := 8
 var format_version: int = FORMAT_VERSION
 
 ## The side this process fetches and mounts the manifest as ([constant DotCloudFile.SIDE_BOTH],
-## [code]SIDE_CLIENT[/code] or [code]SIDE_SERVER[/code]); [method wanted_files] leaves out the
-## entries tagged for the other side.
-##
-## [b]Not part of the document.[/b] Not exported, not in [method to_dict], never parsed:
-## which side reads a manifest is the reader's fact, set by [DotCloudClient] from its own
-## [member DotCloudConfig.side], and nothing a server sends can move it. Filtering in
-## [method wanted_files] rather than at each caller is what keeps the downloader, the
-## mounter's "everything required is present" and "readable after mounting" checks and the
-## code rescan agreeing: a file this side skipped is not one any of them asks about.
+## `SIDE_CLIENT` or `SIDE_SERVER`); [method wanted_files] leaves out the other side's entries.
+## [b]Not part of the document[/b]: set by [DotCloudClient] from its own [member DotCloudConfig.side], never
+## by a server. Filtering in [method wanted_files] keeps the downloader, the mounter's checks and the code
+## rescan agreeing on what is wanted.
 var fetch_side: String = DotCloudFile.SIDE_BOTH
 
-## Signature from the enclosing [DotCloudEnvelope]. Empty for unsigned content.
-##
-## Not an [code]@export[/code] and not part of [method to_dict]: the signature
-## lives outside the document it signs, so that verification never has to
-## re-serialise. See [DotCloudEnvelope].
+## Signature from the enclosing [DotCloudEnvelope]; empty for unsigned content.
+## Outside the document it signs, so verification never re-serialises.
 var signature: String = ""
 
 ## Key id from the enclosing envelope. A hint, not a trusted claim.
 var signature_key_id: String = ""
 
-## The exact bytes the signature covers — the envelope's payload.
-##
-## Signature verification runs over these, never over a re-serialisation of the
-## parsed object: any difference in key order, whitespace or number formatting
-## would break a signature that is in fact valid.
+## The exact bytes the signature covers: the envelope's payload.
+## Verification runs over these, never a re-serialisation, where key order or number formatting would break a valid signature.
 var raw_bytes: PackedByteArray = PackedByteArray()
 
 
-# --- Parsing ---------------------------------------------------------------
-
-## Parses a published manifest, signed or not.
-##
-## Handles the [DotCloudEnvelope] transparently: the single entry point for
-## reading a manifest, so no caller can forget to unwrap and end up verifying a
-## signature against the envelope instead of the payload.
-##
-## [member raw_bytes] is set to the [b]payload[/b] bytes — exactly what was
-## signed — which is what [method DotCloudClient.verify_manifest] checks.
+## Parses a published manifest, signed or not; the only entry point, so no caller verifies against the envelope.
+## [member raw_bytes] is set to the [b]payload[/b] bytes, exactly what was signed.
 static func from_json_bytes(bytes: PackedByteArray) -> DotResult:
 	var unwrapped := DotCloudEnvelope.unwrap(bytes)
 	if not unwrapped.ok:
@@ -333,10 +289,8 @@ func _check_dependencies() -> DotResult:
 	return DotResult.success(true)
 
 
-## [method validate_shape], and then: can THIS engine run it?
-##
-## The shape is intrinsic (malformed on every machine); [member min_engine_version] compares against the
-## running engine, so it is a mount-time question a publisher building for a newer Godot must not ask.
+## [method validate_shape], then: can THIS engine run it?
+## The shape is intrinsic; [member min_engine_version] is a mount-time question a publisher building for a newer Godot must not ask.
 func validate() -> DotResult:
 	var shape := validate_shape()
 	if not shape.ok:
@@ -354,13 +308,7 @@ func validate() -> DotResult:
 	return DotResult.success(true)
 
 
-# --- Serialisation ---------------------------------------------------------
-
-## The manifest as a plain dictionary.
-##
-## Carries no signature — that belongs to the [DotCloudEnvelope] wrapping this
-## document, precisely so that signing and verifying never depend on how this
-## function formats its output.
+## The manifest as a plain dictionary, without the signature (that belongs to the [DotCloudEnvelope]).
 func to_dict() -> Dictionary:
 	var d := {
 		"format_version": FORMAT_VERSION,
@@ -389,10 +337,8 @@ func to_dict() -> Dictionary:
 	if not dependencies.is_empty():
 		d["dependencies"] = dependencies
 
-	# Sorted by hash so the serialisation is deterministic regardless of the
-	# order the publisher walked the source directory. Without this, two
-	# publishes of identical content produce different bytes and therefore
-	# different signatures, and nothing downstream can cache on the manifest.
+	# Sorted by hash so identical content serialises to identical bytes, whatever order the walk found it;
+	# otherwise signatures differ per publish and nothing can cache on the manifest.
 	var sorted := files.duplicate()
 	sorted.sort_custom(func(a: DotCloudFile, b: DotCloudFile) -> bool:
 		return a.sha256 < b.sha256
@@ -423,16 +369,11 @@ func to_json(pretty: bool = true) -> String:
 	return JSON.stringify(to_dict(), "\t" if pretty else "", true, true)
 
 
-## The bytes to sign, and to write as the envelope payload.
-##
-## The publisher signs exactly this and stores exactly this; the client verifies
-## exactly what it received. No canonicalisation is involved anywhere, which is
-## the whole point — see [DotCloudEnvelope].
+## The bytes to sign and write as the envelope payload; the client verifies exactly what it received,
+## so no canonicalisation is involved (see [DotCloudEnvelope]).
 func payload_bytes() -> PackedByteArray:
 	return to_json(true).to_utf8_buffer()
 
-
-# --- Queries ---------------------------------------------------------------
 
 ## Path under [code]res://[/code] where this content mounts.
 ##
@@ -458,11 +399,8 @@ func key() -> String:
 	return "%s@%s" % [content_id, version]
 
 
-## Files this platform wants, filtered by group.
-##
-## The list the downloader actually works from. Filtering here rather than at
-## download time means the progress total is right from the start, instead of a
-## bar that shrinks as skipped files are discovered.
+## Files this platform wants, filtered by group; the list the downloader works from.
+## Filtered here so the progress total is right from the start.
 func wanted_files(groups: PackedStringArray = PackedStringArray()) -> Array[DotCloudFile]:
 	var out: Array[DotCloudFile] = []
 	for f in files:

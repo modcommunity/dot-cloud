@@ -37,8 +37,6 @@ var _last_failure_ms: int = 0
 @export var cooldown_sec: float = 60.0
 
 
-# --- Subclass interface ----------------------------------------------------
-
 ## Human-readable name for logs and progress UI.
 func source_name() -> String:
 	return "source"
@@ -97,8 +95,6 @@ func fetch(
 		"%s does not implement fetch()." % source_name()
 	)
 
-
-# --- Health ----------------------------------------------------------------
 
 ## Whether this source should be tried right now.
 func is_available() -> bool:

@@ -83,7 +83,7 @@ func _run() -> void:
 	_finish(1 if _failures > 0 else 0)
 
 
-# --- 1. The verification chokepoint ----------------------------------------
+# 1. The verification chokepoint
 
 func _section_commit() -> void:
 	_section("[b]1. commit, and the one place a hash is checked[/b]")
@@ -137,7 +137,7 @@ func _section_commit() -> void:
 	_done()
 
 
-# --- 2. Eviction under pressure --------------------------------------------
+# 2. Eviction under pressure
 
 func _section_pressure() -> void:
 	_section("[b]2. a full cache, with content mounted[/b]")
@@ -205,7 +205,7 @@ func _section_pressure() -> void:
 	_done()
 
 
-# --- 3. Eviction order -----------------------------------------------------
+# 3. Eviction order
 
 func _section_lru() -> void:
 	_section("[b]3. least recently used, and what counts as used[/b]")
@@ -252,7 +252,7 @@ func _section_lru() -> void:
 	_done()
 
 
-# --- 4. The index, and the directory it describes --------------------------
+# 4. The index, and the directory it describes
 
 func _section_index() -> void:
 	_section("[b]4. the index is behind the directory, always[/b]")
@@ -353,7 +353,7 @@ func _section_index() -> void:
 	_done()
 
 
-# --- 5. Partials -----------------------------------------------------------
+# 5. Partials
 
 func _section_partials() -> void:
 	_section("[b]5. partials that will never be resumed[/b]")
@@ -389,7 +389,7 @@ func _section_partials() -> void:
 	_done()
 
 
-# --- 6. Verification and clearing ------------------------------------------
+# 6. Verification and clearing
 
 func _section_verify_and_clear() -> void:
 	_section("[b]6. storage that changed underneath us[/b]")
@@ -435,7 +435,7 @@ func _section_verify_and_clear() -> void:
 	_done()
 
 
-# --- Helpers ---------------------------------------------------------------
+# Helpers
 
 func _config(dir: String, limit: int) -> DotCloudConfig:
 	var cfg := DotCloudConfig.new()

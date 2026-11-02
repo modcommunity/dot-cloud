@@ -74,8 +74,6 @@ func _init(p_cloud: DotCloudClient = null) -> void:
 	cloud = p_cloud
 
 
-# --- What this build is ------------------------------------------------------
-
 ## The addon versions this build shipped with: repo -> version, from [constant BUILT_LOCK].
 ## Empty when the build carries no lock, which turns this whole mechanism off: without a
 ## baseline there is no way to say what is newer.
@@ -103,8 +101,6 @@ static func build_fingerprint() -> String:
 	var text := FileAccess.get_file_as_string(BUILT_LOCK)
 	return text.sha256_text().substr(0, 16) if text != "" else ""
 
-
-# --- The plan the boot script reads --------------------------------------------
 
 static func read_plan() -> Dictionary:
 	var text := FileAccess.get_file_as_string(PLAN)
@@ -197,8 +193,6 @@ static func mounted_this_boot(plan: Dictionary) -> bool:
 	return ProjectSettings.get_setting("dot_cloud/addon_overlay", "") != "" \
 		and str(ProjectSettings.get_setting("dot_cloud/addon_overlay", "")) == str(plan.get("pack", ""))
 
-
-# --- Deciding ------------------------------------------------------------------
 
 ## What a server's addon set asks of this process.
 ##
@@ -500,8 +494,6 @@ static func compare_versions(a: String, b: String) -> int:
 
 	return 0
 
-
-# --- Building ------------------------------------------------------------------
 
 ## Fetches every pack in [param wanted] and writes the overlay and its plan.
 ##

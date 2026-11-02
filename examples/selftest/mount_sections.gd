@@ -135,10 +135,8 @@ static func corrupt_object(h: Node) -> void:
 	h._sections_started += 1
 	h._line("[b]6. an object that rotted after it was committed[/b]")
 
-	# commit_partial is the only place a hash is checked, so nothing re-reads an
-	# object once it is in the cache. verify_before_mount is the only thing
-	# standing between a bad sector and a mounted pack of wrong bytes, and it
-	# was reached by no test.
+	# commit_partial is the only hash check, so nothing re-reads a cached object; verify_before_mount alone
+	# guards against a bad sector, and no test reached it.
 	var body: PackedByteArray = h._blob("will-rot", 640)
 	var hash := DotHash.sha256_bytes(body)
 	h._store.put_bytes(body, hash)

@@ -97,7 +97,7 @@ func _run() -> void:
 	_finish(1 if _failures > 0 else 0)
 
 
-# --- The assembled pack is cached by CONTENT, not by version ----------------
+# The assembled pack is cached by CONTENT, not by version
 
 ## Republishing one version with different files, which is how a game gets fixed.
 ##
@@ -175,7 +175,7 @@ func _section_republished_version() -> void:
 	_sections_finished += 1
 
 
-# --- 10. One id and version, two publishers --------------------------------
+# 10. One id and version, two publishers
 
 ## Two parties claiming one `content_id@version`, in ONE process.
 ##
@@ -243,7 +243,7 @@ func _section_two_publishers() -> void:
 	_sections_finished += 1
 
 
-# --- 11. <owner>/<name> content ids ----------------------------------------
+# 11. <owner>/<name> content ids
 
 ## An id that names who owns it, and the forms that must still be refused.
 ##
@@ -323,7 +323,7 @@ func _section_namespaced_ids() -> void:
 	_sections_finished += 1
 
 
-# --- 1. The version is a path component ------------------------------------
+# 1. The version is a path component
 
 func _section_traversal() -> void:
 	_sections_started += 1
@@ -356,7 +356,7 @@ func _section_traversal() -> void:
 	_sections_finished += 1
 
 
-# --- 2. Nothing mounts half-downloaded --------------------------------------
+# 2. Nothing mounts half-downloaded
 
 func _section_incomplete() -> void:
 	_sections_started += 1
@@ -406,7 +406,7 @@ func _section_incomplete() -> void:
 	_sections_finished += 1
 
 
-# --- 3. Mount, and read the bytes back --------------------------------------
+# 3. Mount, and read the bytes back
 
 func _section_mount_and_read() -> void:
 	_sections_started += 1
@@ -497,7 +497,7 @@ func _section_mount_and_read() -> void:
 	_sections_finished += 1
 
 
-# --- 4. The reason the whole addon is shaped this way -----------------------
+# 4. The reason the whole addon is shaped this way
 
 func _section_two_versions() -> void:
 	_sections_started += 1
@@ -558,7 +558,7 @@ func _section_two_versions() -> void:
 	_sections_finished += 1
 
 
-# --- 5. Unmount, and what it can and cannot do ------------------------------
+# 5. Unmount, and what it can and cannot do
 
 func _section_unmount_and_remount() -> void:
 	_sections_started += 1
@@ -612,7 +612,7 @@ func _section_unmount_and_remount() -> void:
 	_sections_finished += 1
 
 
-# --- 7. Queries and describe ------------------------------------------------
+# 7. Queries and describe
 
 func _section_queries() -> void:
 	_sections_started += 1
@@ -687,7 +687,7 @@ func _section_queries() -> void:
 	_sections_finished += 1
 
 
-# --- Helpers ----------------------------------------------------------------
+# Helpers
 
 ## A manifest built in memory. [param entries] are [path, bytes, required].
 ## The mounter's own row for one content key, however `describe` happens to shape it.

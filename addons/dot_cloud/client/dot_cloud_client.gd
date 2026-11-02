@@ -69,30 +69,19 @@ signal _acquire_finished(content_key: String, result: DotResult)
 ## DotClientLink, DotGameManager, the content command and DotAvatarCatalogue duck-type against it; an absent cloud reads as "content ships in the build", so a missing registration errors nowhere.
 @export var register_service: bool = true
 
-## Suffix for this client's registry name.
-##
-## Two clients in one process — a test running both halves, a tool publishing while a
-## client consumes — would otherwise both claim [constant SERVICE] and the second would
-## displace the first.
+## Suffix for this client's registry name, so two clients in one process do not displace each other.
 @export var service_scope: StringName = &""
 
 @export_group("Requirements")
 
-## Who this build is, in the sentence a player reads when a pack needs more than it has:
-## "This game needs dot-net API level 3 or newer; this [b]client[/b] has level 2."
-##
-## [code]"build"[/code] unless the host says otherwise. dot-cloud cannot tell a server from
-## a client -- both mount packs the same way -- and the person reading the refusal needs
-## to know which of the two to update.
+## Who this build is in the refusal a player reads ("this [b]client[/b] has level 2"); `"build"` by default.
+## dot-cloud cannot tell a server from a client, and the reader needs to know which to update.
 @export var host_role: String = "build"
 
 @export_group("Wiring")
 
-## Where to find a [DotScheduler] for hashing work.
-##
-## Defaults to creating a child. Point it at the host project's existing
-## scheduler to share one frame budget across every subsystem — otherwise two
-## schedulers each spend their own budget and together drop the frame.
+## Where to find a [DotScheduler] for hashing; defaults to a child.
+## Point it at the host's scheduler to share one frame budget.
 @export var scheduler_ref: DotNodeRef = null
 
 var store: DotCloudStore = null
@@ -128,10 +117,8 @@ var _registered_name: StringName = &""
 ## content_key -> DotCloudManifest, for everything currently mounted.
 var _acquired: Dictionary = {}
 
-## The session a plain [method ensure] or [method acquire] mount is tagged with in
-## [DotContentIndex]. `online` by default: a plain mount is the server's content, and the
-## shell sets `solo` for a solo launch. The Workshop never relies on this; it passes the tag
-## explicitly through [method ensure_for_session].
+## The session a plain [method ensure] or [method acquire] mount is tagged with in [DotContentIndex].
+## `online` by default; the shell sets `solo`. The Workshop passes the tag through [method ensure_for_session].
 var session_tag: StringName = DotContentIndex.SESSION_ONLINE
 
 ## content_key -> {session, source, uid_policy, allow_root} for a mount in progress that
@@ -140,12 +127,9 @@ var session_tag: StringName = DotContentIndex.SESSION_ONLINE
 var _mount_opts: Dictionary = {}
 
 
-## Publishes the client so the addons that look for it can find it.
-##
-## In [method Node._ready] rather than in [method start], because [method start] awaits —
-## the browser reports its storage quota asynchronously — and a consumer that resolved the
-## service between the two would get null from a client that was about to work. Nothing
-## found here has to be started: [method acquire] starts itself if it has not been.
+## Publishes the client so addons can find it.
+## In [method Node._ready], not [method start], because start awaits and a consumer resolving the service
+## in between would get null. [method acquire] starts itself if needed.
 func _ready() -> void:
 	if Engine.is_editor_hint() or not register_service:
 		return
@@ -158,10 +142,8 @@ func _ready() -> void:
 
 
 ## Opens the cache and prepares the sources. Must be awaited before [method acquire].
-##
-## Separate from [method Node._ready] because it awaits: the browser reports its
-## storage quota asynchronously, and a cache whose ceiling is not yet known would
-## either refuse valid downloads or accept ones it cannot store.
+## Not in _ready because it awaits the browser's storage quota; without the ceiling the cache
+## would refuse valid downloads or accept ones it cannot store.
 func start() -> DotResult:
 	if _started:
 		return DotResult.success(self)
@@ -296,10 +278,8 @@ func _build_sources() -> void:
 		sources.append(netchan)
 
 
-## Gives the netchan source its transport delegate.
-##
-## Called by dot-server once a session is established. Until then the netchan
-## source reports itself unsupported and is skipped.
+## Gives the netchan source its transport delegate; called by dot-server once a session exists.
+## Until then the source reports itself unsupported and is skipped.
 func set_netchan_delegate(delegate: Object) -> void:
 	for s in sources:
 		var nc := s as DotCloudSourceNetchan
@@ -312,11 +292,8 @@ func set_netchan_delegate(delegate: Object) -> void:
 			)
 
 
-## The whole flow for one content set: fetch, verify, download, mount.
-##
-## Returns the entry scene path when the manifest declares one, otherwise the
-## mount prefix. Idempotent — calling it for content already mounted returns
-## immediately.
+## The whole flow for one content set: fetch, verify, download, mount. Idempotent.
+## Returns the entry scene path when the manifest declares one, otherwise the mount prefix.
 func acquire(
 	manifest_url: String,
 	groups: PackedStringArray = PackedStringArray()
@@ -401,10 +378,8 @@ func acquire_manifest(
 		DotLog.debug(CHANNEL, "joining an acquisition already running", {"content": key})
 		return await _await_inflight(key)
 
-	# [b]Released on every path, including a failure, by wrapping rather than by
-	# remembering.[/b] There are four returns below and a leaked entry would make every
-	# later caller wait for an acquisition that is not running -- a deadlock that only
-	# appears after something else has already gone wrong.
+	# Released by wrapping, not by remembering: with four returns below, a leaked entry would make
+	# every later caller wait for an acquisition that is not running.
 	_inflight[key] = true
 
 	var outcome := await _acquire_inner(manifest, groups, key, chain)
@@ -440,10 +415,8 @@ func _acquire_inner(
 	if not needed.ok:
 		return _fail(needed.error)
 
-	# [b]Ask before downloading, not after.[/b] An old web shell once fetched about three
-	# minutes of a game and only then said it needed a newer addon. The requirements are
-	# one small file the manifest already lists, so fetch just that and refuse with
-	# nothing else on the wire.
+	# Ask before downloading: an old web shell fetched minutes of a game and then said it needed a
+	# newer addon. requires.json is one small file the manifest lists, so fetch only that first.
 	var preflight := await _preflight_requirements(manifest, key)
 	if not preflight.ok:
 		return _fail(preflight.error)
@@ -452,13 +425,9 @@ func _acquire_inner(
 	if not downloaded.ok:
 		return _fail(downloaded.error)
 
-	# [b]Before the mount, because after it the pack's scripts are one `load` away.[/b] A
-	# pack built against a newer addon than this build has does not fail with a sentence:
-	# its scripts fail to PARSE, mid-load, naming an identifier "not declared in the current
-	# scope". Its requirements are a file inside it, already downloaded and verified above
-	# like every other object, so they can be read from the store with nothing mounted --
-	# and a refusal here leaves nothing mounted to regret, which matters because a mounted
-	# pack can never be unmounted.
+	# Before the mount: a pack built against a newer addon fails its scripts mid-load with "not declared".
+	# Its requirements are already in the store, and a refusal here leaves nothing mounted, which
+	# matters because a mounted pack can never be unmounted.
 	var fits := check_requirements(manifest)
 	if not fits.ok:
 		return _fail(fits.error)
@@ -485,10 +454,9 @@ func _acquire_inner(
 	return _ready_result(manifest)
 
 
-## Acquires everything [param manifest] depends on, before its own download: a dependency already mounted
-## returns at once and one whose files are in the store downloads nothing, so a client that has a shared
-## store pays for it once however many packs name it. [param chain] is the keys above this call on its own
-## call stack, so concurrent acquisitions neither see each other's chain nor share the depth cap.
+## Acquires everything [param manifest] depends on, before its own download; a shared store pays once.
+## [param chain] is the keys above this call on its own stack, so concurrent acquisitions
+## neither see each other's chain nor share the depth cap.
 func _ensure_dependencies(manifest: DotCloudManifest, key: String, chain: PackedStringArray) -> DotResult:
 	if manifest.dependencies.is_empty():
 		return DotResult.success(true)
@@ -509,11 +477,8 @@ func dependency_prefix(content_id: StringName, version: String) -> String:
 
 
 ## Between download and mount: the stored files must not run more code than the manifest said.
-##
-## Only for a manifest that carries [code]provides[/code], which is where the publisher wrote
-## its `runs_code`; a pack with none predates the Workshop and is trusted as it always was.
-## Read from the store, not from a mount, because a mounted pack can never be unmounted and a
-## refusal after the fact would be a refusal of something already running.
+## Only for a manifest with [code]provides[/code]; older packs are trusted as before. Read from the
+## store because a refusal after mounting would refuse something already running.
 func _rescan_for_code(manifest: DotCloudManifest) -> DotResult:
 	if manifest.provides.is_empty() or bool(manifest.provides.get("runs_code", false)):
 		return DotResult.success(true)
@@ -614,13 +579,9 @@ func download_manifest(
 	return DotResult.success(manifest)
 
 
-## Stamps this client's side ([method DotCloudConfig.resolved_side]) on [param manifest], so
-## its [method DotCloudManifest.wanted_files] leaves out the other side's entries (API 8).
-##
-## On every way in -- acquire, download, plan -- rather than at parse, because a caller may
-## hand in a manifest it parsed itself, and because the side is this process's fact, not
-## the document's: a manifest shared between a server's client and a player's in one
-## process (a listen server, a suite) is re-stamped by whichever is about to use it.
+## Stamps this client's side ([method DotCloudConfig.resolved_side]) on [param manifest] (API 8).
+## On every way in, not at parse: the side is this process's fact, and a manifest shared by a
+## server's and a player's client in one process is re-stamped by whichever uses it.
 func _apply_side(manifest: DotCloudManifest) -> void:
 	if config != null:
 		manifest.fetch_side = config.resolved_side()
@@ -672,10 +633,8 @@ func _download(
 
 
 ## Whether this build has the addon API a pack's [code]requires.json[/code] asks for.
-##
-## Read out of the store, so the pack does not have to be mounted to be asked. A pack
-## with no such file needs nothing that can be checked -- every pack published before
-## the file existed -- and so does one whose file this acquisition did not fetch.
+## Read from the store so the pack need not be mounted. No such file (older packs, or one this
+## acquisition did not fetch) means nothing to check.
 func check_requirements(manifest: DotCloudManifest) -> DotResult:
 	for file in manifest.files:
 		if file.path != DotAddonApi.REQUIREMENTS_FILE:
@@ -752,10 +711,9 @@ func ensure(
 
 
 ## Mounts what a repository's `content.lock.json` pins, the in-game twin of dot-bootstrap's fetch_lock.sh.
-##
-## [param opts] are [method DotCloudLock.load_file]'s (`from`, `cdn`, `cfg`, `only`, `skip`...). Each wanted `kind: "pack"` entry is
-## ensured from the first base that serves a manifest matching its `manifest_sha256`; `kind: "store"` entries are files for
-## fetch_lock to write to disk and are listed as skipped. A failed `optional` entry is logged, any other fails the call.
+## [param opts] are [method DotCloudLock.load_file]'s. Each `kind: "pack"` entry is ensured from the first
+## base serving a manifest matching its `manifest_sha256`; `kind: "store"` entries are listed as skipped.
+## A failed `optional` entry is logged, any other fails the call.
 ## Value: {mounted: [id@version], skipped: [{id, version, why}], failed: [id@version]}.
 func ensure_locked(lock_path: String, opts: Dictionary = {}) -> DotResult:
 	var loaded := DotCloudLock.load_file(lock_path, opts)
@@ -824,12 +782,9 @@ func ensure_for_session(
 	return result
 
 
-## The verified manifest for [param content_id] at [param version], fetched the way
-## [method ensure] fetches one, and nothing downloaded or mounted.
-##
-## Every candidate is asked in order -- [member local_search_dirs] first, then
-## [member http_base_urls] -- and the first one whose manifest verifies AND agrees about
-## its own id and version wins. Empty [param version] is `0.0.0`, as in [method ensure].
+## The verified manifest for [param content_id] at [param version], fetched like [method ensure], nothing mounted.
+## Candidates are asked in order ([member local_search_dirs], then [member http_base_urls]); the first
+## that verifies and agrees about its own id and version wins. Empty version is `0.0.0`.
 func resolve_manifest(
 	content_id: StringName,
 	version: String = "",
@@ -909,10 +864,8 @@ func resolve_manifest(
 	)
 
 
-## Adds a directory to the local source, creating one if there was none.
-##
-## Idempotent, and it also updates [member local_search_dirs] so [method describe] and a
-## later rebuild both agree with what is actually being searched.
+## Adds a directory to the local source, creating one if there was none. Idempotent.
+## Also updates [member local_search_dirs] so [method describe] matches what is searched.
 func _adopt_local_dir(dir: String) -> void:
 	if dir == "" or local_search_dirs.has(dir):
 		return
@@ -935,18 +888,14 @@ func _adopt_local_dir(dir: String) -> void:
 
 
 ## Whether content addressed by id and version is mounted and ready to load from.
-##
-## The id-and-version half of [method is_ready], for the same reason [method ensure]
-## exists.
+## The id-and-version half of [method is_ready].
 func is_mounted(content_id: StringName, version: String = "") -> bool:
 	return is_ready(content_key_for(content_id, version))
 
 
 ## The [code]id@version[/code] key this content is known by.
-##
-## Duplicated from [method DotCloudManifest.key] deliberately: a caller asking whether
-## content is mounted does not have the manifest — getting it is the expensive thing it
-## is trying to avoid.
+## Duplicated from [method DotCloudManifest.key] on purpose: a caller asking whether content is
+## mounted has no manifest, and fetching one is what it is avoiding.
 static func content_key_for(content_id: StringName, version: String = "") -> String:
 	return "%s@%s" % [String(content_id), version if version != "" else "0.0.0"]
 
@@ -1040,10 +989,8 @@ func verify_manifest(manifest: DotCloudManifest) -> DotResult:
 			+ "signed bytes to check"
 		)
 
-	# [b]verify_for, not verify_any: a valid signature is half the question.[/b] The other
-	# half is whether the key that produced it is trusted for THIS content id. With one
-	# key in the set the two are the same question; with two they are not, and the gap is
-	# a second publisher signing a manifest that claims to be somebody else's game.
+	# verify_for, not verify_any: a valid signature is half the question; the key must also be trusted
+	# for THIS content id, or a second publisher could sign a manifest claiming to be somebody else's game.
 	return DotCloudSignature.verify_for(
 		manifest.raw_bytes,
 		manifest.signature,
@@ -1053,10 +1000,8 @@ func verify_manifest(manifest: DotCloudManifest) -> DotResult:
 	)
 
 
-## What acquiring this manifest would cost, without doing it.
-##
-## For a "this map needs 240 MB, continue?" prompt — worth showing on mobile and
-## on metered connections, and cheap because it is only cache lookups.
+## What acquiring this manifest would cost, without doing it (cache lookups only).
+## For a "this map needs 240 MB, continue?" prompt on mobile and metered connections.
 func plan_for(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray()
@@ -1093,12 +1038,9 @@ func plan_for(
 	}
 
 
-## Releases content.
-##
-## [b]Free everything referencing it first.[/b] Nodes holding resources from the
-## pack keep them in the resource cache, and Godot cannot unmount a pack — see
-## [DotCloudMounter]. This makes the content unreachable and its cache objects
-## evictable; it does not and cannot reclaim the file table.
+## Releases content. [b]Free everything referencing it first[/b]: nodes holding its resources keep them
+## cached and Godot cannot unmount a pack (see [DotCloudMounter]). This makes the content
+## unreachable and its objects evictable, not the file table reclaimed.
 func release(content_key: String) -> DotResult:
 	if not mounter.is_mounted(content_key):
 		return DotResult.fail(
@@ -1119,10 +1061,9 @@ func cancel() -> void:
 		downloader.cancel()
 
 
-## Fetches and verifies the site's signed mirror list ([param url], or
-## [member DotCloudConfig.mirrors_url]) and hands it to the HTTP source, ranked by latency when
-## [param rank] is set. Succeeds doing nothing when there is no URL or mirrors are opted out.
-## A failure logs WARN and leaves delivery origin-only; it never fails a download.
+## Fetches and verifies the site's signed mirror list ([param url] or [member DotCloudConfig.mirrors_url])
+## and hands it to the HTTP source, ranked by latency when [param rank] is set.
+## Does nothing with no URL or when opted out; a failure logs WARN and leaves delivery origin-only.
 func load_mirror_list(url: String = "", rank: bool = true) -> DotResult:
 	if not _started:
 		var started := await start()
@@ -1187,12 +1128,9 @@ func mirror_alternatives(url: String) -> PackedStringArray:
 
 
 ## Downloads the packs a server will want into the store before connecting, mounting nothing.
-##
-## [param doc] is `{format: 1, kind: "dot_cloud_prefetch", server_id, app_id, packs: [{id,
-## version, bytes}], avatar_library, mirrors_url}`. Each pack's manifest is resolved and verified
-## like [method ensure]; a pack whose missing bytes exceed what is left of
-## [member DotCloudConfig.prefetch_max_bytes] is skipped, as is every pack past
-## [member DotCloudConfig.prefetch_max_packs]. The objects are ordinary unreferenced LRU entries.
+## [param doc] is `{format: 1, kind: "dot_cloud_prefetch", server_id, app_id, packs: [{id, version, bytes}],
+## avatar_library, mirrors_url}`. Manifests resolve like [method ensure]; a pack past
+## [member DotCloudConfig.prefetch_max_bytes] or [member DotCloudConfig.prefetch_max_packs] is skipped.
 ## Returns `{packs_fetched, packs_skipped, bytes, skipped: [{id, version, why}], avatar_library}`.
 func prefetch(doc: Dictionary) -> DotResult:
 	return await _Prefetch.run(self, doc)
@@ -1232,11 +1170,9 @@ signal _prewarm_done
 const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 
 
-## Compiles the scripts of the mounted packs [param keys], and the addon classes they name,
-## a slice per frame, so the load() of their scene that follows is a cache hit. Without
-## threads that load() compiles the whole closure in one frame. Keep the returned loader
-## until that load() is done: it holds what it loaded. Skipped where there are threads.
-## [param on_progress] is called with (done, total) after each resource, for a loading bar.
+## Compiles the scripts of the mounted packs [param keys], and the addon classes they name, a slice
+## per frame, so the scene load() that follows is a cache hit. Skipped where there are threads.
+## Keep the returned loader until that load() is done. [param on_progress] gets (done, total).
 func _prewarm_classes(manifest: DotCloudManifest) -> void:
 	await _Warm.prewarm_classes(self, manifest)
 

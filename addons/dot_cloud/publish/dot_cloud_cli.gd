@@ -64,8 +64,6 @@ func _initialize() -> void:
 	quit(code)
 
 
-# --- Commands --------------------------------------------------------------
-
 func _publish(opts: Dictionary) -> int:
 	var missing := _require(opts, ["source", "out", "id"])
 	if missing != "":
@@ -499,8 +497,6 @@ func _inspect(opts: Dictionary) -> int:
 
 	return EXIT_OK
 
-
-# --- Argument handling ----------------------------------------------------
 
 ## Arguments after [code]--[/code].
 ##

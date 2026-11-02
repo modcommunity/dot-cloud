@@ -3,11 +3,7 @@ class_name DotCloudDownloader
 extends Node
 
 ## Fetches everything a manifest needs, in parallel, from whichever sources work.
-##
-## Owns the concurrency, the retry-and-failover policy, the bandwidth throttle and
-## the aggregate progress. Sources own the "how" of one file; this owns the "which
-## files, how many at once, and what to do when it goes wrong".
-##
+## Owns concurrency, retry-and-failover, the bandwidth throttle and aggregate progress; sources own the how of one file.
 ## [codeblock]
 ## var dl := DotCloudDownloader.new()
 ## add_child(dl)
@@ -15,24 +11,16 @@ extends Node
 ## dl.store = store
 ## dl.scheduler = scheduler
 ## dl.sources = [http_source, netchan_source]
-##
 ## dl.progress_changed.connect(func(p): bar.value = p.fraction * 100.0)
 ## var res := await dl.sync(manifest)
 ## [/codeblock]
-##
-## [b]On deduplication.[/b] Work is queued by unique content hash, not by manifest
-## entry. A manifest listing the same file at four paths downloads it once, and the
-## progress total reflects that from the start rather than jumping when the
-## duplicates are discovered.
+## Work is queued by unique content hash, so a file listed at four paths downloads once and the
+## progress total is right from the start.
 
 const CHANNEL := "cloud.dl"
 
-## Aggregate progress. Emitted at most every
-## [member DotCloudConfig.progress_interval_sec], because a 6-way parallel
-## download produces thousands of chunk events a second and no UI can use them.
-##
-## The payload is [code]{fraction, done_files, total_files, done_bytes,
-## total_bytes, bytes_per_sec, eta_sec, active}[/code].
+## Aggregate progress, emitted at most every [member DotCloudConfig.progress_interval_sec] (chunk events arrive thousands a second).
+## The payload is [code]{fraction, done_files, total_files, done_bytes, total_bytes, bytes_per_sec, eta_sec, active}[/code].
 signal progress_changed(progress: Dictionary)
 
 ## One file finished, successfully or not.
@@ -45,11 +33,8 @@ signal sync_finished(result: DotResult)
 signal bundle_unpacked(manifest: DotCloudManifest)
 
 ## Internal: one pool worker has drained the queue and returned.
-##
-## Exists because GDScript offers no way to await a coroutine you did not await
-## at the call site. Always paired with [member _workers_finished] — see the
-## fan-out comment in [method sync] for why the count and not the signal is
-## authoritative.
+## GDScript cannot await a coroutine you did not await at the call site. Paired with
+## [member _workers_finished]; see the fan-out comment in [method sync] for why the count is authoritative.
 signal _worker_done()
 
 var config: DotCloudConfig
@@ -65,12 +50,8 @@ var _http: DotHttp = null
 var _active: int = 0
 
 ## What is in flight right now, newest first, as player-facing names.
-##
-## [b]A count answers "how busy", which nobody watching a download wants to know.[/b]
-## The number that matters to a person staring at a progress bar is WHICH file --
-## a 200 MB map and a 3 KB manifest produce the same "4 active" and very different
-## amounts of patience. Kept as an ordered list rather than a set so the newest start
-## is what a one-line display shows.
+## Which file matters to someone watching a bar (a 200 MB map and a 3 KB manifest both read "4 active").
+## An ordered list so a one-line display shows the newest start.
 var _active_files: PackedStringArray = PackedStringArray()
 var _cancelled: bool = false
 var _running: bool = false
@@ -86,39 +67,22 @@ var _done_files: int = 0
 var _failed_files: int = 0
 
 ## Why the first required file failed, kept for the summary [DotResult].
-##
-## The summary used to name a file and nothing else — "2 missing, first:
-## small.txt" — so everything [method _fetch_with_failover] had worked out about
-## *why* stopped at the log line and never reached the caller of
-## [method DotCloudClient.acquire_manifest]. "Which file" is rarely the question;
-## "every source is in cooldown" and "the host 404s" want opposite responses.
+## What [method _fetch_with_failover] learned about why must reach the caller of
+## [method DotCloudClient.acquire_manifest]: "every source is in cooldown" and "the host 404s" want opposite responses.
 var _first_required_failure: DotResult = null
 
-## One entry per required file this sync could not produce, most recent sync
-## only. `[{ "path": String, "code": String, "message": String, "detail": String }]`.
-##
-## The summary [DotResult] can carry a code and a string and nothing else —
-## [method DotResult.fail] has no payload on the failure side, and adding one is
-## a dot-core change. So the *shape* of the failure lives here instead, on the
-## node the caller already holds via [member DotCloudClient.downloader].
-##
-## It exists because the detail string was the only way to tell "every source is
-## in cooldown, come back in a minute" from "no content URL is configured, your
-## deployment is wrong", and branching on a substring of a human-readable
-## sentence is exactly what [DotError] codes exist to avoid. Read
-## [method failure_codes] for the set, or walk this for the per-file breakdown.
-##
-## Empty after a successful sync, and after a cancelled one — a cancel is not a
-## statement about any file.
+## One entry per required file this sync could not produce, latest sync only.
+## `[{ "path": String, "code": String, "message": String, "detail": String }]`.
+## A failed [DotResult] carries only a code and a string (a payload would be a dot-core change), so the
+## per-file shape lives here, on [member DotCloudClient.downloader]; callers branch on codes, not message text.
+## See [method failure_codes]. Empty after a success or a cancel (a cancel says nothing about any file).
 var last_failure_causes: Array[Dictionary] = []
 
 var _started_ms: int = 0
 var _last_emit_ms: int = 0
 
 ## Rolling window of (ticks_ms, bytes) samples for the rate estimate.
-##
-## An average over the whole download is useless for an ETA — it hides that the
-## connection died two minutes ago. A short window tracks reality.
+## A whole-download average hides that the connection died two minutes ago.
 var _rate_samples: Array = []
 
 ## Bytes charged against the throttle in the current second.
@@ -147,16 +111,10 @@ func _ensure_http() -> void:
 	add_child(_http)
 
 
-# --- Syncing ---------------------------------------------------------------
-
 ## Downloads everything in [param manifest] that is not already cached.
-##
-## [param groups] selects optional content groups; empty fetches only what is
-## ungrouped (i.e. required).
-##
-## Returns [code]{fetched, skipped, failed, bytes}[/code]. Succeeds when every
-## [member DotCloudFile.required] file is present — optional failures are counted
-## and reported, not fatal.
+## [param groups] selects optional content groups; empty fetches only ungrouped (required) files.
+## Returns [code]{fetched, skipped, failed, bytes}[/code]. Succeeds when every [member DotCloudFile.required]
+## file is present; optional failures are counted, not fatal.
 func sync(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray()
@@ -283,14 +241,10 @@ func sync(
 			DotError.CODE_CANCELLED, "The download was cancelled."
 		)
 	elif not missing_required.is_empty():
-		# The cause goes in the detail rather than replacing the message, and the
-		# code stays CODE_NETWORK: callers branch on codes, and a first failure
-		# that happened to be CODE_STATE or CODE_TIMEOUT would otherwise change
-		# what this call returns depending on which file lost the race.
-		# The per-file breakdown, for a caller that wants to act on the kind of
-		# failure rather than print it. `results` is keyed by hash, and a file
-		# with no entry at all never reached a worker — record that as such
-		# rather than dropping it, or the causes and the count disagree.
+		# The cause goes in the detail and the code stays CODE_NETWORK, so the result does not change with
+		# which file lost the race.
+		# The per-file breakdown, for callers that act on the kind of failure. A file with no entry in
+		# `results` never reached a worker; record that, or the causes and the count disagree.
 		for f in wanted:
 			if not f.required or store.has(f.sha256):
 				continue
@@ -355,9 +309,9 @@ func sync(
 
 
 ## Starts a worker pool over [param files] (largest first) and returns how many workers it started.
-## A worker pool, not a batch barrier: one 400 MB file would hold up five idle slots. GDScript has no
-## task handle, so each worker is a bare call that runs to its first `await`; completions are counted in
-## a member because a synchronous source never suspends and its signals fire before anything awaits.
+## A pool, not a batch barrier: one 400 MB file would hold up five idle slots. GDScript has no task
+## handle, so each worker is a bare call running to its first `await`; completions are counted in a
+## member because a synchronous source never suspends and its signals fire before anything awaits.
 func _start_pool(files: Array[DotCloudFile], results: Dictionary, manifest: DotCloudManifest, slots: int) -> int:
 	# Largest first. Long tasks started last are what makes a parallel download
 	# finish long after it looks nearly done.
@@ -411,10 +365,7 @@ func _run_bundle(manifest: DotCloudManifest, wanted: Dictionary) -> int:
 
 
 ## One pool worker: takes the next queued file until the queue is empty.
-##
-## Every return path must emit [signal _worker_done] — [method sync] counts them
-## to know when the pool has drained, and a worker that returns silently leaves
-## it awaiting forever.
+## Every return path must emit [signal _worker_done]; [method sync] counts them, and a silent return hangs it.
 func _worker(
 	queue: Array[DotCloudFile],
 	results: Dictionary,
@@ -439,10 +390,8 @@ func _worker(
 
 		_active += 1
 		_active_files.append(file.display_name())
-		# Emitted on the START of a file as well as on its bytes: a large file that has
-		# only just begun has moved no bytes yet, and a display driven by byte progress
-		# alone shows the PREVIOUS file's name for as long as the new one takes to
-		# produce its first chunk.
+		# Emitted on a file's start as well as its bytes, or a byte-driven display shows the previous
+		# file's name until the new one produces its first chunk.
 		_emit_progress(true)
 
 		var res := await _fetch_with_failover(file, manifest)
@@ -488,10 +437,8 @@ func _fetch_with_failover(
 	var skipped: Array[String] = []
 	var ordered := _ordered_sources(manifest, skipped)
 	if ordered.is_empty():
-		# Naming each source and its reason, rather than the old blanket
-		# "unsupported or in cooldown". Those are opposite problems — one is a
-		# deployment mistake, the other resolves itself in `cooldown_sec` — and a
-		# player-facing message that cannot tell them apart is a support ticket.
+		# Name each source and its reason: unsupported-or-cooldown hides opposite problems (a deployment
+		# mistake vs. one that resolves in `cooldown_sec`).
 		return DotResult.fail(
 			DotError.CODE_STATE,
 			"No content source is available.",
@@ -531,10 +478,8 @@ func _fetch_with_failover(
 			DotError.CODE_NETWORK, "No source could provide this content."
 		)
 
-	# A source that was skipped is invisible in `last`, which only carries the
-	# complaint of whichever source was tried last. With one source in cooldown
-	# and one that simply has nowhere to fetch from, that produced a diagnosis
-	# describing neither.
+	# A skipped source is invisible in `last`, which carries only the last-tried source's complaint,
+	# so with one in cooldown and one with nowhere to fetch the diagnosis described neither.
 	if not skipped.is_empty():
 		return last.wrap(
 			"Downloading '%s' failed; skipped %s." % [file.path, "; ".join(skipped)]
@@ -544,19 +489,10 @@ func _fetch_with_failover(
 
 
 ## Sources worth trying for this manifest, best first.
-##
-## Excludes three different things, and appends a sentence to [param skipped]
-## for each so the caller can say which:
-##
-## - unsupported on this platform, or missing a collaborator;
-## - in circuit-breaker cooldown after repeated failures;
-## - healthy, but with no way to reach [param manifest]'s content.
-##
-## The third is why this takes a manifest at all. [DotCloudClient] always builds
-## an HTTP source, so a netchan-only deployment carried one with no base URLs
-## permanently ahead of the source that could actually serve it — spending an
-## attempt per file on a guaranteed failure, and speaking for the whole download
-## once netchan backed off. See [method DotCloudSource.can_serve].
+## Excludes unsupported or collaborator-less sources, those in circuit-breaker cooldown, and healthy ones
+## with no way to reach [param manifest]'s content, appending a sentence to [param skipped] for each.
+## The third is why this takes a manifest: an always-built HTTP source with no base URLs would sit ahead of
+## the netchan source that can serve, wasting an attempt per file. See [method DotCloudSource.can_serve].
 func _ordered_sources(
 	manifest: DotCloudManifest, skipped: Array[String]
 ) -> Array[DotCloudSource]:
@@ -616,15 +552,9 @@ func is_running() -> bool:
 	return _running
 
 
-# --- Throttling ------------------------------------------------------------
-
 ## Waits long enough to keep under [member DotCloudConfig.throttle_bytes_per_sec].
-##
-## Per-file rather than per-chunk, because [method DotHttp.download_to_file] does
-## not expose chunk callbacks. Coarse: a single large file overshoots its second
-## and the next file waits it off. Good enough for its purpose, which is leaving
-## a playable connection while content downloads in the background — not precise
-## shaping.
+## Per file, since [method DotHttp.download_to_file] has no chunk callbacks, so coarse: a large file
+## overshoots its second and the next waits it off. Enough to leave a playable connection, not precise shaping.
 func _apply_throttle(bytes: int) -> void:
 	if config.throttle_bytes_per_sec <= 0 or bytes <= 0:
 		return
@@ -648,8 +578,6 @@ func _apply_throttle(bytes: int) -> void:
 
 	await get_tree().create_timer(wait).timeout
 
-
-# --- Progress -------------------------------------------------------------
 
 func _reset_progress() -> void:
 	_total_bytes = 0
@@ -771,10 +699,8 @@ static func _format_duration(seconds: float) -> String:
 	return "%dh %dm" % [int(seconds / 3600.0), int(fmod(seconds, 3600.0) / 60.0)]
 
 
-## The distinct [DotError] codes across [member last_failure_causes], sorted.
-##
-## Sorted so the result is stable: it goes into log lines and demo assertions,
-## and dictionary iteration order is not something to hang a comparison on.
+## The distinct [DotError] codes across [member last_failure_causes], sorted so log lines and demo
+## assertions are stable.
 func failure_codes() -> PackedStringArray:
 	var seen := {}
 	for c in last_failure_causes:

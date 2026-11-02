@@ -2,25 +2,12 @@ class_name DotCloudStore
 extends RefCounted
 
 ## The content-addressed cache: objects on disk, keyed by SHA-256.
-##
-## [b]Content addressing is what makes hot-swapping content affordable.[/b] Files
-## are stored under their hash, not their path, so:
-##
-## - two games sharing a 40 MB texture pack download it once;
-## - re-publishing a game re-downloads only what actually changed;
-## - a partially-downloaded file cannot be confused with a different file that
-##   happens to live at the same path, which is what makes resume safe;
-## - verification is a property of the object, checked once when it is written.
-##
-## Objects live in [code]<cache>/objects/<aa>/<full-hash>[/code] — sharded by the
-## first two hex characters, because a flat directory of 50,000 entries is slow to
-## enumerate on every filesystem in the target set. Partial downloads live
-## somewhere else entirely, so nothing in [code]objects/[/code] is ever
-## unverified.
-##
-## An index at [code]<cache>/index.json[/code] tracks size, last use and which
-## content sets reference each object, so eviction can be least-recently-used and
-## can leave referenced content alone.
+## Content addressing makes hot-swapping affordable: games sharing a texture pack download it once, a
+## republish fetches only what changed, a partial cannot be confused with another file at the same path
+## (which makes resume safe), and verification is checked once when an object is written.
+## Objects live in [code]<cache>/objects/<aa>/<full-hash>[/code], sharded by two hex characters because a
+## flat directory of 50,000 entries is slow everywhere. Partials live elsewhere, so nothing in `objects/` is unverified.
+## [code]<cache>/index.json[/code] tracks size, last use and referencing content sets, for LRU eviction.
 
 const CHANNEL := "cloud.store"
 
@@ -44,12 +31,8 @@ func _init(p_config: DotCloudConfig) -> void:
 	config = p_config
 
 
-# --- Lifecycle -------------------------------------------------------------
-
 ## Creates the cache directories, loads the index, and resolves the size limit.
-##
-## Must be awaited: on web the limit comes from
-## [method DotWeb.estimate_storage], which is a promise.
+## Must be awaited: on web the limit comes from the promise [method DotWeb.estimate_storage].
 func open() -> DotResult:
 	for dir in [config.cache_dir, config.objects_dir(), config.partials_dir()]:
 		var made := DotPaths.ensure_dir(dir)
@@ -76,11 +59,8 @@ func open() -> DotResult:
 
 
 ## Works out how much space we may use.
-##
-## On web the browser's quota is the real constraint and it is not knowable up
-## front, so an unavailable estimate falls back to the configured ceiling rather
-## than assuming unlimited — assuming unlimited means discovering the truth as a
-## failed write halfway through a download.
+## On web an unavailable estimate falls back to the configured ceiling, not unlimited, which would
+## surface as a failed write halfway through a download.
 func _resolve_limit() -> void:
 	if not DotPlatform.is_web():
 		_limit_bytes = config.effective_cache_bytes()
@@ -120,19 +100,14 @@ func close() -> void:
 	flush_index()
 
 
-# --- Object access ---------------------------------------------------------
-
 ## Absolute path of an object, whether or not it exists.
 func path_for(sha256: String) -> String:
 	var h := sha256.to_lower()
 	return config.objects_dir().path_join("%s/%s" % [h.substr(0, 2), h])
 
 
-## Whether an object is present and complete.
-##
-## A cheap existence check, valid precisely because nothing unverified is ever
-## written into the object directory. Also refreshes the last-used stamp, so
-## reading content keeps it from being evicted.
+## Whether an object is present and complete; also refreshes its last-used stamp.
+## A cheap check, valid because nothing unverified is written into the object directory.
 func has(sha256: String) -> bool:
 	var path := path_for(sha256)
 	if not FileAccess.file_exists(path):
@@ -169,13 +144,8 @@ func read(sha256: String) -> DotResult:
 	return DotPaths.read_bytes(path_for(sha256))
 
 
-# --- Partials --------------------------------------------------------------
-
 ## Path of the in-progress download for an object.
-##
-## Keyed by content hash, which is what makes resume safe: two different files
-## can never share a partial, so appending to whatever is already there cannot
-## splice unrelated bytes together.
+## Keyed by content hash, so appending to an existing partial cannot splice unrelated bytes.
 func partial_path(sha256: String) -> String:
 	return config.partials_dir().path_join("%s.part" % sha256.to_lower())
 
@@ -196,15 +166,9 @@ func discard_partial(sha256: String) -> void:
 
 
 ## Promotes a verified partial into the object store.
-##
-## [b]Verification happens here and nowhere else.[/b] The partial is hashed and
-## must match the name it was downloaded under; only then is it moved. That single
-## chokepoint is what lets every other read in this class skip verification, and
-## it is why a mismatched download is discarded rather than kept and retried
-## against the same corrupt bytes.
-##
-## [param scheduler] slices the hashing. Pass null to hash synchronously, which is
-## fine for small files and wrong for large ones on the main thread.
+## Verification happens here and nowhere else: the partial is hashed against its name before the move,
+## which lets every other read skip verification and discards a mismatch instead of retrying corrupt bytes.
+## [param scheduler] slices the hashing; null hashes synchronously (fine for small files only).
 func commit_partial(
 	sha256: String,
 	scheduler: DotScheduler = null
@@ -258,10 +222,8 @@ func commit_partial(
 			DotError.from_engine(err, "moving '%s' into the cache" % src)
 		)
 
-	# Sync per object rather than once at the end of a sync: on web an unflushed
-	# write is lost when the tab closes, and a player who closes the tab
-	# mid-download should keep the objects that already finished. Re-downloading
-	# is precisely what the cache exists to avoid.
+	# Sync per object, not once per sync: on web an unflushed write is lost with the tab, and a player
+	# closing it mid-download should keep the finished objects.
 	DotWeb.sync_filesystem()
 
 	_record(sha256, size)
@@ -276,9 +238,7 @@ func commit_partial(
 
 
 ## Writes bytes directly as an object, verifying them first.
-##
-## For content that arrived somewhere other than an HTTP download — the in-band
-## netchan source, or a local import.
+## For content that arrived by another route: the in-band netchan source, or a local import.
 func put_bytes(bytes: PackedByteArray, expected_sha256: String) -> DotResult:
 	var actual := DotHash.sha256_bytes(bytes)
 	if not DotHash.constant_time_equal_hex(actual, expected_sha256):
@@ -299,25 +259,16 @@ func put_bytes(bytes: PackedByteArray, expected_sha256: String) -> DotResult:
 	if not written.ok:
 		return written
 
-	# The object arrived by another route entirely, so whatever an interrupted
-	# HTTP download left behind is now unreachable weight: nothing resumes a
-	# partial for content that is already committed, and only sweep_partials
-	# would eventually notice — a day later, having held the bytes the whole
-	# time. This is the normal shape of a netchan fallback after HTTP failed
-	# part-way, which is exactly when the disk is under pressure.
+	# Drop any partial an interrupted HTTP download left: nothing resumes a partial for committed content,
+	# and a netchan fallback after a part-way HTTP failure is exactly when the disk is under pressure.
 	discard_partial(expected_sha256)
 
 	_record(expected_sha256, bytes.size())
 	return DotResult.success(dest)
 
 
-# --- References ------------------------------------------------------------
-
-## Records that [param content_key] needs these objects.
-##
-## Referenced objects survive eviction. Without this, playing game B could evict
-## game A's content while a player is still connected to a server that will
-## switch back to it — turning a map change into a re-download.
+## Records that [param content_key] needs these objects, so they survive eviction.
+## Otherwise playing game B could evict game A's content and turn a map change into a re-download.
 func add_refs(content_key: String, hashes: PackedStringArray) -> void:
 	for h in hashes:
 		if not _index.has(h):
@@ -328,11 +279,8 @@ func add_refs(content_key: String, hashes: PackedStringArray) -> void:
 	_index_dirty = true
 
 
-## Drops a content set's claim on its objects.
-##
-## The objects are not deleted — they become eviction candidates. That is the
-## point: unmounting a game should be instant and free, and if the player
-## reconnects before the cache fills, the content is still there.
+## Drops a content set's claim on its objects; they become eviction candidates, not deleted,
+## so unmounting is free and a quick reconnect finds the content still there.
 func release_refs(content_key: String) -> void:
 	for h in _index:
 		var refs: Array = _index[h]["refs"]
@@ -348,8 +296,6 @@ func ref_count(sha256: String) -> int:
 	return (_index[sha256]["refs"] as Array).size()
 
 
-# --- Eviction --------------------------------------------------------------
-
 ## Whether the cache is over its ceiling.
 func is_over_limit() -> bool:
 	return _limit_bytes > 0 and _total_bytes > _limit_bytes
@@ -362,13 +308,9 @@ func shortfall(incoming: int = 0) -> int:
 	return maxi(0, (_total_bytes + incoming) - _limit_bytes)
 
 
-## Evicts unreferenced objects, least recently used first.
-##
-## Returns the bytes freed. Referenced objects are never evicted, so a cache
-## entirely full of referenced content cannot shrink — [method prune] reports the
-## shortfall it could not meet and the caller decides whether to proceed anyway or
-## refuse the download. Deleting content a running game has mounted would be
-## worse than either.
+## Evicts unreferenced objects, least recently used first; returns the bytes freed.
+## Referenced objects are never evicted, so a cache full of them cannot shrink: [method prune] reports
+## the shortfall and the caller decides whether to proceed or refuse the download.
 func prune(need_bytes: int = 0) -> DotResult:
 	var target := shortfall(need_bytes)
 	if target <= 0:
@@ -427,19 +369,14 @@ func prune(need_bytes: int = 0) -> DotResult:
 	return DotResult.success(freed)
 
 
-## Deletes everything, including referenced objects.
-##
-## For a "clear downloaded content" button. Unsafe while content is mounted:
-## Godot has already read the pack's file table, so mounted paths keep resolving
-## to files that no longer exist, and the failure looks like corruption. Restart
-## after calling it.
+## Deletes everything, including referenced objects, for a "clear downloaded content" button.
+## Unsafe while content is mounted: mounted paths keep resolving to deleted files and look like corruption.
+## Restart after calling it.
 func clear_all() -> DotResult:
 	var removed := DotPaths.remove_tree(config.objects_dir())
 	DotPaths.remove_tree(config.partials_dir())
-	# [b]And the packs.[/b] [DotCloudMounter] assembles each mounted set of objects into
-	# a `.pck` under `<cache_dir>/packs/`, a second full copy of everything a player has
-	# played, and "everything" left it: a "clear downloaded content" freed the objects
-	# and kept the larger half. Rebuilt from the objects on the next mount.
+	# And the packs: [DotCloudMounter] keeps a `.pck` per mounted set under `<cache_dir>/packs/`, a second
+	# copy of everything played; they are rebuilt from the objects on the next mount.
 	DotPaths.remove_tree(config.cache_dir.path_join("packs"))
 
 	_index.clear()
@@ -450,29 +387,17 @@ func clear_all() -> DotResult:
 	DotPaths.ensure_dir(config.objects_dir())
 	DotPaths.ensure_dir(config.partials_dir())
 
-	# Same reason every commit flushes: on web the filesystem is an IndexedDB
-	# mirror, and a "clear downloaded content" that is never synced comes back
-	# on the next load. Every other mutating path in this class syncs; this one
-	# is the one where the user explicitly asked.
+	# Synced like every commit: on web the filesystem is an IndexedDB mirror and an unsynced clear comes back on reload.
 	DotWeb.sync_filesystem()
 
 	DotLog.info(CHANNEL, "cache cleared")
 	return removed
 
 
-## Removes partials that can never be resumed into anything useful.
-##
-## Housekeeping for downloads interrupted by a crash. Cheap, and worth doing at
-## startup: an abandoned partial is dead weight the size of the file it was.
-##
-## Two things make one dead. Age is the obvious one. The other is the object
-## already being in the store — a partial is only ever resumed for content that
-## is [i]missing[/i], so once the object is committed nothing will ever look at
-## its partial again. That happens whenever a transfer falls back to a different
-## source: HTTP gets half the file, fails, and the in-band source delivers the
-## whole thing through [method put_bytes]. Keeping those for [param max_age_sec]
-## holds the largest files in the cache twice over, and disk pressure is what
-## caused the failover in the first place.
+## Removes partials that can never be resumed into anything useful; cheap, worth doing at startup.
+## A partial is dead when old, or when its object is already in the store (a transfer that fell back
+## to another source, e.g. HTTP half then netchan via [method put_bytes]). Keeping those for
+## [param max_age_sec] would hold the largest files twice, under the disk pressure that caused the failover.
 func sweep_partials(max_age_sec: float = 86400.0) -> int:
 	var now := int(Time.get_unix_time_from_system())
 	var removed := 0
@@ -498,14 +423,9 @@ func sweep_partials(max_age_sec: float = 86400.0) -> int:
 	return removed
 
 
-# --- Verification ----------------------------------------------------------
-
 ## Re-hashes every cached object and drops any that no longer match.
-##
-## Slow — it reads the whole cache — so it is opt-in via
-## [member DotCloudConfig.verify_cache_on_start]. What it catches is storage that
-## changed underneath us: a partially-evicted IndexedDB, a trimmed mobile sandbox,
-## a failing disk.
+## Slow, so opt-in via [member DotCloudConfig.verify_cache_on_start]; catches storage that changed
+## underneath us (evicted IndexedDB, trimmed mobile sandbox, failing disk).
 func verify_all(scheduler: DotScheduler) -> DotResult:
 	var checked := 0
 	var dropped := 0
@@ -538,8 +458,6 @@ func verify_all(scheduler: DotScheduler) -> DotResult:
 
 	return DotResult.success({"checked": checked, "dropped": dropped})
 
-
-# --- Index -----------------------------------------------------------------
 
 func _record(sha256: String, size: int) -> void:
 	if _index.has(sha256):
@@ -614,26 +532,11 @@ func _load_index() -> void:
 
 
 ## Makes the loaded index agree with what is actually in [code]objects/[/code].
-##
-## [b]The index is always behind the directory, by design.[/b] Every committed
-## object is written and flushed to storage immediately — a tab closed
-## mid-download must keep what already finished — but the index is only written
-## at the end of a sync, at mount and at prune. So any run that ended without
-## [method close] leaves a file on disk that a valid, parseable index knows
-## nothing about, and the parse succeeding is precisely why [method _rebuild_index]
-## never gets a chance to notice.
-##
-## An untracked object is worse than a missing one. [method has] finds it, so it
-## is never re-downloaded and never re-recorded; [method touch] cannot stamp it;
-## it is absent from [member _total_bytes], so [method shortfall] under-reports;
-## and [method prune] iterates the index, so it can never be evicted. The cache
-## grows past its ceiling by exactly the amount that the last unclean shutdown
-## had in flight, permanently, and on a phone that ceiling is the thing keeping
-## the app from being killed for disk use.
-##
-## One directory walk at open, which is what [method _rebuild_index] costs
-## anyway whenever the index is missing, and [method sweep_partials] already
-## walks the sibling directory at startup.
+## The index is always behind the directory by design: objects are flushed at commit but the index only
+## at sync end, mount and prune, so an unclean shutdown leaves valid objects a parseable index never
+## heard of, and [method _rebuild_index] never runs. An untracked object is never re-downloaded or
+## evicted and is missing from [member _total_bytes], so the cache grows past its ceiling permanently.
+## One directory walk at open, which a missing index costs anyway.
 func _reconcile_with_disk() -> void:
 	var on_disk := {}
 	for rel in DotPaths.list_files_recursive(config.objects_dir()):
@@ -672,10 +575,8 @@ func _reconcile_with_disk() -> void:
 	for h: String in _index.keys():
 		if on_disk.has(h):
 			continue
-		# The browser evicted our storage, a mobile sandbox was trimmed, or a
-		# user cleared it. [method has] would drop these one at a time on the
-		# next lookup; doing it now is what makes _total_bytes true before the
-		# first shortfall() is reported to a player.
+		# Storage was evicted or cleared: dropping these now makes _total_bytes true before the first
+		# shortfall() is reported to a player.
 		_forget(h)
 		dropped += 1
 
@@ -693,11 +594,8 @@ func _reconcile_with_disk() -> void:
 
 
 ## Rebuilds the index by walking the object directory.
-##
-## Possible only because the store is content-addressed: a filename is a hash, so
-## the directory carries everything the index does except last-use times and
-## references. Both are recoverable — refs are re-added on the next mount and
-## last-use starts from now.
+## Possible because a filename is a hash; only last-use times and references are lost, and they are
+## re-added on the next mount and restarted from now.
 func _rebuild_index() -> void:
 	_index.clear()
 	_total_bytes = 0
@@ -738,8 +636,6 @@ func flush_index() -> void:
 			{"detail": written.error.detail}
 		)
 
-
-# --- Reporting -------------------------------------------------------------
 
 func total_bytes() -> int:
 	return _total_bytes

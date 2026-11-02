@@ -106,10 +106,9 @@ func _load_threaded(tree: SceneTree, paths: PackedStringArray) -> DotResult:
 	return DotResult.success(done)
 
 
-## The global-class scripts that the sources at [param paths] name, not yet cached, in
-## class-list order. Load them before [param paths]: compiling one pack script otherwise
-## compiles every addon class it names in the same frame (244 of them, 3.2 s, in a browser).
-## [param read_from], when given, holds the file to read for each path (a pack not yet mounted).
+## The global-class scripts the sources at [param paths] name, not yet cached, in class-list order.
+## Load them first: compiling one pack script otherwise compiles every addon class it names in one frame
+## (244, 3.2 s in a browser). [param read_from] maps each path to the file to read (a pack not yet mounted).
 static func named_class_scripts(paths: PackedStringArray, read_from: PackedStringArray = PackedStringArray()) -> PackedStringArray:
 	var classes := ProjectSettings.get_global_class_list()
 	var by_name := {}

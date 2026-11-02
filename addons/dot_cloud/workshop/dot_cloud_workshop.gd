@@ -240,8 +240,6 @@ func describe_lines() -> PackedStringArray:
 	return lines
 
 
-# --- the sync ---------------------------------------------------------------
-
 
 func _run(game: String, cloud_client: DotCloudClient, summary: Dictionary) -> DotResult:
 	if not config.workshop_enabled:
@@ -622,8 +620,6 @@ static func _new_summary() -> Dictionary:
 		"takes_subscriptions": false, "mounted": [], "skipped": [], "failed": [],
 	}
 
-
-# --- setup and the cache ------------------------------------------------------
 
 
 func _prepare() -> DotResult:

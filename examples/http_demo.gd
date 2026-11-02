@@ -73,7 +73,7 @@ func _run() -> void:
 	var source_dir := WORK.path_join("source")
 	var publish_dir := WORK.path_join("published")
 
-	# --- publish ---------------------------------------------------------
+	# publish
 	var keys := DotCloudSignature.generate_keypair(2048)
 	if not keys.ok:
 		await _fail("keygen", keys)
@@ -113,7 +113,7 @@ func _run() -> void:
 		return
 	var manifest: DotCloudManifest = reparsed.value
 
-	# --- serve -----------------------------------------------------------
+	# serve
 	_server = TestServer.new()
 	_server.name = "TestHttpServer"
 	_server.root = publish_dir
@@ -136,7 +136,7 @@ func _run() -> void:
 	await _test_no_range_support(base, key_pair, manifest)
 	await _test_corrupt_mirror(base, key_pair, manifest)
 
-	# --- summary ---------------------------------------------------------
+	# summary
 	_check(
 		"every suspending section ran to completion",
 		_sections_completed == _sections_entered,
@@ -157,7 +157,7 @@ func _run() -> void:
 	await _finish(1 if _failures > 0 else 0)
 
 
-# --- Sections --------------------------------------------------------------
+# Sections
 
 
 ## The reachability probe, which is the call meant to run before a large sync.
@@ -584,7 +584,7 @@ func _test_corrupt_mirror(
 	_sections_completed += 1
 
 
-# --- Helpers ---------------------------------------------------------------
+# Helpers
 
 
 ## A started client with its own cache directory, or null after reporting why.

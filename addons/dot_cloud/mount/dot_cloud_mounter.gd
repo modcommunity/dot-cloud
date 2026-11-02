@@ -2,48 +2,18 @@ class_name DotCloudMounter
 extends RefCounted
 
 ## Mounts downloaded content into the running project's virtual filesystem.
-##
-## [b]This is the hardest constraint in dot-cloud, so read this before changing
-## anything here.[/b]
-##
-## [b]Godot cannot unmount a resource pack.[/b] There is no
-## [code]unload_resource_pack[/code], on any platform, in any version. Once
-## [method ProjectSettings.load_resource_pack] returns, that pack's file table is
-## merged into the virtual filesystem for the lifetime of the process. The engine
-## does not track which pack contributed which entry, so there is nothing to
-## unwind even in principle.
-##
-## The brief for dot-cloud is "dynamically load and unload games while users are
-## connected". Given the above, the naive implementation — mount game A at
-## [code]res://game/[/code], later mount game B at the same paths with
-## [code]replace_files = true[/code] — is broken in a way that only shows up
-## later:
-##
-## - Files that existed in A and not in B [b]still resolve[/b], to A's bytes.
-##   A stale [code]res://game/config.tres[/code] silently loads into B.
-## - Godot's resource cache may hand back A's already-loaded instance for a path
-##   B also defines, depending on whether anything still holds a reference.
-## - Nothing errors. The game just behaves as a blend of two content sets.
-##
-## [b]So dot-cloud does not reuse paths.[/b] Content mounts at
-## [code]res://<mount_root>/<content_id>/<version>/[/code] — the version is in the
-## path — and "unloading" means:
-##
-## 1. tear down the scene tree that referenced it — this is the step that
-##    actually frees the resources, because Godot's resource cache holds no
-##    reference of its own and empties itself when the last one drops,
-## 2. check that step 1 was complete ([method purge_resources], which reports
-##    what is still referenced and cannot evict anything — see its doc),
+## [b]Godot cannot unmount a resource pack[/b]: once [method ProjectSettings.load_resource_pack] returns, its
+## file table is merged for the life of the process, with no record of which pack added which entry.
+## So remounting game B over game A's paths with [code]replace_files = true[/code] misbehaves silently:
+## files only A had still resolve to A's bytes, and the resource cache may return A's loaded instance.
+## [b]So paths are never reused.[/b] Content mounts at [code]res://<mount_root>/<content_id>/<version>/[/code]
+## and "unloading" means:
+## 1. free the scene tree that referenced it (this frees the resources; the cache holds no reference of its own),
+## 2. check that was complete ([method purge_resources] reports what is still referenced, evicts nothing),
 ## 3. release the store's refs so the objects become evictable,
-## 4. forget the mount and never look at those paths again.
-##
-## The file-table entries linger. That costs a few kilobytes per mount and
-## nothing else, because no code and no path ever points at them again. A server
-## cycling through fifty maps in a session accumulates fifty namespaces of dead
-## file-table entries, which is a rounding error against one texture.
-##
-## [method needs_restart_to_reclaim] and [method restart_process] exist for the
-## rare case where that genuinely is not acceptable.
+## 4. forget the mount and never use those paths again.
+## The lingering file-table entries cost kilobytes per mount. [method needs_restart_to_reclaim] and
+## [method restart_process] exist for the rare case that is not acceptable.
 
 const CHANNEL := "cloud.mount"
 const _Uids := preload("dot_cloud_mounter_uids.gd")
@@ -61,17 +31,10 @@ func _init(p_config: DotCloudConfig) -> void:
 	config = p_config
 
 
-# --- Mounting --------------------------------------------------------------
-
 ## Builds a pack from cached objects and mounts it.
-##
-## The cache stores objects by hash, but Godot mounts *packs*, so this writes a
-## thin PCK whose entries point content paths at the cached bytes. That pack is
-## itself cached under the manifest key, so re-mounting the same content on a
-## later run is one [method ProjectSettings.load_resource_pack] call.
-##
-## [param store] must already hold every required object — run the downloader
-## first.
+## Godot mounts packs, the cache stores objects by hash, so this writes a thin PCK pointing content paths at
+## cached bytes. The pack is cached under the manifest key, so a later run's remount is one call.
+## [param store] must already hold every required object; run the downloader first.
 func mount(
 	manifest: DotCloudManifest,
 	store: DotCloudStore,
@@ -86,25 +49,15 @@ func mount(
 	var wanted := manifest.wanted_files()
 	var identity := _mount_identity(manifest, wanted)
 
-	# [b]The key is not proof that the content is the same.[/b] `key()` is
-	# `content_id@version` and nothing in it is derived from the bytes, so two
-	# manifests from two publishers -- or one publisher who re-used a version
-	# number -- arrive here indistinguishable. Returning the mounted prefix for
-	# whichever got here first means the caller asked for one content set and
-	# quietly got another, and since a pack can contain scripts, "another" is
-	# somebody else's code.
-	#
-	# It cannot be repaired after the fact either: the first pack is already
-	# merged into the virtual filesystem and there is no unmount, so the only
-	# honest answer is to refuse the second and let the caller decide.
+	# The key is not proof the content is the same: `content_id@version` is not derived from the bytes, so two
+	# publishers (or a re-used version) arrive indistinguishable, and since packs can contain scripts "another"
+	# is somebody else's code. It cannot be repaired after the mount, so refuse the second and let the caller decide.
 	if _mounts.has(key):
 		var held: Dictionary = _mounts[key]
 
-		# [b]The same content asked for with more files than were mounted[/b] (API 8): a
-		# shell that joined a server as a client and then hosts the same game itself wants
-		# the server-only files too, and the pack cannot be unmounted and remounted. The
-		# difference is mounted as a second pack at the same prefix; nothing already there
-		# is replaced. A narrower ask of the same content is already covered.
+		# The same content asked for with more files than were mounted (API 8): a shell that joined as a client and
+		# then hosts the game wants the server-only files, and the pack cannot be remounted. The difference mounts as a
+		# second pack at the same prefix, replacing nothing. A narrower ask is already covered.
 		if str(held.get("identity", "")) != identity \
 				and str(held.get("whole", "")) == _mount_identity(manifest, manifest.files):
 			return await _mount_more(manifest, store, scheduler, options, wanted, held)
@@ -218,10 +171,9 @@ func mount(
 	return DotResult.success(prefix)
 
 
-## Whether [param manifest] is mounted with every file it now wants: false when the same
-## content was mounted for a narrower side or group set, so [method mount] would add the
-## rest. Different content under the key reads as covered, as it always has: [method mount]
-## is where that is refused.
+## Whether [param manifest] is mounted with every file it now wants: false when the same content was
+## mounted for a narrower side or group set, so [method mount] would add the rest.
+## Different content under the key reads as covered; [method mount] is where that is refused.
 func covers(manifest: DotCloudManifest) -> bool:
 	var held: Dictionary = _mounts.get(manifest.key(), {})
 	if held.is_empty():
@@ -307,11 +259,8 @@ func _mount_more(
 
 
 ## Writes a PCK mapping manifest paths to cached object bytes.
-##
-## [PCKPacker] takes a target path per file, which is exactly what is needed:
-## the cached object lives at a hash-named path and has to appear inside the pack
-## at [code]res://<prefix>/<manifest path>[/code]. No export preset can express
-## that, which is why the pack is assembled here rather than shipped.
+## [PCKPacker] takes a target path per file, which is what is needed: the hash-named cached object must appear
+## at [code]res://<prefix>/<manifest path>[/code], which no export preset can express.
 func _build_pack(
 	manifest: DotCloudManifest,
 	store: DotCloudStore,
@@ -405,10 +354,9 @@ static func pack_intact(path: String) -> bool:
 
 
 func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
-	# Version and a fingerprint of the CONTENT are in the name: republishing `id@0.1.0` from corrected
-	# sources is the ordinary fix loop, and a path without the fingerprint kept serving the old pack. The
-	# version also stops a new publish overwriting a pack a running process has open (fatal on Windows).
-	# [param files] is the wanted set, so two group selections of one id@version must not share a path.
+	# Version and a content fingerprint are in the name: republishing `id@0.1.0` from corrected sources is the
+	# ordinary fix loop, and the old name kept serving the old pack. The version also stops a publish overwriting
+	# a pack a running process has open (fatal on Windows). [param files] is the wanted set, so two group selections must not share a path.
 	return config.cache_dir.path_join(
 		"packs/%s-%s-%s.pck" % [
 			DotPaths.slugify(manifest.content_id),
@@ -418,19 +366,9 @@ func _pack_path(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> Strin
 	)
 
 
-## What the assembled pack will contain, as a short stable digest.
-##
-## Path AND hash, so a file that moved and a file that changed are both a different
-## pack. Sorted, because the manifest's order is the publisher's and two publishes of
-## identical content must agree.
-## What has to match for an already-mounted key to be the same content.
-##
-## The file set is the bulk of it, and [method _pack_fingerprint] already answers
-## that. [member DotCloudManifest.entry_scene] and
-## [member DotCloudManifest.mount_root] are in here as well because neither is a
-## file: two manifests can agree about every byte and still disagree about what
-## loads and where it lands, and the caller would be handed the first one's answer
-## for both.
+## What has to match for an already-mounted key to be the same content: the file set plus
+## [member DotCloudManifest.entry_scene] and [member DotCloudManifest.mount_root], since two manifests can
+## agree about every byte and still disagree about what loads and where it lands.
 func _mount_identity(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
 	return "%s|%s|%s" % [
 		_pack_fingerprint(manifest, files),
@@ -439,6 +377,8 @@ func _mount_identity(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> 
 	]
 
 
+## What the assembled pack will contain, as a short stable digest.
+## Path AND hash, so a moved and a changed file both differ; sorted, as publish order is the publisher's.
 func _pack_fingerprint(manifest: DotCloudManifest, files: Array[DotCloudFile]) -> String:
 	var lines := PackedStringArray()
 
@@ -447,13 +387,8 @@ func _pack_fingerprint(manifest: DotCloudManifest, files: Array[DotCloudFile]) -
 
 	lines.sort()
 
-	# [b]The id and the version are part of the fingerprint, not just of the name.[/b]
-	# A built pack holds its files at `res://<mount_root>/<id>/<version>/...`, so it is
-	# only ever valid for the identity it was built for -- and the filename alone stopped
-	# saying which as soon as a content_id could contain "/", because the name slugifies
-	# it and `alice/x` and `alice_x` slugify alike. Two different packs would then agree
-	# about their path and the wrong one would be mounted, which is section 6's bug
-	# arriving through a different door.
+	# The id and version are part of the fingerprint, not just the name: a pack holds files at
+	# `res://<mount_root>/<id>/<version>/...`, and `alice/x` and `alice_x` slugify alike, so the wrong pack could mount.
 	return DotHash.sha256_text(
 		"%s\n%s\n%s" % [manifest.content_id, manifest.version, "\n".join(lines)]
 	).substr(0, 16)
@@ -493,10 +428,8 @@ func _check_prefix(
 ) -> DotResult:
 	var prefix := manifest.mount_prefix()
 
-	# Simplified on both sides before comparing. A raw begins_with() is not a
-	# containment test: "res://a/b/../../evil" begins with "res://a/b/" and is
-	# nowhere near it, so the belt would have agreed with anything the braces
-	# let through — which is the opposite of what a second check is for.
+	# Simplified on both sides first: begins_with() is no containment test ("res://a/b/../../evil" begins
+	# with "res://a/b/"), so the second check would agree with whatever the first let through.
 	var simple_prefix := prefix.simplify_path()
 
 	for f in files:
@@ -519,20 +452,10 @@ func _check_prefix(
 	return DotResult.success(true)
 
 
-# --- Unmounting ------------------------------------------------------------
-
-## Forgets a mount and releases its cache references.
-##
-## [b]Does not remove the pack from the virtual filesystem[/b] — the engine has no
-## such operation, see the class documentation. What it does is make the content
-## unreachable in every way that matters: the caller has torn down the scene tree,
-## this drops the resource-cache references and the store's refs, and nothing
-## points at those paths again.
-##
-## The caller must free anything still holding a resource from this content
-## [b]before[/b] calling. A [Node] holding a [Mesh] from the pack keeps it alive
-## in the resource cache, and the next mount of the same version would hand back
-## the stale instance.
+## Forgets a mount and releases its cache references; does not remove the pack from the virtual
+## filesystem (see the class documentation), only makes the content unreachable.
+## The caller must free anything still holding a resource from this content [b]before[/b] calling: a [Node]
+## holding a [Mesh] keeps it in the resource cache and the next mount of the version gets the stale instance.
 func unmount(content_key: String, store: DotCloudStore) -> DotResult:
 	if not _mounts.has(content_key):
 		return DotResult.fail(
@@ -564,10 +487,8 @@ func unmount(content_key: String, store: DotCloudStore) -> DotResult:
 
 
 ## Counts cached resources still live under [param prefix], and warns about them.
-##
-## This cannot evict anything: the resource cache holds no strong reference, so a path is cached exactly
-## while something else refers to it, and `CACHE_MODE_IGNORE` only returns a new instance. A non-zero
-## return means the caller did [b]not[/b] free everything before unmounting, which breaks a re-mount.
+## Cannot evict: the cache holds no strong reference (a path is cached while something refers to it) and
+## `CACHE_MODE_IGNORE` only returns a new instance. Non-zero means the caller did [b]not[/b] free everything.
 func purge_resources(prefix: String) -> int:
 	var still_cached := 0
 
@@ -593,21 +514,15 @@ func purge_resources(prefix: String) -> int:
 	return still_cached
 
 
-## Whether anything has been mounted that a restart would reclaim.
-##
-## For a UI that offers "restart to free up memory". Almost never worth showing:
-## the leak is file-table entries, measured in kilobytes.
+## Whether anything has been mounted that a restart would reclaim, for a "restart to free memory" UI.
+## Rarely worth showing: the leak is kilobytes of file-table entries.
 func needs_restart_to_reclaim() -> bool:
 	return not _mounts.is_empty() and not DotPlatform.can_unmount_packs()
 
 
-## Restarts the process to get a clean virtual filesystem.
-##
-## The only true unmount. Desktop re-execs, a browser tab reloads, mobile cannot
-## do either — [method DotPlatform.can_self_restart] says which.
-##
-## An escape hatch, not part of the normal flow. Needing it means content is being
-## mounted at colliding paths, which version namespacing is there to prevent.
+## Restarts the process to get a clean virtual filesystem: the only true unmount.
+## Desktop re-execs, a browser tab reloads, mobile does neither ([method DotPlatform.can_self_restart]).
+## An escape hatch; needing it means colliding mount paths, which version namespacing prevents.
 func restart_process() -> DotResult:
 	if not DotPlatform.can_self_restart():
 		return DotResult.fail(
@@ -638,8 +553,6 @@ func restart_process() -> DotResult:
 
 	return DotResult.success(pid)
 
-
-# --- Queries ---------------------------------------------------------------
 
 func is_mounted(content_key: String) -> bool:
 	return _mounts.has(content_key)

@@ -104,7 +104,7 @@ func _run() -> void:
 	await _finish(1 if _failures > 0 else 0)
 
 
-# --- setup -----------------------------------------------------------------
+# setup
 
 
 func _prepare() -> bool:
@@ -167,7 +167,7 @@ func _prepare() -> bool:
 	return true
 
 
-# --- sections --------------------------------------------------------------
+# sections
 
 
 func _section_happy_path() -> void:
@@ -534,7 +534,7 @@ func _section_skipped_sources() -> void:
 	_sections_completed += 1
 
 
-# --- helpers ---------------------------------------------------------------
+# helpers
 
 
 func _server() -> RefCounted:

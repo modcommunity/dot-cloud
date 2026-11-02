@@ -55,7 +55,7 @@ func _run() -> void:
 	_finish()
 
 
-# --- 1 ---------------------------------------------------------------------
+# 1
 
 func _versions() -> void:
 	_section("versions compare by number")
@@ -66,7 +66,7 @@ func _versions() -> void:
 	_done()
 
 
-# --- 1b --------------------------------------------------------------------
+# 1b
 
 ## The class list written from script headers, against the one the editor wrote for this
 ## project. A field that differs is a type check that differs from the editor's.
@@ -112,7 +112,7 @@ func _class_list() -> void:
 	_done()
 
 
-# --- 2 ---------------------------------------------------------------------
+# 2
 
 func _entry(dir: String, id: String, version: String) -> Dictionary:
 	return {"dir": dir, "repo": dir.replace("_", "-"), "id": id, "version": version}
@@ -173,7 +173,7 @@ func _policy() -> void:
 	_done()
 
 
-# --- 3 ---------------------------------------------------------------------
+# 3
 
 func _published_client() -> DotCloudClient:
 	_section("an addon published as a pack")
@@ -255,7 +255,7 @@ func _builds(cloud: DotCloudClient) -> void:
 	_done()
 
 
-# --- 4 ---------------------------------------------------------------------
+# 4
 
 ## Starts this project again through the boot scene and returns what it reported.
 func _start() -> Dictionary:
@@ -321,7 +321,7 @@ func _boots() -> void:
 	_done()
 
 
-# --- harness ---------------------------------------------------------------
+# harness
 
 func _finish() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(LOCK))

@@ -118,7 +118,7 @@ func _make_packs() -> void:
 	_make_pack("ws_wrongkey", "map", false, 0, "other")
 
 
-# --- the fake site ---------------------------------------------------------
+# the fake site
 
 func _site(method: String, path: String, query: Dictionary, headers: Dictionary, body: String) -> Dictionary:
 	var auth := str(headers.get("authorization", ""))
@@ -214,7 +214,7 @@ func _reasons(entries: Array) -> String:
 	return ",".join(parts)
 
 
-# --- sections --------------------------------------------------------------
+# sections
 
 func _check_first_sync_and_cache() -> void:
 	_line("")
@@ -606,7 +606,7 @@ func _check_reporting() -> void:
 	_check(not cfg.validate().ok, "armed: a bad script policy fails validation", str(applied))
 
 
-# --- harness ---------------------------------------------------------------
+# harness
 
 func _check(ok: bool, what: String, detail: String = "") -> void:
 	_checks += 1

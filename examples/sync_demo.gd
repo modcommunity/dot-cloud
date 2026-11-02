@@ -53,20 +53,20 @@ func _run() -> void:
 	var source_dir := WORK.path_join("source")
 	var publish_dir := WORK.path_join("published")
 
-	# --- 1. keys ---------------------------------------------------------
+	# 1. keys
 	var keys := DotCloudSignature.generate_keypair(2048)
 	if not keys.ok:
 		return _fail("keygen", keys)
 	var key_pair: Dictionary = keys.value
 	_line("  keypair          generated (RSA 2048)")
 
-	# --- 2. content ------------------------------------------------------
+	# 2. content
 	var made := _write_source_content(source_dir)
 	if not made.ok:
 		return _fail("writing content", made)
 	_line("  source content   %d files" % int(made.value))
 
-	# --- 3. publish ------------------------------------------------------
+	# 3. publish
 	var pub := DotCloudPublisher.new()
 	pub.content_id = "demo_arena"
 	pub.version = "1.0.0"
@@ -92,7 +92,7 @@ func _run() -> void:
 	if int(pd["deduped"]) < 1:
 		_line("  [b]WARNING[/b]        expected deduplication, got none")
 
-	# --- 4. verify the signature independently ---------------------------
+	# 4. verify the signature independently
 	var manifest_bytes := DotPaths.read_bytes(str(pd["manifest_path"]))
 	if not manifest_bytes.ok:
 		return _fail("reading manifest", manifest_bytes)
@@ -164,7 +164,7 @@ func _run() -> void:
 	)
 	_check("empty body refused", not empty_check.ok)
 
-	# --- 5. client -------------------------------------------------------
+	# 5. client
 	var config := DotCloudConfig.new()
 	config.cache_dir = WORK.path_join("cache")
 	config.require_signed_manifests = true
@@ -202,7 +202,7 @@ func _run() -> void:
 		return _fail("client start", started)
 	_line("  client started   cache at %s" % config.cache_dir)
 
-	# --- 6. plan ---------------------------------------------------------
+	# 6. plan
 	var plan := _client.plan_for(manifest)
 	_line("")
 	_line("  plan             %d missing (%s), %d cached" % [
@@ -211,7 +211,7 @@ func _run() -> void:
 		int(plan["cached_files"]),
 	])
 
-	# --- 7. acquire ------------------------------------------------------
+	# 7. acquire
 	var t0 := Time.get_ticks_msec()
 	var acquired := await _client.acquire_manifest(manifest)
 	if not acquired.ok:
@@ -221,7 +221,7 @@ func _run() -> void:
 		Time.get_ticks_msec() - t0, str(acquired.value)
 	])
 
-	# --- 8. read content back out of the mount ---------------------------
+	# 8. read content back out of the mount
 	var mounted_path := manifest.mount_prefix().path_join("arena.txt")
 	var read_back := DotPaths.read_text(mounted_path)
 
@@ -244,12 +244,12 @@ func _run() -> void:
 	var optional_path := manifest.mount_prefix().path_join("optional/extra.txt")
 	_check("optional skipped", not FileAccess.file_exists(optional_path))
 
-	# --- 9. cache state --------------------------------------------------
+	# 9. cache state
 	_line("")
 	for l in _client.store.describe_lines():
 		_line("  " + l)
 
-	# --- 10. release then re-acquire -------------------------------------
+	# 10. release then re-acquire
 	_line("")
 	var released := _client.release(manifest.key())
 	_check(
@@ -262,7 +262,7 @@ func _run() -> void:
 		Time.get_ticks_msec() - t1
 	])
 
-	# --- 11. a manifest signed by nobody we trust ------------------------
+	# 11. a manifest signed by nobody we trust
 	var rogue := DotCloudManifest.new()
 	rogue.content_id = "rogue"
 	rogue.version = "1.0.0"

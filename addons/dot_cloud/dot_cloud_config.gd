@@ -3,35 +3,23 @@ class_name DotCloudConfig
 extends DotConfig
 
 ## Everything configurable about content delivery.
-##
-## Layered like every [DotConfig]: exported defaults, then a JSON file, then
-## [code]DOT_CLOUD_*[/code] environment variables, then
-## [code]--cloud-*[/code] arguments.
+## Layered like every [DotConfig]: exported defaults, JSON file, [code]DOT_CLOUD_*[/code] environment, [code]--cloud-*[/code] arguments.
 
 @export_group("Cache")
 
-## Root of the content cache. Everything dot-cloud writes lives under here.
-##
-## On web this is inside IndexedDB rather than a directory; the path still works,
-## it just is not somewhere a player can look.
+## Root of the content cache; everything dot-cloud writes lives under here. On web it is inside IndexedDB.
 @export var cache_dir: String = "user://dot_cloud"
 
-## Cache ceiling in bytes. 0 means unlimited.
-##
-## Unreferenced objects are evicted least-recently-used first once the cache
-## exceeds this. Defaults to 4 GiB, which is generous for desktop and far too
-## much for a phone — see [member mobile_cache_bytes].
+## Cache ceiling in bytes; 0 is unlimited. Unreferenced objects are evicted LRU past it.
+## Defaults to 4 GiB, far too much for a phone (see [member mobile_cache_bytes]).
 @export var cache_bytes: int = 4 * 1024 * 1024 * 1024
 
 ## Cache ceiling on mobile, where filling the device's storage gets the app
 ## killed or uninstalled rather than merely inconvenienced.
 @export var mobile_cache_bytes: int = 1024 * 1024 * 1024
 
-## Fraction of the browser's reported quota to use as the ceiling on web.
-##
-## Not the whole quota: the origin shares it with everything else the site
-## stores, and hitting the real limit surfaces as an opaque write failure rather
-## than as a manageable "cache full".
+## Fraction of the browser's reported quota used as the ceiling on web.
+## Not all of it: the origin shares the quota, and hitting the real limit is an opaque write failure.
 @export_range(0.1, 0.95, 0.05) var web_quota_fraction: float = 0.6
 
 ## Ask the browser to make storage persistent, so a low-disk browser is less
@@ -41,22 +29,12 @@ extends DotConfig
 @export_group("Integrity")
 
 ## Refuse manifests that are not signed by a trusted key.
-##
-## [b]Leaving this on is the difference between a content system and a remote
-## code execution system.[/b] Godot packs can contain scripts, so a client that
-## mounts content from an unsigned manifest runs whatever the server sent. Turn
-## it off only for LAN play, first-party servers, or development — and expect the
-## warning it logs every time.
+## [b]Leaving this on separates a content system from a remote code execution system[/b]: packs can contain
+## scripts. Turn off only for LAN play, first-party servers or development; it warns every time.
 @export var require_signed_manifests: bool = true
 
-## Trusted signing keys, as [code]key_id -> PEM public key[/code].
-##
-## Several entries is normal: rotating a key needs a window where both are
-## accepted. See [DotCloudSignature].
-##
-## [b]An entry can also say what it is trusted FOR[/b], which matters as soon as there is
-## more than one publisher:
-##
+## Trusted signing keys, as [code]key_id -> PEM public key[/code]; several is normal while rotating (see [DotCloudSignature]).
+## An entry can also say what it is trusted FOR, which matters with more than one publisher:
 ## [codeblock]
 ## {
 ##     "first-party": "-----BEGIN PUBLIC KEY-----\n…",
@@ -66,38 +44,23 @@ extends DotConfig
 ##     }
 ## }
 ## [/codeblock]
-##
-## A bare PEM means every content id, which is what every config written before this
-## said and still means. [method validate] warns about the combination that is actually
-## dangerous -- several keys, at least one of them unscoped -- rather than about the
-## single-key case, which is every deployment today.
+## A bare PEM means every content id. [method validate] warns about several keys with one unscoped.
 @export var trusted_keys: Dictionary = {}
 
-## Re-hash every cached object on startup.
-##
-## Off by default — it is minutes of work for a large cache, and objects are
-## verified when they are written. Worth turning on when investigating
-## corruption, or on a platform whose storage you do not trust.
+## Re-hash every cached object on startup. Off: minutes for a large cache, and objects are verified on write.
+## Turn on to investigate corruption or on storage you do not trust.
 @export var verify_cache_on_start: bool = false
 
-## Re-hash an object before mounting it, even though it was verified on download.
-##
-## Cheap insurance against storage that changed underneath us — which on web
-## means an IndexedDB the browser partially evicted, and on mobile a sandbox the
-## OS trimmed.
+## Re-hash an object before mounting it, against storage that changed underneath us
+## (a partially evicted IndexedDB, a trimmed mobile sandbox).
 @export var verify_before_mount: bool = true
 
 @export_group("Transfer")
 
-## Files fetched at once.
-##
-## [b]A game pack is hundreds of small files, so a cold download is bound by round
-## trips, not bandwidth.[/b] The reference deathmatch is ~460 objects, half under
-## 4 KiB; through a 40 ms, 50 Mbit/s link a cold acquire took 8.2 s at 6 and 6.6 s at
-## 12. A browser caps HTTP/1.1 at about 6 connections per host and queues the rest,
-## which costs nothing; over HTTP/2, which the content host speaks, all 12 share one
-## connection. Stay at or under [code]DotHttp.MAX_POOL[/code] (16), which bounds the
-## request nodes.
+## Files fetched at once. A game pack is hundreds of small files, so a cold download is bound by round
+## trips: the reference pack (~460 objects) acquired in 8.2 s at 6 and 6.6 s at 12 over 40 ms, 50 Mbit/s.
+## Browsers queue past ~6 HTTP/1.1 connections; over HTTP/2 all 12 share one. Stay at or under
+## [code]DotHttp.MAX_POOL[/code] (16), which bounds the request nodes.
 @export_range(1, 32, 1) var parallel_downloads: int = 12
 
 ## Fetch a manifest's bundle (one archive of its small objects) when enough are missing.
@@ -105,27 +68,18 @@ extends DotConfig
 @export var bundle_min_missing: int = 8
 
 ## Resume partial downloads with HTTP range requests.
-##
-## Requires the content host to support ranges — and on web, to expose
-## [code]Accept-Ranges[/code] through CORS. Falls back to restarting the transfer
-## when a range request is refused.
+## Needs host support (on web, [code]Accept-Ranges[/code] exposed through CORS); restarts when refused.
 @export var resume_downloads: bool = true
 
 ## Attempts per file before it is treated as failed, across all mirrors.
 @export_range(1, 20, 1) var max_attempts_per_file: int = 4
 
-## Bandwidth ceiling in bytes/sec. 0 is unlimited.
-##
-## Worth setting on a client downloading in the background while a game is being
-## played: saturating the connection makes the game unplayable, which is a worse
-## outcome than the download taking longer.
+## Bandwidth ceiling in bytes/sec; 0 is unlimited.
+## For background downloads during play: saturating the connection is worse than a slower download.
 @export var throttle_bytes_per_sec: int = 0
 
-## Per-file timeout in seconds.
-##
-## Generous, because this covers a whole file: a 200 MB pack on a slow
-## connection is legitimately several minutes, and a timeout that fires on it
-## turns a working download into an infinite retry loop.
+## Per-file timeout in seconds. Generous because it covers a whole file; a timeout that fires on a
+## 200 MB pack over a slow link becomes an infinite retry loop.
 @export_range(10.0, 3600.0, 10.0) var file_timeout_sec: float = 600.0
 
 @export_group("Mirrors and prefetch")
@@ -149,39 +103,26 @@ extends DotConfig
 @export_group("Mounting")
 
 ## Which side of a game this process fetches packs as: [code]auto[/code], [code]client[/code],
-## [code]server[/code] or [code]both[/code] (API 8). A manifest entry tagged for the other side
-## ([member DotCloudFile.side]) is never downloaded, cached, mounted or checked for.
-##
-## [code]auto[/code] is [code]server[/code] on a headless process and [code]client[/code]
-## everywhere else. A host that knows what it is says so: a dedicated server sets
-## [code]server[/code], and a client shell that also runs headless in tests sets
-## [code]client[/code], so a test client fetches what a player's does. [code]both[/code] is a
-## listen server, a tool that republishes or inspects packs, and the pre-API-8 behaviour.
-##
-## [b]A web build is always [code]client[/code],[/b] whatever this says: a browser can only
-## be a client (see [method resolved_side]).
+## [code]server[/code] or [code]both[/code] (API 8). Entries tagged for the other side ([member DotCloudFile.side])
+## are never downloaded, cached, mounted or checked for.
+## `auto` is server on a headless process, client elsewhere; a client shell run headless in tests sets
+## `client` so it fetches what a player's does. `both` is a listen server or a republishing tool.
+## [b]A web build is always client[/b] (see [method resolved_side]).
 @export_enum("auto", "client", "server", "both") var side: String = "auto"
 
 ## Verify that no mounted path escapes the manifest's mount prefix.
-##
-## Belt and braces — [DotPaths.safe_relative] already refuses traversal at parse
-## time — but the consequence of a miss is content overwriting the host project's
-## own scripts, so it is checked twice.
+## [DotPaths.safe_relative] already refuses traversal at parse time; a miss would overwrite the host's
+## scripts, so it is checked twice.
 @export var enforce_mount_prefix: bool = true
 
-## Load packs with [code]replace_files = true[/code].
-##
-## [b]Leave this off.[/b] Version-namespaced mount paths mean nothing ever needs
-## replacing, and turning it on lets downloaded content shadow files the host
-## project shipped. See [DotCloudMounter].
+## Load packs with [code]replace_files = true[/code]. [b]Leave off[/b]: version-namespaced mount paths
+## need no replacing, and it lets downloaded content shadow shipped files. See [DotCloudMounter].
 @export var allow_replace_files: bool = false
 
 @export_group("Progress")
 
-## Seconds between [signal DotCloudClient.progress_changed] emissions.
-##
-## Progress is sampled rather than emitted per chunk: a 6-way parallel download
-## produces thousands of chunk callbacks a second and UI cannot use them.
+## Seconds between [signal DotCloudClient.progress_changed] emissions; sampled because parallel
+## downloads produce thousands of chunk callbacks a second.
 @export_range(0.05, 5.0, 0.05) var progress_interval_sec: float = 0.2
 
 
@@ -287,11 +228,8 @@ func resolved_side() -> String:
 	return DotCloudFile.SIDE_SERVER if DotPlatform.is_headless() else DotCloudFile.SIDE_CLIENT
 
 
-## The cache ceiling for the platform actually running.
-##
-## Resolved rather than configured directly so one config file is correct on
-## every target: a 4 GiB ceiling is fine on desktop, hostile on a phone, and
-## meaningless on web where the browser decides.
+## The cache ceiling for the platform actually running, resolved so one config file is right everywhere:
+## 4 GiB suits desktop, not a phone, and means nothing on web.
 func effective_cache_bytes() -> int:
 	if DotPlatform.is_mobile():
 		return mobile_cache_bytes
@@ -302,12 +240,8 @@ func objects_dir() -> String:
 	return cache_dir.path_join("objects")
 
 
-## Where in-progress downloads live.
-##
-## Separate from [method objects_dir] so a partial file can never be mistaken for
-## a complete one — the object directory holds only verified content, which is
-## what lets [method DotCloudStore.has] be a cheap existence check instead of a
-## hash.
+## Where in-progress downloads live, apart from [method objects_dir] so a partial is never mistaken
+## for a complete object and [method DotCloudStore.has] can be an existence check.
 func partials_dir() -> String:
 	return cache_dir.path_join("partial")
 
@@ -316,10 +250,7 @@ func index_path() -> String:
 	return cache_dir.path_join("index.json")
 
 
-## Warns once about settings that are dangerous but legal.
-##
-## Called by [DotCloudClient] at startup. A silent insecure default is how a
-## development shortcut ships.
+## Warns once about settings that are dangerous but legal; called by [DotCloudClient] at startup.
 func warn_about_risky_settings() -> void:
 	if not require_signed_manifests:
 		DotLog.warn(

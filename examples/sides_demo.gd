@@ -79,7 +79,7 @@ func _run() -> void:
 	_finish(1 if _failures > 0 else 0)
 
 
-# --- Sections ----------------------------------------------------------------
+# Sections
 
 func _section_published_tags() -> void:
 	_begin("published tags")
@@ -286,7 +286,7 @@ func _section_parser() -> void:
 	_end()
 
 
-# --- Helpers -----------------------------------------------------------------
+# Helpers
 
 func _published(version: String) -> String:
 	return WORK.path_join("published_" + version)

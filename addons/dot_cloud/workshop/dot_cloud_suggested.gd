@@ -1,15 +1,9 @@
 class_name DotCloudSuggested
 extends RefCounted
 
-## Content packs a game suggests but never requires (its separate map packs), and the one rule for
-## who turns them off.
-##
-## A game declares entries [code]{group, id, version}[/code] (empty version: the newest published).
-## The mode is [code]all[/code], [code]none[/code] or a comma list of groups. Where it comes from,
-## strongest first: the command line ([code]--no-suggested-<group>[/code], [code]--suggested=<mode>[/code]),
-## this device's override ([method DotCloudWorkshopDevice.suggested_mode]), then
-## [member DotCloudWorkshopConfig.workshop_suggested] (defaults, JSON file, environment,
-## [code]--cloud-workshop-suggested[/code]). Picking maps one by one is the per-pack device switch.
+## Content packs a game suggests but never requires, and the one rule for who turns them off.
+## Mode is `all`, `none` or a comma list of groups; strongest source first: command line, device override
+## ([method DotCloudWorkshopDevice.suggested_mode]), then [member DotCloudWorkshopConfig.workshop_suggested].
 
 const MODE_ALL := "all"
 const MODE_NONE := "none"

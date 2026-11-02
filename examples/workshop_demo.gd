@@ -59,7 +59,7 @@ func _ready() -> void:
 	_done()
 
 
-# --- fixtures ---------------------------------------------------------------
+# fixtures
 
 func _write(dir: String, rel: String, text: String) -> void:
 	DotPaths.write_text(dir.path_join(rel), text)
@@ -99,7 +99,7 @@ func _data_source(dir: String, provides: Dictionary = DATA_PROVIDES) -> void:
 	_write(dir, "provides.json", JSON.stringify(provides))
 
 
-# --- sections ---------------------------------------------------------------
+# sections
 
 func _check_publish_validation() -> void:
 	_line("")
@@ -378,7 +378,7 @@ func _check_scan_alone() -> void:
 	_check(bool((kinds.value as Dictionary)["runs_code"]), "an entry of kind tool always runs code")
 
 
-# --- harness ----------------------------------------------------------------
+# harness
 
 func _check(ok: bool, what: String, detail: String = "") -> void:
 	_checks += 1

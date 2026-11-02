@@ -176,8 +176,6 @@ static func cache_text(list: Array[Dictionary]) -> String:
 	return cfg.encode_to_text()
 
 
-# --- Internals -----------------------------------------------------------------
-
 static func _base_of(header: Dictionary, headers: Dictionary, depth: int) -> String:
 	var named := str(header.get("extends", ""))
 
