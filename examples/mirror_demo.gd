@@ -14,7 +14,7 @@ const CAROL := "carol/big"
 const VERSION := "1.0.0"
 
 ## Every check this suite runs, including the one that compares against it.
-const CHECKS := 67
+const CHECKS := 72
 
 var _failures := 0
 var _checks := 0
@@ -103,6 +103,21 @@ func _test_parse() -> void:
 		var list: DotCloudMirrorList = good.value
 		_check("with every mirror", list.mirrors.size() == 3, str(list.mirrors.size()))
 		_check("a trailing slash is trimmed", str(list.mirrors[2]["base_url"]) == "https://m3.example")
+
+	# Platform fields added later (first_party, location, country, weight) are optional and ignored here.
+	var fp := _mirror("m1000042", "https://fp.example", ["*"], true)
+	fp["first_party"] = true
+	fp["location"] = "Frankfurt"
+	fp["country"] = "DE"
+	fp["weight"] = 2.5
+	var extra := DotCloudMirrorList.parse_signed(_signed(_list("https://cdn.example", [fp, three[0]])), keys, now)
+	_check("a list with the optional platform fields parses", extra.ok, "" if extra.ok else str(extra.error))
+	if extra.ok:
+		var el: DotCloudMirrorList = extra.value
+		_check("no entry is refused for them", el.mirrors.size() == 2 and el.dropped.is_empty(), str(el.dropped))
+		_check("an m1000042-style id is kept", str(el.mirrors[0]["id"]) == "m1000042")
+		_check("its base is served", el.pack_bases("alice/map").has("https://fp.example/content"))
+	_check("a list without them still parses", good.ok)
 
 	var env: Dictionary = JSON.parse_string(_signed(_list("https://cdn.example", three)).get_string_from_utf8())
 	env["payload"] = DotHash.base64url_encode(JSON.stringify(_list("https://evil.example", three)).to_utf8_buffer())
