@@ -620,7 +620,7 @@ func restart_process() -> DotResult:
 
 	if DotPlatform.is_web():
 		DotWeb.sync_filesystem()
-		DotWeb.reload()
+		DotWeb.reload_page()
 		return DotResult.success(true)
 
 	var exe := OS.get_executable_path()
