@@ -123,11 +123,7 @@ func is_metered() -> bool:
 	if force_metered >= 0:
 		return force_metered == 1
 	if DotWeb.available():
-		var v: Variant = DotWeb.eval(
-			"(function(){var c=navigator.connection;"
-			+ "return (c && (c.saveData===true || c.type==='cellular')) ? 1 : 0;})()"
-		)
-		return int(v) == 1 if v != null else false
+		return DotWeb.is_metered()
 	return DotPlatform.is_mobile()
 
 
