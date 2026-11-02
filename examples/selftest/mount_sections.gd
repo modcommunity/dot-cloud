@@ -45,7 +45,10 @@ static func uids(h: Node) -> void:
 		["stolen.png.import", thief, true],
 	])
 
+	# The pack steals a uid on purpose; the mounter's ERROR for it is the behaviour under test.
+	DotLog.set_channel_level("cloud.mount", DotLog.Level.OFF)
 	var res: DotResult = await mounter.mount(m, h._store, h._scheduler)
+	DotLog.clear_channel_level("cloud.mount")
 	h._check("mounted", res.ok, str(res.error) if not res.ok else "")
 
 	if not res.ok:
