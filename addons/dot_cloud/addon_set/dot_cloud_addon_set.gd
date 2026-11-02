@@ -584,20 +584,10 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	if not made.ok:
 		return made
 
-	# [b]Named by what is IN it[/b] -- every file's path and hash, and the build it is laid
-	# over -- not by `id@version`. A version republished from a corrected source is how an
-	# addon gets fixed, and dot-cloud's mounter learned the hard way that a cache keyed on
-	# the version keeps serving the broken one. Same name therefore means same bytes, which
-	# is what makes reusing an existing file safe -- and reuse is required, not merely
-	# cheaper: the file of that name may be the overlay this very process has mounted, and
-	# rewriting a mounted pack under a running engine corrupts what it reads next.
-	var lines := PackedStringArray([fingerprint])
-	for dir: String in manifests:
-		for f in (manifests[dir] as DotCloudManifest).files:
-			lines.append("%s/%s:%s" % [dir, f.path, f.sha256])
-	lines.sort()
-
-	var pack_path := DIR.path_join("overlay-%s.pck" % "\n".join(lines).sha256_text().substr(0, 16))
+	# Named by content, not `id@version`: a republished version must not reuse a stale file.
+	# Reuse is required: the file may be the overlay this process has mounted, and rewriting
+	# a mounted pack corrupts what it reads next.
+	var pack_path := _overlay_path(manifests, fingerprint)
 	var reuse := FileAccess.file_exists(pack_path)
 	var scratch := DIR.path_join("staging")
 	DotPaths.remove_tree(scratch)
@@ -664,23 +654,8 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 		DotPaths.remove_tree(scratch)
 		return DotResult.success({"pack": pack_path, "uids": uids, "probes": probes, "classes": 0, "reused": true})
 
-	# The build's list as the build shipped it -- saved by the boot script before any
-	# overlay replaced it -- and only then this set's entries.
-	var base := DotCloudScriptClass.read_cache(SHELL_CLASSES)
-	if base.is_empty():
-		base = DotCloudScriptClass.read_cache()
-
-	var known := {}
-	for e in base:
-		if e is Dictionary:
-			known[str(e.get("class", ""))] = e
-
-	var added := DotCloudScriptClass.entries_for(scripts, known)
-	var merged := DotCloudScriptClass.merge(base, replaced, added)
+	var added := _write_class_cache(scripts, replaced, scratch)
 	var cache_file := scratch.path_join("global_script_class_cache.cfg")
-	var c := FileAccess.open(cache_file, FileAccess.WRITE)
-	c.store_string(DotCloudScriptClass.cache_text(merged))
-	c.close()
 
 	err = packer.add_file(DotCloudScriptClass.CACHE_PATH, cache_file)
 	if err != OK:
@@ -697,6 +672,37 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 
 
 # --- Internals -----------------------------------------------------------------
+
+## The overlay's file name, from what is in it (see [method _assemble]).
+static func _overlay_path(manifests: Dictionary, fingerprint: String) -> String:
+	var lines := PackedStringArray([fingerprint])
+	for dir: String in manifests:
+		for f in (manifests[dir] as DotCloudManifest).files:
+			lines.append("%s/%s:%s" % [dir, f.path, f.sha256])
+	lines.sort()
+	return DIR.path_join("overlay-%s.pck" % "\n".join(lines).sha256_text().substr(0, 16))
+
+
+## Writes the merged class list into [param scratch]; returns the entries this set added.
+static func _write_class_cache(scripts: Dictionary, replaced: PackedStringArray, scratch: String) -> Array:
+	# The build's list as the build shipped it -- saved by the boot script before any
+	# overlay replaced it -- and only then this set's entries.
+	var base := DotCloudScriptClass.read_cache(SHELL_CLASSES)
+	if base.is_empty():
+		base = DotCloudScriptClass.read_cache()
+
+	var known := {}
+	for e in base:
+		if e is Dictionary:
+			known[str(e.get("class", ""))] = e
+
+	var added := DotCloudScriptClass.entries_for(scripts, known)
+	var merged := DotCloudScriptClass.merge(base, replaced, added)
+	var c := FileAccess.open(scratch.path_join("global_script_class_cache.cfg"), FileAccess.WRITE)
+	c.store_string(DotCloudScriptClass.cache_text(merged))
+	c.close()
+	return added
+
 
 ## Deletes every overlay but [param keep] and the one mounted in this process. An old
 ## overlay is never mounted again -- the plan names one file -- so the rest is disk.

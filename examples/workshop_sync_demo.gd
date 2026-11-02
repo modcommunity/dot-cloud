@@ -88,15 +88,7 @@ func _ready() -> void:
 		_progress.append([d, t, bd, bt, cur]))
 	add_child(_ws)
 
-	_make_pack("ws_a", "map")
-	_make_pack("ws_b", "prop")
-	_make_pack("ws_e", "map")
-	_make_pack("ws_off", "map")
-	_make_pack("ws_code", "script", true)
-	_make_pack("ws_m1", "map")
-	_make_pack("ws_m2", "map")
-	_make_pack("ws_q", "map", false, 1)
-	_make_pack("ws_wrongkey", "map", false, 0, "other")
+	_make_packs()
 
 	await _check_first_sync_and_cache()
 	await _check_unchanged()
@@ -112,6 +104,18 @@ func _ready() -> void:
 	_check_reporting()
 
 	_done()
+
+
+func _make_packs() -> void:
+	_make_pack("ws_a", "map")
+	_make_pack("ws_b", "prop")
+	_make_pack("ws_e", "map")
+	_make_pack("ws_off", "map")
+	_make_pack("ws_code", "script", true)
+	_make_pack("ws_m1", "map")
+	_make_pack("ws_m2", "map")
+	_make_pack("ws_q", "map", false, 1)
+	_make_pack("ws_wrongkey", "map", false, 0, "other")
 
 
 # --- the fake site ---------------------------------------------------------
