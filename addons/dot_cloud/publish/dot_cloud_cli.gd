@@ -299,6 +299,11 @@ func _versions(opts: Dictionary) -> int:
 	return EXIT_OK
 
 
+## True when the site's content id is the id asked for, with or without the owner prefix.
+static func _names_pack(content_id: String, id: String) -> bool:
+	return content_id == id or content_id.ends_with("/" + id)
+
+
 ## With --upload the site names the content id (owner/repo): claim first, estimating size from the source tree.
 func _claim(opts: Dictionary) -> DotResult:
 	if not opts.has("token-file"):
@@ -326,7 +331,7 @@ func _claim(opts: Dictionary) -> DotResult:
 	if opts.has("asset") and asset_id <= 0:
 		return DotResult.fail(DotError.CODE_INVALID, "--asset needs a positive asset id")
 	var r := up.claim(str(opts["id"]), version, count, bytes, asset_id)
-	if r.ok and asset_id > 0 and not str((r.value as Dictionary).get("contentId", "")).ends_with("/" + str(opts["id"])):
+	if r.ok and asset_id > 0 and not _names_pack(str((r.value as Dictionary).get("contentId", "")), str(opts["id"])):
 		var got_id := str((r.value as Dictionary).get("contentId", ""))
 		up.fail_claim(int((r.value as Dictionary)["id"]), "asset %d publishes as %s, not %s" % [asset_id, got_id, str(opts["id"])])
 		return DotResult.fail(DotError.CODE_INVALID, "asset %d publishes as '%s', not '%s': give the asset that repo name" % [asset_id, got_id, str(opts["id"])])
