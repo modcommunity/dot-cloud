@@ -57,6 +57,9 @@ extends DotConfig
 
 @export_group("Transfer")
 
+## Origins a game without a server fetches from; read by dot-game from the shared client content.json, declared so that file does not warn here.
+@export var content_urls: PackedStringArray = PackedStringArray()
+
 ## Files fetched at once. A game pack is hundreds of small files, so a cold download is bound by round
 ## trips: the reference pack (~460 objects) acquired in 8.2 s at 6 and 6.6 s at 12 over 40 ms, 50 Mbit/s.
 ## Browsers queue past ~6 HTTP/1.1 connections; over HTTP/2 all 12 share one. Stay at or under
