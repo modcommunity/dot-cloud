@@ -5,7 +5,7 @@ extends Node
 ## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 80
+const CHECKS := 85
 const SECTIONS := 10
 
 var _failures: int = 0
@@ -184,7 +184,7 @@ func _section_parallel() -> void:
 		_publish(id, "1", {"data.txt": body}, [])
 		deps.append({"id": id, "version": "1"})
 	_collection("par_all", deps)
-	var client := _client("parallel")
+	var client := _client("parallel", true)
 	client.config.parallel_packs = 3
 	var snaps: Array = []
 	client.job_progress_changed.connect(func(s: Dictionary) -> void: snaps.append(s))
@@ -192,6 +192,12 @@ func _section_parallel() -> void:
 	_check("twelve packs mount", got.ok and client.is_mounted(&"par_11", "1"), str(got.error) if not got.ok else "")
 	_check("the cap of 3 held", client.pool.peak <= 3, "peak %d" % client.pool.peak)
 	_check("packs did overlap", client.pool.peak >= 2, "peak %d" % client.pool.peak)
+	_check("manifests resolved within the cap", client.resolve_peak >= 2 and client.resolve_peak <= 3, "resolve peak %d" % client.resolve_peak)
+	var registered := -1
+	for i in snaps.size():
+		if int(snaps[i]["total_packs"]) == 12 and registered < 0:
+			registered = i
+	_check("all 12 packs known before the first byte", registered >= 0 and int(snaps[registered]["done_bytes"]) == 0, str(registered))
 	_check("downloaders made: no more than the cap", client.pool.size() <= 3, str(client.pool.size()))
 	var mono := true
 	var prev := -1
@@ -205,17 +211,18 @@ func _section_parallel() -> void:
 	_check("bytes sum to the payloads", int(last.get("total_bytes", 0)) >= total and int(last.get("done_bytes", 0)) == int(last.get("total_bytes", -1)), str(last))
 	client.queue_free()
 
-	var one := _client("parallel_one")
+	var one := _client("parallel_one", true)
 	one.config.parallel_packs = 1
 	var seq := await one.ensure(&"par_all", "1")
 	_check("a cap of 1 is still correct", seq.ok and one.pool.peak == 1 and one.pool.size() == 1, "peak %d" % one.pool.peak)
+	_check("a cap of 1 resolves one manifest at a time", one.resolve_peak == 1, "resolve peak %d" % one.resolve_peak)
 	one.queue_free()
 
 	var bad_deps := deps.duplicate()
 	bad_deps.insert(4, {"id": "par_missing", "version": "1"})
 	bad_deps.insert(9, {"id": "par_missing2", "version": "1"})
 	_collection("par_bad", bad_deps)
-	var broke := _client("parallel_bad")
+	var broke := _client("parallel_bad", true)
 	broke.config.parallel_packs = 4
 	var t0 := Time.get_ticks_msec()
 	var failed := await broke.ensure(&"par_bad", "1")
@@ -223,6 +230,8 @@ func _section_parallel() -> void:
 	_check("and does not hang", Time.get_ticks_msec() - t0 < 20000, "%d ms" % (Time.get_ticks_msec() - t0))
 	_check("the error names the dependency", failed.error != null and failed.error.message.contains("par_missing@1"), str(failed.error))
 	_check("the cap held while failing", broke.pool == null or broke.pool.peak <= 4)
+	_check("resolve cap held with failing manifests", broke.resolve_peak <= 4 and broke.resolve_peak >= 2, "resolve peak %d" % broke.resolve_peak)
+	_check("first failure in list order is named", failed.error != null and failed.error.message.contains("par_missing@1") and not failed.error.message.contains("par_missing2"), str(failed.error))
 	_check("a later acquire still works", (await broke.ensure(&"par_3", "1")).ok)
 	broke.queue_free()
 	_end()
@@ -321,7 +330,11 @@ func _read(id: String, version: String) -> DotCloudManifest:
 	return parsed.value if parsed.ok else null
 
 
-func _client(tag: String) -> DotCloudClient:
+var _server: Node = null
+
+
+## [param http] serves the published packs over the test server, so manifest fetches really overlap (a local read never yields).
+func _client(tag: String, http := false) -> DotCloudClient:
 	var config := DotCloudConfig.new()
 	config.cache_dir = WORK.path_join("cache_" + tag)
 	config.require_signed_manifests = true
@@ -333,6 +346,14 @@ func _client(tag: String) -> DotCloudClient:
 	client.register_service = false
 	# The default template looks for <base>/<id>/<version>/manifest.json: one search dir holds every pack.
 	client.local_search_dirs = PackedStringArray([WORK.path_join("published")])
+	if http:
+		if _server == null:
+			_server = preload("res://examples/http_test_server.gd").new()
+			_server.root = ProjectSettings.globalize_path(WORK.path_join("published"))
+			add_child(_server)
+			_server.start(0)
+		client.local_search_dirs = PackedStringArray()
+		client.http_base_urls = PackedStringArray([_server.base_url()])
 	client.allow_netchan_fallback = false
 	add_child(client)
 	return client

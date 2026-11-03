@@ -328,6 +328,9 @@ var _pinned: Dictionary = {}
 
 ## Syncs run side by side, up to [member DotCloudConfig.parallel_packs]; a further one (a prefetch while the boot map downloads) waits its turn instead of failing.
 var pool: DotCloudDownloaderPool = null
+
+## Most dependency manifests fetched together while resolving a collection; a test reads it to prove the cap held.
+var resolve_peak := 0
 var _boosted := 0
 
 

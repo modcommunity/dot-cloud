@@ -8,16 +8,41 @@ const MAX_DEPTH := 4
 
 ## Resolves a manifest's dependency tree ahead of the downloads and registers each pack's missing bytes,
 ## so the job's total is known before the first byte. Manifests are kept for [method ensure_dependency].
+## One level is fetched [member DotCloudConfig.parallel_packs] at a time and registered in list order, so the job's totals do not depend on which fetch finished first; a manifest that fails to resolve is skipped here and fails in [method ensure_all] with its context.
 static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest, depth: int) -> void:
 	if depth >= MAX_DEPTH or c.job == null:
 		return
+	var wanted: Array = []
+	var seen := {}
 	for dep in manifest.dependencies:
 		var id := StringName(str(dep["id"]))
 		var version := str(dep["version"])
-		if c.is_mounted(id, version):
+		var key := DotCloudClient.content_key_for(id, version)
+		if seen.has(key) or c.is_mounted(id, version):
 			continue
-		var resolved := await c.resolve_manifest(id, version)
-		if not resolved.ok or c.job == null:
+		seen[key] = true
+		wanted.append([id, version])
+	var results: Array = []
+	results.resize(wanted.size())
+	var state := {"next": 0, "live": 0, "running": 0}
+	var worker := func() -> void:
+		while int(state["next"]) < wanted.size():
+			var i: int = state["next"]
+			state["next"] = i + 1
+			state["running"] = int(state["running"]) + 1
+			c.resolve_peak = maxi(c.resolve_peak, int(state["running"]))
+			results[i] = await c.resolve_manifest(wanted[i][0], wanted[i][1])
+			state["running"] = int(state["running"]) - 1
+		state["live"] = int(state["live"]) - 1
+	for _w in mini(maxi(1, c.config.parallel_packs), wanted.size()):
+		state["live"] = int(state["live"]) + 1
+		worker.call()
+	while int(state["live"]) > 0:
+		await c.get_tree().process_frame
+	for resolved: DotResult in results:
+		if c.job == null:
+			return
+		if resolved == null or not resolved.ok:
 			continue
 		var m: DotCloudManifest = resolved.value
 		c._job_manifests[m.key()] = m

@@ -26,7 +26,7 @@ A collection's dependencies download side by side, `DotCloudConfig.parallel_pack
 - Progress: each pack reports against its own key, and `DotCloudJobProgress` sets rather than adds, so the overall bar stays monotonic and sums the same as in a serial run.
 - Failure: a failing dependency stops new ones starting and lets the running ones finish (no hang). The result names the first failure in list order (`<collection> needs <id>@<version>`, cause kept by `wrap`), and `error.context["failed_dependencies"]` lists every failed id.
 - `client.pool.peak` is the most syncs seen running together; `dependency_demo` ("parallel") checks it against the cap.
-- Manifests are still resolved one after another before the downloads (`register_dependencies`); that serial walk is what remains if a set of forty is slow to start.
+- Manifests resolve through the same cap: `register_dependencies` fetches each level `parallel_packs` manifests at a time (the manifest `DotHttp`'s HTTPRequest pool, no threads), then registers the packs in list order, so job totals do not depend on which fetch finished first and are all known before the first byte. Resolving is not counted as progress; the bar starts when downloads do, as before. A manifest that fails to resolve is skipped there and fails the collection in `ensure_all` with its context. `client.resolve_peak` is the most manifests fetched together; `dependency_demo` checks it against the cap.
 
 ## Not built
 
