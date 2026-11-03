@@ -15,6 +15,8 @@ var token_file := ""
 var on_progress := Callable()
 ## Retries per object PUT.
 var retries := 3
+## Object PUTs in flight at once; 1 sends them one at a time.
+var concurrency := 6
 
 
 ## Claims [param repo_name]@[param version]. Value: {id, contentId}; build the pack with that contentId.
@@ -84,20 +86,37 @@ func _run(man_bytes: PackedByteArray, out_dir: String, claim_id: int, cfg: Strin
 		if not page.ok:
 			return page.wrap("listing uploads")
 		var puts: Array = page.value.get("puts", [])
+		var jobs: Array = []
 		for p: Dictionary in puts:
 			var h := str(p["sha256"])
 			var file := out_dir.path_join("objects/%s/%s" % [h.substr(0, 2), h])
 			if not FileAccess.file_exists(file):
 				file = out_dir.path_join("bundles/%s.zip" % h)
-			var put := _put(p, file)
-			if not put.ok:
-				if put.error.detail.contains("403"):
-					break
-				return put.wrap("uploading %s" % h)
-			done += 1
-			bytes += int(p.get("size", 0))
-			if on_progress.is_valid():
-				on_progress.call(done, total, bytes)
+			jobs.append({"put": p, "path": file})
+		var expired := false
+		if concurrency > 1 and jobs.size() > 1:
+			var sent := _put_many(jobs, func(n: int, nbytes: int) -> void:
+				done += n
+				bytes += nbytes
+				if on_progress.is_valid():
+					on_progress.call(done, total, bytes))
+			if not sent.ok:
+				return sent
+			expired = bool(sent.value)
+		else:
+			for j: Dictionary in jobs:
+				var put := _put(j["put"], j["path"])
+				if not put.ok:
+					if put.error.detail.contains("403"):
+						expired = true
+						break
+					return put.wrap("uploading %s" % str(j["put"]["sha256"]))
+				done += 1
+				bytes += int(j["put"].get("size", 0))
+				if on_progress.is_valid():
+					on_progress.call(done, total, bytes)
+		if expired:
+			continue
 		if puts.is_empty() and int(page.value.get("remaining", 0)) == 0:
 			break
 
@@ -165,3 +184,66 @@ func _put(p: Dictionary, path: String) -> DotResult:
 			return DotResult.fail(DotError.CODE_FORBIDDEN, "presigned URL expired", "403")
 		OS.delay_msec(1000 << attempt)
 	return DotResult.fail(DotError.CODE_NETWORK, last)
+
+
+## PUTs [param jobs] ({put, path}) with one `curl --parallel`, [member concurrency] at a time; per-transfer outcomes are appended to a status file that is polled for [param progress] callable(n, bytes).
+## Value: true when a presigned URL had expired (403), so the caller asks for fresh ones.
+func _put_many(jobs: Array, progress: Callable) -> DotResult:
+	var base := OS.get_user_data_dir().path_join(".dot_cloud_put_%d" % OS.get_process_id())
+	var cfg := base + ".cfg"
+	var status := base + ".status"
+	var f := FileAccess.open(cfg, FileAccess.WRITE)
+	if f == null:
+		return DotResult.fail(DotError.CODE_IO, "Could not write the curl config.")
+	var sink := "NUL" if OS.get_name() == "Windows" else "/dev/null"
+	f.store_line("silent\nshow-error\nparallel\nparallel-max = %d" % concurrency)
+	for i in jobs.size():
+		var p: Dictionary = jobs[i]["put"]
+		if i > 0:
+			f.store_line("next")
+		f.store_line("fail\nrequest = \"PUT\"\nretry = %d\nretry-connrefused" % retries)
+		f.store_line("upload-file = %s\nurl = %s\noutput = %s" % [_q(jobs[i]["path"]), _q(str(p["url"])), _q(sink)])
+		for k in (p.get("headers", {}) as Dictionary):
+			f.store_line("header = %s" % _q("%s: %s" % [k, p["headers"][k]]))
+		f.store_line("write-out = %s" % _q("%%output{>>%s}%%{exitcode} %%{http_code} %s\\n" % [status.replace("\\", "/"), str(p["sha256"])]))
+	f.close()
+	FileAccess.open(status, FileAccess.WRITE).close()
+	var by_sha := {}
+	for j: Dictionary in jobs:
+		by_sha[str(j["put"]["sha256"])] = int(j["put"].get("size", 0))
+	var pid := OS.create_process("curl", ["-K", cfg])
+	if pid < 0:
+		DirAccess.remove_absolute(cfg)
+		DirAccess.remove_absolute(status)
+		return DotResult.fail(DotError.CODE_NETWORK, "Could not start curl.")
+	var seen := 0
+	var failed: Array = []
+	var expired := false
+	while true:
+		var running := OS.is_process_running(pid)
+		var lines := FileAccess.get_file_as_string(status).split("\n", false)
+		for i in range(seen, lines.size()):
+			var parts := lines[i].split(" ")
+			if parts.size() < 3:
+				continue
+			if parts[0] == "0":
+				progress.call(1, int(by_sha.get(parts[2], 0)))
+			elif parts[1] == "403":
+				expired = true
+			else:
+				failed.append("%s: curl exit %s HTTP %s" % [parts[2], parts[0], parts[1]])
+			seen = i + 1
+		if not running:
+			break
+		OS.delay_msec(100)
+	DirAccess.remove_absolute(cfg)
+	DirAccess.remove_absolute(status)
+	if not failed.is_empty():
+		var sha := str(failed[0]).get_slice(":", 0)
+		return DotResult.fail(DotError.CODE_NETWORK, "uploading %s: %s" % [sha, failed[0]], "%d failed" % failed.size())
+	return DotResult.success(expired)
+
+
+## Quotes a curl config value.
+func _q(v: String) -> String:
+	return '"%s"' % v.replace("\\", "\\\\").replace('"', '\\"')
