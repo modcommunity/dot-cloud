@@ -94,12 +94,15 @@ func _run(man_bytes: PackedByteArray, out_dir: String, claim_id: int, cfg: Strin
 				file = out_dir.path_join("bundles/%s.zip" % h)
 			jobs.append({"put": p, "path": file})
 		var expired := false
-		if concurrency > 1 and jobs.size() > 1:
+		if concurrency > 1 and jobs.size() > 1 and _parallel_supported():
+			var tally := [done, bytes]
 			var sent := _put_many(jobs, func(n: int, nbytes: int) -> void:
-				done += n
-				bytes += nbytes
+				tally[0] += n
+				tally[1] += nbytes
 				if on_progress.is_valid():
-					on_progress.call(done, total, bytes))
+					on_progress.call(tally[0], total, tally[1]))
+			done = tally[0]
+			bytes = tally[1]
 			if not sent.ok:
 				return sent
 			expired = bool(sent.value)
@@ -217,15 +220,20 @@ func _put_many(jobs: Array, progress: Callable) -> DotResult:
 		DirAccess.remove_absolute(status)
 		return DotResult.fail(DotError.CODE_NETWORK, "Could not start curl.")
 	var seen := 0
+	var reported := 0
 	var failed: Array = []
 	var expired := false
 	while true:
 		var running := OS.is_process_running(pid)
-		var lines := FileAccess.get_file_as_string(status).split("\n", false)
+		var text := FileAccess.get_file_as_string(status)
+		var lines := text.split("\n", false)
+		if not text.ends_with("\n") and not lines.is_empty():
+			lines.remove_at(lines.size() - 1)
 		for i in range(seen, lines.size()):
 			var parts := lines[i].split(" ")
 			if parts.size() < 3:
 				continue
+			reported += 1
 			if parts[0] == "0":
 				progress.call(1, int(by_sha.get(parts[2], 0)))
 			elif parts[1] == "403":
@@ -241,7 +249,26 @@ func _put_many(jobs: Array, progress: Callable) -> DotResult:
 	if not failed.is_empty():
 		var sha := str(failed[0]).get_slice(":", 0)
 		return DotResult.fail(DotError.CODE_NETWORK, "uploading %s: %s" % [sha, failed[0]], "%d failed" % failed.size())
+	if reported < jobs.size():
+		return DotResult.fail(DotError.CODE_NETWORK, "curl ended after %d of %d transfers" % [reported, jobs.size()])
 	return DotResult.success(expired)
+
+
+static var _parallel_ok := -1
+
+
+## True when the installed curl can drive [method _put_many]: `%output{}` in write-out needs 8.3.0 (`%{exitcode}` 7.75, `--parallel` 7.66).
+func _parallel_supported() -> bool:
+	if _parallel_ok < 0:
+		var out: Array = []
+		var ok := false
+		if OS.execute("curl", ["--version"], out, true) == 0:
+			var m := RegEx.create_from_string("curl (\\d+)\\.(\\d+)").search("".join(out))
+			if m != null:
+				var v := int(m.get_string(1)) * 1000 + int(m.get_string(2))
+				ok = v >= 8003
+		_parallel_ok = 1 if ok else 0
+	return _parallel_ok == 1
 
 
 ## Quotes a curl config value.
