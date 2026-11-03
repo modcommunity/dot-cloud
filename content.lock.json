@@ -1,0 +1,15 @@
+{
+	"format": 1,
+	"mirrors": [],
+	"origin": "https://dotgames.org/content",
+	"packs": [
+		{
+			"id": "gamemann/game-arena",
+			"into": "",
+			"kind": "pack",
+			"manifest_sha256": "578571575ce2e952ee35790012ab4d3707cc952cf77efa2c6a33ef819c431be4",
+			"optional": false,
+			"version": "0.1.42"
+		}
+	]
+}
