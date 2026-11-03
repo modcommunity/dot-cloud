@@ -6,6 +6,15 @@ extends RefCounted
 const CHANNEL := "cloud"
 
 
+## True for a file under a tooling directory at any depth: a pack ships `addons/<x>/examples/`, whose scripts do not parse in a running game.
+static func _skipped(path: String) -> bool:
+	var parts := path.split("/")
+	for i in parts.size() - 1:
+		if DotCloudClient.WARM_SKIP_DIRS.has(parts[i]):
+			return true
+	return false
+
+
 ## The addon classes a pack names, compiled while its big objects still download.
 static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> void:
 	if DotPlatform.has_threads() or c._prewarming or not c.is_inside_tree():
@@ -13,8 +22,7 @@ static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> vo
 	var names := PackedStringArray()
 	var files := PackedStringArray()
 	for file in manifest.files:
-		var top := file.path.get_slice("/", 0)
-		if file.path.get_extension() != "gd" or (file.path.contains("/") and DotCloudClient.WARM_SKIP_DIRS.has(top)):
+		if file.path.get_extension() != "gd" or _skipped(file.path):
 			continue
 		var object := c.store.path_for(file.sha256)
 		if FileAccess.file_exists(object):
@@ -45,8 +53,7 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 			continue
 		for file in manifest.files:
 			# Tooling and examples are never loaded by a running game; warming them cost ~12 s of a join.
-			var top := file.path.get_slice("/", 0)
-			if file.path.contains("/") and DotCloudClient.WARM_SKIP_DIRS.has(top):
+			if _skipped(file.path):
 				continue
 			var path := manifest.resource_path(file)
 			# A tokenized script ships as x.gdc behind x.gd.remap; load the .gd path either way.

@@ -87,5 +87,9 @@ chk "a linked addon is matched by its repository" "[ $? -eq 0 ] && ! grep -q zee
 rm -f "$W/h/addons/zee_weapons"
 hp --host-addons "$W/missing"
 chk "missing --host-addons argument fails" "[ $? -ne 0 ]"
+# examples/ at the source root is editor-only and never packed; a nested folder of that name is content
+mkdir -p "$W/h/examples" "$W/h/sub/examples"; echo e > "$W/h/examples/e.gd"; echo n > "$W/h/sub/examples/n.txt"
+rm -rf ho; hp
+chk "root examples/ left out, nested examples/ kept" "[ $? -eq 0 ] && ! grep -q 'examples/e.gd' ho/manifest.json && grep -q 'sub/examples/n.txt' ho/manifest.json"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

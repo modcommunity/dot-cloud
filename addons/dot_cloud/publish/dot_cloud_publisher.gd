@@ -65,6 +65,9 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 	".git", ".godot", ".svn", "__pycache__",
 ])
 
+## Top-level folders of the source skipped entirely: `examples/` holds editor-only suites and demos, whose scripts do not parse in a web export (they name classes a shell lacks) and which no game scene loads.
+var exclude_roots: PackedStringArray = PackedStringArray(["examples"])
+
 ## Where an imported output lives inside a pack, instead of `.godot/imported/` as in the project.
 ## A web export cannot read files under the engine's reserved `.godot` name, though Linux can, so a
 ## headless mount check passes while the game fails on the web.
@@ -555,6 +558,11 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 		for dir_name in exclude_dirs:
 			if rel.begins_with(dir_name + "/") or rel.contains("/" + dir_name + "/"):
+				skip = true
+				break
+
+		for root in exclude_roots:
+			if rel.begins_with(root + "/"):
 				skip = true
 				break
 
