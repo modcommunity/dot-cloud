@@ -44,6 +44,13 @@ extends DotCloudSource
 ## a [Node] and must live in the tree.
 var http: DotHttp = null
 
+## Requests this source keeps in flight at once, across every downloader sharing it. DotHttp's pool is
+## 16 and a request past it fails at once with a state error that would count against the base.
+@export_range(1, 15, 1) var max_in_flight: int = 12
+
+var _active_requests := 0
+signal _slot_freed
+
 ## Base URL that last worked, tried first next time.
 ##
 ## Sticky rather than round-robin: mixing a fast mirror and a slow one at random
@@ -59,6 +66,17 @@ const BASE_FAILURES_BEFORE_DEMOTION := 2
 
 ## base -> {fails, until_ms}. Per base, so one dead mirror never trips the source breaker.
 var _base_health: Dictionary = {}
+
+
+## One HTTP download, waiting for a free slot first so packs downloading side by side never overrun the pool.
+func download(url: String, dest: String, from: int, extra_headers: Dictionary = {}) -> DotResult:
+	while _active_requests >= max_in_flight:
+		await _slot_freed
+	_active_requests += 1
+	var res := await http.download_to_file(url, dest, from, extra_headers)
+	_active_requests -= 1
+	_slot_freed.emit()
+	return res
 
 
 func source_name() -> String:
@@ -127,7 +145,7 @@ func fetch(
 				store.discard_partial(file.sha256)
 				resume_from = 0
 
-		var res := await http.download_to_file(
+		var res := await download(
 			url, store.partial_path(file.sha256), resume_from, headers
 		)
 
@@ -140,7 +158,7 @@ func fetch(
 				{"file": file.path, "why": res.code()}
 			)
 			store.discard_partial(file.sha256)
-			res = await http.download_to_file(
+			res = await download(
 				url, store.partial_path(file.sha256), 0, headers
 			)
 
@@ -177,7 +195,7 @@ func fetch(
 			)
 			store.discard_partial(file.sha256)
 
-			var restarted := await http.download_to_file(
+			var restarted := await download(
 				url, store.partial_path(file.sha256), 0, headers
 			)
 
@@ -243,7 +261,7 @@ func fetch_bundle(
 	for base in _resolve_bases(manifest):
 		var url := "%s/%s" % [base.trim_suffix("/"), str(decl["url_path"]).trim_prefix("/")]
 		store.discard_partial(sha)
-		var res := await http.download_to_file(url, part, 0, headers)
+		var res := await download(url, part, 0, headers)
 		if not res.ok:
 			last = res
 			_note_base_failure(base)
