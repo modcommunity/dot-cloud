@@ -37,5 +37,6 @@ extends RefCounted
 #     a game's suggested packs (its map packs) mount by default for a solo session, with opt-outs.
 # 17: DotCloudSuggested.MODE_ASK / asks / device_choice / mode_for_choice, DotCloudWorkshop.set_device_suggested_mode:
 #     the per-device Off / Ask / Auto switch for suggested packs; ask prompts once through ask_fn and a refusal skips only those.
-const LEVEL := 17
+# 18: DotCloudJobProgress, DotCloudClient.job / begin_job / end_job / job_progress_changed (one overall bar for a many-pack job).
+const LEVEL := 18
 const OLDEST := 1

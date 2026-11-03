@@ -67,6 +67,8 @@ const FORMAT_VERSION := 1
 
 ## Most dependencies a manifest may name (a typo or a hostile list must not start a hundred downloads).
 const MAX_DEPENDENCIES := 8
+## A collection (no files of its own, only dependencies) may list a whole map set.
+const MAX_COLLECTION := 128
 
 ## Format version the document declared.
 var format_version: int = FORMAT_VERSION
@@ -274,8 +276,9 @@ func validate_shape() -> DotResult:
 
 ## Every dependency names a safe id and one exact version, and none is this content itself.
 func _check_dependencies() -> DotResult:
-	if dependencies.size() > MAX_DEPENDENCIES:
-		return DotResult.fail(DotError.CODE_INVALID, "A manifest names at most %d dependencies." % MAX_DEPENDENCIES)
+	var cap := MAX_COLLECTION if files.is_empty() else MAX_DEPENDENCIES
+	if dependencies.size() > cap:
+		return DotResult.fail(DotError.CODE_INVALID, "A manifest names at most %d dependencies." % cap)
 	for dep in dependencies:
 		var id := str(dep.get("id", ""))
 		var ver := str(dep.get("version", ""))

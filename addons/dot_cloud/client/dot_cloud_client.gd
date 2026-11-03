@@ -9,6 +9,7 @@ extends "dot_cloud_client_urls.gd"
 const CHANNEL := "cloud"
 const _Prefetch := preload("dot_cloud_client_prefetch.gd")
 const _Warm := preload("dot_cloud_client_warm.gd")
+const _Job := preload("dot_cloud_client_job.gd")
 
 ## Registry name the rest of the family looks this up under.
 const SERVICE := &"dot_cloud_client"
@@ -31,6 +32,9 @@ signal phase_changed(phase: Phase, text: String)
 
 ## Forwarded from the downloader. See [method DotCloudDownloader.progress].
 signal progress_changed(progress: Dictionary)
+
+## The whole job's progress (every pack of a dependency tree or a Workshop sync), see [DotCloudJobProgress].
+signal job_progress_changed(snapshot: Dictionary)
 
 ## Content is downloaded, verified and mounted.
 signal content_ready(manifest: DotCloudManifest, mount_prefix: String)
@@ -322,6 +326,11 @@ func acquire(
 ##
 ## A second caller for the same content waits for the first: the downloader runs one sync at a time, and failing the later caller lost the race between sv_map and a game's initial map.
 var _inflight: Dictionary = {}
+## The job being tracked, or null; [method begin_job] and [method end_job] nest.
+var job: DotCloudJobProgress = null
+var _job_depth := 0
+var _job_key := ""
+var _job_manifests: Dictionary = {}
 ## manifest URL -> pinned sha256 of the manifest file, set by [method ensure_locked].
 var _pinned: Dictionary = {}
 
@@ -464,11 +473,35 @@ func _ensure_dependencies(manifest: DotCloudManifest, key: String, chain: Packed
 		return DotResult.fail(DotError.CODE_INVALID, "Content dependencies are circular or nested too deep.", key)
 	var below := chain.duplicate()
 	below.append(key)
+	begin_job(manifest.display_name if manifest.display_name != "" else key)
+	await _Job.register_dependencies(self, manifest, 0)
+	var outcome := DotResult.success(true)
 	for dep in manifest.dependencies:
-		var got := await ensure(StringName(str(dep["id"])), str(dep["version"]), PackedStringArray(), "", below)
+		var got := await _Job.ensure_dependency(self, dep, below)
 		if not got.ok:
-			return got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
-	return DotResult.success(true)
+			outcome = got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
+			break
+	end_job()
+	return outcome
+
+
+## Starts (or joins) a job: from here until the matching [method end_job] every pack's progress
+## also feeds [member job]. A caller that knows its packs up front calls [method DotCloudJobProgress.add_pack].
+func begin_job(label: String = "") -> DotCloudJobProgress:
+	if job == null:
+		job = DotCloudJobProgress.new()
+		job.label = label
+		job.changed.connect(func(s: Dictionary) -> void: job_progress_changed.emit(s))
+	_job_depth += 1
+	return job
+
+
+func end_job() -> void:
+	_job_depth = maxi(0, _job_depth - 1)
+	if _job_depth == 0 and job != null:
+		job.finish_all()
+		job = null
+		_job_manifests.clear()
 
 
 ## Where the dependency [param content_id] of a mounted pack is mounted, or "" when it is not mounted here.
@@ -608,6 +641,9 @@ func _download(
 		}
 	)
 
+	if job != null:
+		job.add_pack(key, int(plan["missing_bytes"]), int(plan["missing_files"]))
+
 	if int(plan["missing_files"]) == 0:
 		return DotResult.success(true)
 
@@ -620,8 +656,12 @@ func _download(
 		await _sync_freed
 
 	_sync_busy = true
+	_job_key = key
 	scheduler.set_boost(600.0)
 	var synced := await downloader.sync(manifest, groups)
+	if job != null and synced.ok:
+		job.finish_pack(key)
+	_job_key = ""
 	scheduler.clear_boost()
 	_sync_busy = false
 	# Deferred, so a waiter resumes after this frame's caller has moved on rather
@@ -1207,6 +1247,8 @@ func _fail(error: DotError) -> DotResult:
 
 
 func _on_progress(p: Dictionary) -> void:
+	if job != null and _job_key != "":
+		job.set_pack_done(_job_key, int(p.get("done_bytes", 0)), int(p.get("done_files", 0)))
 	progress_changed.emit(p)
 
 

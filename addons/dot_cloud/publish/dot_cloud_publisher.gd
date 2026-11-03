@@ -241,7 +241,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		if not relatives.has(rel):
 			relatives.append(rel)
 
-	if relatives.is_empty():
+	if relatives.is_empty() and dependencies.is_empty():
 		return DotResult.fail(
 			DotError.CODE_INVALID,
 			"No publishable files in the source directory.",

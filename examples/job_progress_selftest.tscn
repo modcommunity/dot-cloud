@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://examples/job_progress_selftest.gd" id="1_job"]
+
+[node name="JobProgressSelftest" type="Node"]
+script = ExtResource("1_job")

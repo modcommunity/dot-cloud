@@ -7,6 +7,7 @@ The reasoning behind content delivery, one subject per file. [CLAUDE.md](../CLAU
 | [mounting.md](mounting.md) | Why a path is never reused, what unloading can and cannot do, the addon-API check, UIDs at mount, the prefix check |
 | [trust.md](trust.md) | The manifest as the trust boundary, path components, the envelope, the key floor, scoped keys |
 | [client.md](client.md) | The registry name and who finds it, `acquire` and `ensure`, local manifests |
+| [collections.md](collections.md) | Downloading a whole map set: bundle vs collection manifest vs as is, and the overall job progress |
 | [store.md](store.md) | Content addressing, the index against the directory, partials, platform notes |
 | [sources.md](sources.md) | The three sources, why a source is skipped, the in-band bounds, resume, the downloader |
 | [cdn-publish.md](cdn-publish.md) | Publishing through the site with a creator token: claim, manifest, presigned PUTs, finalize, the licence gate, `content.lock.json`, stores as packs |

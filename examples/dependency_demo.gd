@@ -5,8 +5,8 @@ extends Node
 ## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 48
-const SECTIONS := 8
+const CHECKS := 53
+const SECTIONS := 9
 
 var _failures: int = 0
 var _checks: int = 0
@@ -41,6 +41,7 @@ func _run() -> void:
 	await _section_manifest_rules()
 	await _section_nested()
 	await _section_concurrent()
+	await _section_collection()
 	_section_vram_tags()
 
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
@@ -120,11 +121,18 @@ func _section_manifest_rules() -> void:
 		var d := base.duplicate()
 		d["dependencies"] = bad
 		_check("refused %s" % JSON.stringify(bad), not DotCloudManifest.from_dict(d).ok)
-	var many := base.duplicate()
-	many["dependencies"] = []
+	var many := {"content_id": "x", "version": "1", "files": [{"path": "a.txt", "sha256": "0".repeat(64), "size": 1}], "dependencies": []}
 	for i in 9:
 		many["dependencies"].append({"id": "s%d" % i, "version": "1"})
-	_check("more than eight refused", not DotCloudManifest.from_dict(many).ok)
+	_check("more than eight refused for a pack with files", not DotCloudManifest.from_dict(many).ok)
+	var coll := base.duplicate()
+	coll["dependencies"] = []
+	for i in 40:
+		coll["dependencies"].append({"id": "s%d" % i, "version": "1"})
+	_check("a collection (no files) may list forty", DotCloudManifest.from_dict(coll).ok)
+	for i in 100:
+		coll["dependencies"].append({"id": "t%d" % i, "version": "1"})
+	_check("a collection is still capped", not DotCloudManifest.from_dict(coll).ok)
 	_end()
 
 
@@ -137,6 +145,29 @@ func _section_nested() -> void:
 	var got := await client.ensure(&"deep_top", "1")
 	_check("chain mounts", got.ok, str(got.error) if not got.ok else "")
 	_check("deepest first", _ready_keys.size() == 3 and _ready_keys[0] == "lib_store@1" and _ready_keys[2] == "deep_top@1", str(_ready_keys))
+	client.queue_free()
+	_end()
+
+
+func _section_collection() -> void:
+	_begin("collection")
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "all_maps"
+	pub.version = "1"
+	pub.signing_key_pem = str(_keys["private"])
+	pub.signing_key_id = "demo"
+	for id in ["map_a", "map_b"]:
+		pub.dependencies.append({"id": id, "version": "1"})
+	var src := WORK.path_join("src_all_maps")
+	DirAccess.make_dir_recursive_absolute(src)
+	var res := pub.publish(src, _published("all_maps", "1"))
+	_check("an empty source publishes as a collection", res.ok, str(res.error) if not res.ok else "")
+	var client := _client("collection")
+	var last: Array = [{}]
+	client.job_progress_changed.connect(func(s: Dictionary) -> void: last[0] = s)
+	var got := await client.ensure(&"all_maps", "1")
+	_check("the collection mounts every map", got.ok and client.dependency_prefix(&"map_a", "1") != "" and client.dependency_prefix(&"map_b", "1") != "", str(got.error) if not got.ok else "")
+	_check("one job covered both maps and the store", int(last[0].get("total_packs", 0)) == 3 and int(last[0].get("done_packs", 0)) == 3, str(last[0]))
 	client.queue_free()
 	_end()
 

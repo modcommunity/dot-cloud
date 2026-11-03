@@ -414,6 +414,9 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		bytes_total += int(c["missing"])
 	var bytes_done := 0
 	var done := 0
+	var job := cloud_client.begin_job("subscribed content")
+	for c in to_mount:
+		job.add_pack(DotCloudClient.content_key_for(StringName(str(c["id"])), str(c["version"])), int(c["missing"]))
 	for c in to_mount:
 		var id: String = c["id"]
 		var version: String = c["version"]
@@ -434,6 +437,7 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		else:
 			_fail_pack(failed, id, version, mounted.error)
 		progress.emit(done, total, bytes_done, bytes_total, str(c["title"]))
+	cloud_client.end_job()
 
 
 ## The subscribed packs worth planning: each one the list names, minus those the device, the key, the
