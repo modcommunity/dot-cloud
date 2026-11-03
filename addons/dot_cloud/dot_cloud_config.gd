@@ -63,6 +63,9 @@ extends DotConfig
 ## [code]DotHttp.MAX_POOL[/code] (16), which bounds the request nodes.
 @export_range(1, 32, 1) var parallel_downloads: int = 12
 
+## Packs downloaded at once (API 19): a collection's dependencies run side by side, each pack with its own share of [member parallel_downloads]. 1 restores one pack at a time.
+@export_range(1, 16, 1) var parallel_packs: int = 4
+
 ## Fetch a manifest's bundle (one archive of its small objects) when enough are missing.
 @export var use_bundles: bool = true
 @export var bundle_min_missing: int = 8

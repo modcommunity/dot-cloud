@@ -55,7 +55,7 @@ static func run(c: DotCloudClient, doc: Dictionary) -> DotResult:
 		fetched += 1
 		bytes += missing
 
-	if c._inflight.is_empty() and not c._sync_busy:
+	if c._inflight.is_empty() and not (c.pool != null and c.pool.running() > 0):
 		c._set_phase(DotCloudClient.Phase.IDLE, "")
 	DotLog.info(CHANNEL, "prefetch finished", {
 		"server": plan["server_id"], "fetched": fetched, "skipped": skipped.size(),

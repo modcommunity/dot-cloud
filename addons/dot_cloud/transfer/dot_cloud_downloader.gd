@@ -47,6 +47,9 @@ var sources: Array[DotCloudSource] = []
 ## The HTTP node handed to any [DotCloudSourceHttp] in [member sources].
 var _http: DotHttp = null
 
+## Most files fetched at once by this downloader; 0 = [member DotCloudConfig.parallel_downloads].
+var slots_cap := 0
+
 var _active: int = 0
 
 ## What is in flight right now, newest first, as player-facing names.
@@ -196,6 +199,8 @@ func sync(
 
 	var results := {}
 	var slots := maxi(1, config.parallel_downloads)
+	if slots_cap > 0:
+		slots = mini(slots, slots_cap)
 	_workers_finished = 0
 	# Big objects download while the bundle unpacks, and addon classes prewarm once it has.
 	var started_workers := _start_pool(big, results, manifest, slots)

@@ -38,5 +38,6 @@ extends RefCounted
 # 17: DotCloudSuggested.MODE_ASK / asks / device_choice / mode_for_choice, DotCloudWorkshop.set_device_suggested_mode:
 #     the per-device Off / Ask / Auto switch for suggested packs; ask prompts once through ask_fn and a refusal skips only those.
 # 18: DotCloudJobProgress, DotCloudClient.job / begin_job / end_job / job_progress_changed (one overall bar for a many-pack job).
-const LEVEL := 18
+# 19: DotCloudConfig.parallel_packs (default 4), DotCloudDownloaderPool, DotCloudClient.pool: a collection's dependencies download side by side.
+const LEVEL := 19
 const OLDEST := 1

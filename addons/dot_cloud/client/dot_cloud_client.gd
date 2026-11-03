@@ -202,15 +202,8 @@ func start() -> DotResult:
 
 	_build_sources()
 
-	downloader = DotCloudDownloader.new()
-	downloader.name = "Downloader"
-	downloader.config = config
-	downloader.store = store
-	downloader.scheduler = scheduler
-	downloader.sources = sources
-	downloader.progress_changed.connect(_on_progress)
-	downloader.bundle_unpacked.connect(_prewarm_classes)
-	add_child(downloader)
+	downloader = _make_downloader(false)
+	pool = DotCloudDownloaderPool.new(downloader, _make_downloader, func() -> int: return config.parallel_packs)
 
 	_started = true
 	_set_phase(Phase.IDLE, "")
@@ -329,16 +322,13 @@ var _inflight: Dictionary = {}
 ## The job being tracked, or null; [method begin_job] and [method end_job] nest.
 var job: DotCloudJobProgress = null
 var _job_depth := 0
-var _job_key := ""
 var _job_manifests: Dictionary = {}
 ## manifest URL -> pinned sha256 of the manifest file, set by [method ensure_locked].
 var _pinned: Dictionary = {}
 
-## Whether [member downloader] is running a sync right now, and the signal that it stopped.
-##
-## A second sync (a prefetch while the boot map downloads) waits its turn instead of failing.
-var _sync_busy := false
-signal _sync_freed
+## Syncs run side by side, up to [member DotCloudConfig.parallel_packs]; a further one (a prefetch while the boot map downloads) waits its turn instead of failing.
+var pool: DotCloudDownloaderPool = null
+var _boosted := 0
 
 
 ## Wait for an acquisition already running for [param key].
@@ -475,12 +465,7 @@ func _ensure_dependencies(manifest: DotCloudManifest, key: String, chain: Packed
 	below.append(key)
 	begin_job(manifest.display_name if manifest.display_name != "" else key)
 	await _Job.register_dependencies(self, manifest, 0)
-	var outcome := DotResult.success(true)
-	for dep in manifest.dependencies:
-		var got := await _Job.ensure_dependency(self, dep, below)
-		if not got.ok:
-			outcome = got.wrap("%s needs %s@%s" % [key, dep["id"], dep["version"]])
-			break
+	var outcome := await _Job.ensure_all(self, key, manifest.dependencies, below)
 	end_job()
 	return outcome
 
@@ -652,22 +637,16 @@ func _download(
 		"Downloading %s…" % DotPaths.format_bytes(int(plan["missing_bytes"]))
 	)
 
-	while _sync_busy:
-		await _sync_freed
-
-	_sync_busy = true
-	_job_key = key
+	var worker := await pool.take(key)
+	_boosted += 1
 	scheduler.set_boost(600.0)
-	var synced := await downloader.sync(manifest, groups)
+	var synced := await worker.sync(manifest, groups)
 	if job != null and synced.ok:
 		job.finish_pack(key)
-	_job_key = ""
-	scheduler.clear_boost()
-	_sync_busy = false
-	# Deferred, so a waiter resumes after this frame's caller has moved on rather
-	# than inside it -- and only one of them takes the slot: the rest see it busy
-	# again and go back to waiting.
-	_sync_freed.emit.call_deferred()
+	_boosted -= 1
+	if _boosted == 0:
+		scheduler.clear_boost()
+	pool.give_back(worker)
 
 	return synced
 
@@ -1097,8 +1076,8 @@ func release(content_key: String) -> DotResult:
 
 
 func cancel() -> void:
-	if downloader != null and downloader.is_running():
-		downloader.cancel()
+	if pool != null:
+		pool.cancel_all()
 
 
 ## Fetches and verifies the site's signed mirror list ([param url] or [member DotCloudConfig.mirrors_url])
@@ -1246,9 +1225,26 @@ func _fail(error: DotError) -> DotResult:
 	return DotResult.failure(error)
 
 
-func _on_progress(p: Dictionary) -> void:
-	if job != null and _job_key != "":
-		job.set_pack_done(_job_key, int(p.get("done_bytes", 0)), int(p.get("done_files", 0)))
+## [param extra] downloaders (beyond the first) get a share of [member DotCloudConfig.parallel_downloads], so four packs at once do not open four times the connections.
+func _make_downloader(extra: bool) -> DotCloudDownloader:
+	var d := DotCloudDownloader.new()
+	d.name = "Downloader%d" % (pool.size() if extra and pool != null else 0)
+	d.config = config
+	d.store = store
+	d.scheduler = scheduler
+	d.sources = sources
+	if extra:
+		d.slots_cap = maxi(2, ceili(float(config.parallel_downloads) / float(maxi(1, config.parallel_packs))))
+	d.progress_changed.connect(_on_progress.bind(d))
+	d.bundle_unpacked.connect(_prewarm_classes)
+	add_child(d)
+	return d
+
+
+func _on_progress(p: Dictionary, from: DotCloudDownloader) -> void:
+	var key := pool.key_of(from) if pool != null else ""
+	if job != null and key != "":
+		job.set_pack_done(key, int(p.get("done_bytes", 0)), int(p.get("done_files", 0)))
 	progress_changed.emit(p)
 
 

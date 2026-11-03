@@ -1,6 +1,6 @@
 # Downloading a whole map set: bundle, collection, or as is
 
-Solo (offline) play wants every map on the disk; an online client wants only the current map and its materials. About forty separate packs is slow for solo (a manifest fetch, a signature check and a mount each) and was noisy in the shell, which now shows one overall bar ([client](client.md), `DotCloudJobProgress`, API 18).
+Solo (offline) play wants every map on the disk; an online client wants only the current map and its materials. About forty separate packs is slow for solo (a manifest fetch, a signature check and a mount each) and was noisy in the shell, which now shows one overall bar ([client](client.md), `DotCloudJobProgress`, API 18, parallel since API 19).
 
 ## The options
 
@@ -19,7 +19,15 @@ A dependency list already is a collection: a manifest with no files and `depende
 
 What is built: a manifest with no files may name up to `DotCloudManifest.MAX_COLLECTION` (128) dependencies, where a pack with files keeps the cap of eight (`dependency_demo`, "collection"). A game publishes `<game>-all-maps@N` with `--depends` for each map pack, and solo mode `ensure`s that one id; online the server hands out the single map pack.
 
+## Parallel downloads (API 19)
+
+A collection's dependencies download side by side, `DotCloudConfig.parallel_packs` at a time (default 4, 1 to 16; `--cloud-parallel-packs`, `DOT_CLOUD_PARALLEL_PACKS`, or the JSON file, so an admin panel can set it). `DotCloudDownloaderPool` gives each concurrent pack its own `DotCloudDownloader` and so its own HTTPRequest pool: no threads, so it is the same on web. Extra downloaders fetch with a share of `parallel_downloads` (the setting divided by the cap, at least 2) so four packs do not open four times the connections; the first downloader keeps the full setting for a lone pack. Syncs past the cap wait for a free downloader, which also holds for unrelated callers (a prefetch beside the boot map).
+
+- Progress: each pack reports against its own key, and `DotCloudJobProgress` sets rather than adds, so the overall bar stays monotonic and sums the same as in a serial run.
+- Failure: a failing dependency stops new ones starting and lets the running ones finish (no hang). The result names the first failure in list order (`<collection> needs <id>@<version>`, cause kept by `wrap`), and `error.context["failed_dependencies"]` lists every failed id.
+- `client.pool.peak` is the most syncs seen running together; `dependency_demo` ("parallel") checks it against the cap.
+- Manifests are still resolved one after another before the downloads (`register_dependencies`); that serial walk is what remains if a set of forty is slow to start.
+
 ## Not built
 
-- Dependencies are acquired one after another: `_download` is serialised by the client's single sync, and the downloader parallelises only the files inside a pack. Fetching several packs at once needs a sync per pack and is the next step if forty serial manifest round trips are still slow.
 - Nothing publishes the collection yet: the game repositories' publish scripts (and the suggested-packs list in `DotCloudSuggested`, which is the other way solo gets maps) need to emit it.

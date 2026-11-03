@@ -5,8 +5,8 @@ extends Node
 ## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 53
-const SECTIONS := 9
+const CHECKS := 80
+const SECTIONS := 10
 
 var _failures: int = 0
 var _checks: int = 0
@@ -42,6 +42,7 @@ func _run() -> void:
 	await _section_nested()
 	await _section_concurrent()
 	await _section_collection()
+	await _section_parallel()
 	_section_vram_tags()
 
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
@@ -170,6 +171,75 @@ func _section_collection() -> void:
 	_check("one job covered both maps and the store", int(last[0].get("total_packs", 0)) == 3 and int(last[0].get("done_packs", 0)) == 3, str(last[0]))
 	client.queue_free()
 	_end()
+
+
+func _section_parallel() -> void:
+	_begin("parallel")
+	var deps: Array = []
+	var total := 0
+	for i in 12:
+		var id := "par_%d" % i
+		var body := ("pack %d\n" % i).repeat(40)
+		total += body.length()
+		_publish(id, "1", {"data.txt": body}, [])
+		deps.append({"id": id, "version": "1"})
+	_collection("par_all", deps)
+	var client := _client("parallel")
+	client.config.parallel_packs = 3
+	var snaps: Array = []
+	client.job_progress_changed.connect(func(s: Dictionary) -> void: snaps.append(s))
+	var got := await client.ensure(&"par_all", "1")
+	_check("twelve packs mount", got.ok and client.is_mounted(&"par_11", "1"), str(got.error) if not got.ok else "")
+	_check("the cap of 3 held", client.pool.peak <= 3, "peak %d" % client.pool.peak)
+	_check("packs did overlap", client.pool.peak >= 2, "peak %d" % client.pool.peak)
+	_check("downloaders made: no more than the cap", client.pool.size() <= 3, str(client.pool.size()))
+	var mono := true
+	var prev := -1
+	for s: Dictionary in snaps:
+		var d := int(s["done_bytes"])
+		mono = mono and d >= prev and d <= int(s["total_bytes"])
+		prev = d
+	_check("progress never moved back or past total", mono and snaps.size() > 1, "%d snapshots" % snaps.size())
+	var last: Dictionary = snaps[-1] if not snaps.is_empty() else {}
+	_check("the job ends at 12 of 12 packs", int(last.get("done_packs", 0)) == 12 and int(last.get("total_packs", 0)) == 12, str(last))
+	_check("bytes sum to the payloads", int(last.get("total_bytes", 0)) >= total and int(last.get("done_bytes", 0)) == int(last.get("total_bytes", -1)), str(last))
+	client.queue_free()
+
+	var one := _client("parallel_one")
+	one.config.parallel_packs = 1
+	var seq := await one.ensure(&"par_all", "1")
+	_check("a cap of 1 is still correct", seq.ok and one.pool.peak == 1 and one.pool.size() == 1, "peak %d" % one.pool.peak)
+	one.queue_free()
+
+	var bad_deps := deps.duplicate()
+	bad_deps.insert(4, {"id": "par_missing", "version": "1"})
+	bad_deps.insert(9, {"id": "par_missing2", "version": "1"})
+	_collection("par_bad", bad_deps)
+	var broke := _client("parallel_bad")
+	broke.config.parallel_packs = 4
+	var t0 := Time.get_ticks_msec()
+	var failed := await broke.ensure(&"par_bad", "1")
+	_check("a missing dependency fails the collection", not failed.ok)
+	_check("and does not hang", Time.get_ticks_msec() - t0 < 20000, "%d ms" % (Time.get_ticks_msec() - t0))
+	_check("the error names the dependency", failed.error != null and failed.error.message.contains("par_missing@1"), str(failed.error))
+	_check("the cap held while failing", broke.pool == null or broke.pool.peak <= 4)
+	_check("a later acquire still works", (await broke.ensure(&"par_3", "1")).ok)
+	broke.queue_free()
+	_end()
+
+
+func _collection(id: String, deps: Array) -> void:
+	var pub := DotCloudPublisher.new()
+	pub.content_id = id
+	pub.version = "1"
+	pub.signing_key_pem = str(_keys["private"])
+	pub.signing_key_id = "demo"
+	for d: Dictionary in deps:
+		pub.dependencies.append(d)
+	var src := WORK.path_join("src_" + id)
+	DirAccess.make_dir_recursive_absolute(src)
+	var res := pub.publish(src, _published(id, "1"))
+	_check("publish collection %s" % id, res.ok, str(res.error) if not res.ok else "")
 
 
 func _section_concurrent() -> void:
