@@ -1,6 +1,6 @@
 extends Node
 
-## Loads a published collection (a manifest with no files that lists map packs) and reports the aggregate job.
+## Loads a published collection (a manifest with no payload beyond its licence that lists map packs) and reports the aggregate job.
 ## Resolves and verifies the collection and every dependency manifest, prints the totals the one progress bar
 ## would show; with --download also fetches everything into a temp cache and prints the final snapshot.
 ## Run: godot --headless --path . res://examples/collection_check.tscn -- --base URL --key PEM --key-id ID \
@@ -15,7 +15,7 @@ func _ready() -> void:
 	DotLog.set_level(DotLog.Level.WARN)
 	var args := _parse(OS.get_cmdline_user_args())
 	if not args.has("base") or not args.has("id"):
-		print("collection_check: pass --base URL --id ID --version V --key PEM [--key-id ID] [--download] [--min-packs N]; nothing to check")
+		print("collection_check: pass --base URL --id ID --version V --key PEM|--key-b64 B64 [--key-id ID] [--download] [--min-packs N]; nothing to check")
 		get_tree().quit(0)
 		return
 	await _run(args)
@@ -45,7 +45,7 @@ func _check(name: String, ok: bool, detail: String = "") -> void:
 
 
 func _run(args: Dictionary) -> void:
-	var pem := FileAccess.get_file_as_string(str(args.get("key", "")))
+	var pem := Marshalls.base64_to_utf8(str(args["key-b64"])) if args.has("key-b64") else FileAccess.get_file_as_string(str(args.get("key", "")))
 	var cache := OS.get_temp_dir().path_join("dot_cloud_collection_check_%d" % OS.get_process_id())
 	var config := DotCloudConfig.new()
 	config.cache_dir = cache
@@ -66,7 +66,7 @@ func _run(args: Dictionary) -> void:
 	if not res.ok:
 		return
 	var coll: DotCloudManifest = res.value
-	_check("the collection carries no files of its own", coll.files.is_empty(), str(coll.files.size()))
+	_check("the collection carries at most its licence file", coll.files.size() <= 1, str(coll.files.size()))
 	var deps: Array[Dictionary] = coll.dependencies
 	_check("it names at least %d packs" % int(args.get("min-packs", 1)), deps.size() >= int(args.get("min-packs", 1)), str(deps.size()))
 

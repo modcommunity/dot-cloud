@@ -30,4 +30,4 @@ A collection's dependencies download side by side, `DotCloudConfig.parallel_pack
 
 ## Not built
 
-- Nothing publishes the collection yet: the game repositories' publish scripts (and the suggested-packs list in `DotCloudSuggested`, which is the other way solo gets maps) need to emit it.
+- `examples/collection_check.tscn` loads a published collection and reports the aggregate job (`--base URL --id ID --version V --key-b64 B64 --key-id ID [--download] [--min-packs N]`). `gamemann/game-arena-all-maps@1.0.0` (56 STANDALONE_KEYS packs) is on dev only and does not load: the publisher adds `licence.json` as a file, so the client's cap is eight; `1.0.1` with no files is refused by the site ("The manifest names no files", HTTP 400) until website-city accepts a dependencies-only manifest. The game repositories' publish scripts and `DotCloudSuggested` still need to emit the collection.
