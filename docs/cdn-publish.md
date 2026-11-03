@@ -40,6 +40,8 @@ The lock file is `content.lock.json` at the repository root:
 | `--host-addons FILE\|DIR\|LOCK` (repeatable, `publish_pack.sh` only) | leave out the `addons/<name>` folders the host already owns. Takes an `addons.lock` (`repo<TAB>ref`), a directory of addon folders (dot-server-deploy's `addons/`) or one holding `addons.lock`, or a plain list of names. `-` and `_` match alike. It logs which addons were left out and which ship; without the flag it says so and packs every addon, as before |
 | `--site URL`, `--token-file FILE`, `--out DIR`, `--dry-run` | site (`$DOT_SITE`, default `https://tmcdev.net`; `dev.dotgames.org` is the dev CDN and answers no API), token file, where the objects are built, build without sending |
 
+**`--asset ID`** sends `assetId` with the claim: the version is linked to that site asset (which must be yours), and the pack is named after the asset's repo name, so the script refuses and fails the claim when that is not `--id`. A pack with no asset is invisible to anonymous visitors (`/api/packs/latest` answers not_found); `--asset` is how a published pack becomes public. The asset has to exist already, one per pack id.
+
 **The token is never an argument** (`--token` is refused). It comes from `$DOT_CLI_TOKEN`, which is copied to a mode-600 temp file removed on exit, or from the file in `--token-file`, `$DOT_CLI_TOKEN_FILE` or `~/.config/dot/cli-token`. The script sends only missing objects, so running it again after a failure resumes. A `HELD` first release writes no lock line; run it again after the moderator approves (the objects are already there, but a taken version cannot be claimed again, so `--bump`).
 
 A worked example: pin a CC0 asset store into a game.

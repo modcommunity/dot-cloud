@@ -8,7 +8,7 @@
 # Needs curl.exe (ships with Windows 10+) and Godot on PATH or -Godot. Flags map one to one onto publish_pack.sh's --kebab-case ones.
 param([Parameter(Position = 0)][ValidateSet('publish', 'versions')][string]$Command = 'publish',
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
-      [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional,
+      [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional, [int]$Asset = 0,
       [string]$Name, [string[]]$Meta = @(), [string[]]$ExcludeDir = @(), [string]$Site, [string]$TokenFile, [string]$Out,
       [string]$Godot, [switch]$DryRun, [switch]$NoImport)
 $ErrorActionPreference = 'Stop'
@@ -57,6 +57,7 @@ try {
     if ($Into) { $a += '--into', $Into }
     if ($Kind) { $a += '--kind', $Kind }
     if ($LockOptional) { $a += '--lock-optional' }
+    if ($Asset -gt 0) { $a += '--asset', "$Asset" }
     if ($Name) { $a += '--name', $Name }
     foreach ($m in $Meta) { $a += '--meta', $m }
     foreach ($d in $ExcludeDir) { $a += '--exclude-dir', $d }

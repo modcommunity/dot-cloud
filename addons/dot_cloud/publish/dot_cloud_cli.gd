@@ -322,7 +322,14 @@ func _claim(opts: Dictionary) -> DotResult:
 			if fa != null:
 				bytes += fa.get_length()
 	var version := str(opts.get("version", "0.0.0"))
-	var r := up.claim(str(opts["id"]), version, count, bytes)
+	var asset_id := int(str(opts.get("asset", "0")))
+	if opts.has("asset") and asset_id <= 0:
+		return DotResult.fail(DotError.CODE_INVALID, "--asset needs a positive asset id")
+	var r := up.claim(str(opts["id"]), version, count, bytes, asset_id)
+	if r.ok and asset_id > 0 and not str((r.value as Dictionary).get("contentId", "")).ends_with("/" + str(opts["id"])):
+		var got_id := str((r.value as Dictionary).get("contentId", ""))
+		up.fail_claim(int((r.value as Dictionary)["id"]), "asset %d publishes as %s, not %s" % [asset_id, got_id, str(opts["id"])])
+		return DotResult.fail(DotError.CODE_INVALID, "asset %d publishes as '%s', not '%s': give the asset that repo name" % [asset_id, got_id, str(opts["id"])])
 	if not r.ok and opts.has("resume") and r.error.detail == "version_taken":
 		# An unfinished claim (neither READY nor HELD) is reused: the site lists only the objects still missing.
 		var open := _find_version(up, str(opts["id"]), version)
@@ -610,6 +617,7 @@ Commands
     --lock FILE          once READY, pin the pack in this content.lock.json
     --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
     --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
+    --asset ID           link the version to this site asset (visitors can fetch a pack only through a visible asset); the asset's repo name must equal --id
     --resume             a 409 version_taken from an unfinished claim reuses that claim
     --lock-optional      lock entry: bootstrap may skip it
     --bump patch|minor|major  republish: take the next version of the --lock entry for --id

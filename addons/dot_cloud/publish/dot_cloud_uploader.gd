@@ -18,11 +18,12 @@ var retries := 3
 
 
 ## Claims [param repo_name]@[param version]. Value: {id, contentId}; build the pack with that contentId.
-func claim(repo_name: String, version: String, files: int, bytes: int) -> DotResult:
-	var r := _with_config(func(cfg: String) -> DotResult:
-		return _post("/api/app/v1/packs", {
-			"action": "claim", "repoName": repo_name, "version": version, "fileCount": files, "byteSize": bytes,
-		}, cfg))
+## A positive [param asset_id] links the version to that asset (the site then names the pack after the asset's repo name and lets visitors fetch it).
+func claim(repo_name: String, version: String, files: int, bytes: int, asset_id: int = 0) -> DotResult:
+	var body := {"action": "claim", "repoName": repo_name, "version": version, "fileCount": files, "byteSize": bytes}
+	if asset_id > 0:
+		body["assetId"] = asset_id
+	var r := _with_config(func(cfg: String) -> DotResult: return _post("/api/app/v1/packs", body, cfg))
 	if r.ok and not (r.value as Dictionary).has("id"):
 		return DotResult.fail(DotError.CODE_PARSE, "The site's claim answer names no id.")
 	return r

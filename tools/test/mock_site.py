@@ -65,6 +65,9 @@ class H(BaseHTTPRequestHandler):
                     if c["contentId"].endswith("/" + b["repoName"]) and c["version"] == b["version"] and not c.get("done"):
                         return self._err(409, "version_taken", "claim open")
                 cid = "tester/" + b["repoName"]
+                if "assetId" in b:  # a real site names the pack after the asset; asset 8 is called "other"
+                    log("CLAIM asset=%s" % b["assetId"])
+                    cid = "tester/" + ("other" if b["assetId"] == 8 else b["repoName"])
                 i = S["next_id"]; S["next_id"] += 1
                 S["claims"][i] = {"contentId": cid, "version": b["version"], "files": []}
                 return self._send(200, {"ok": True, "data": {"id": i, "contentId": cid}})

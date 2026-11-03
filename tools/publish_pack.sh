@@ -1,7 +1,7 @@
 #!/bin/bash
 # Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.ps1.
 #   tools/publish_pack.sh [publish] --source DIR --id NAME [--version V | --bump patch|minor|major] [--lock content.lock.json]
-#                         [--into DIR] [--kind pack|store] [--lock-optional] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
+#                         [--into DIR] [--kind pack|store] [--lock-optional] [--asset ID] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
 #                         [--host-addons FILE|DIR|LOCK]... [--site URL] [--token-file FILE] [--out DIR] [--godot BIN] [--dry-run] [--no-import]
 #   tools/publish_pack.sh relock --id NAME [--version V] [--lock FILE]   (rewrite the lock line of a held version once approved)
 #   publish --resume reuses an unfinished claim instead of failing with 409 version_taken

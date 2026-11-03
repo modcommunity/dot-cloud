@@ -43,6 +43,16 @@ chk "--resume reuses the claim and exits 0" "[ $? -eq 0 ] && grep -q 'resuming c
 chk "lock now 2.0.0" "grep -q '\"version\": \"2.0.0\"' content.lock.json"
 pub --version 2.0.0
 chk "READY version taken says use --bump" "grep -q -- '--bump' out"
+# (b2) --asset sends assetId; an asset that publishes under another name is refused and its claim failed
+pub --version 3.0.0
+pub --version 3.0.1 --asset 7
+chk "--asset sends assetId and publishes" "[ \$? -eq 0 ] && grep -q 'CLAIM asset=7' log"
+pub --version 3.0.2
+chk "no --asset sends no assetId" "[ \$(grep -c 'CLAIM asset' log) -eq 1 ]"
+pub --version 3.0.3 --asset 8
+chk "asset naming another pack is refused" "[ \$? -ne 0 ] && grep -q 'publishes as' out"
+pub --version 3.0.4 --asset abc
+chk "bad --asset is refused" "[ \$? -ne 0 ] && grep -q 'positive asset id' out"
 # (c) a HELD release has no lock line until approved; relock writes it
 rm -f held.lock.json
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1
