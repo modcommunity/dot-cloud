@@ -18,6 +18,9 @@ var _packs: Dictionary = {}  # key -> {total_bytes, total_files, done_bytes, don
 var _order: PackedStringArray = PackedStringArray()
 var _samples: Array = []  # [ms, cumulative done bytes]
 var _current := ""
+var _unpacking := false
+var _unpack_total := 0
+var _unpack_done := 0
 
 
 ## Registers a pack's expected work. Calling again for a known key only raises its totals.
@@ -63,6 +66,21 @@ func finish_pack(key: String) -> void:
 ## The job is over: whatever did not finish stays at what it reached, and the last snapshot says so.
 func finish_all() -> void:
 	changed.emit(snapshot())
+
+
+## Switches the job from downloading to unpacking (mounting): the bytes stay where they reached, [method snapshot] says "unpack" with a count of [param total] packs (default every registered pack).
+func begin_unpack(total: int = -1) -> void:
+	_unpacking = true
+	_unpack_total = total if total >= 0 else _packs.size()
+	_unpack_done = 0
+	_touch()
+
+
+## One pack finished mounting; ignored before [method begin_unpack].
+func note_unpacked() -> void:
+	if _unpacking:
+		_unpack_done = mini(_unpack_done + 1, _unpack_total)
+		_touch()
 
 
 ## The key of the pack reported on last.
@@ -122,6 +140,9 @@ func snapshot() -> Dictionary:
 		"bytes_per_sec": rate,
 		"eta_sec": eta,
 		"current": _current,
+		"phase": "unpack" if _unpacking else "download",
+		"unpack_done": _unpack_done,
+		"unpack_total": _unpack_total,
 	}
 
 

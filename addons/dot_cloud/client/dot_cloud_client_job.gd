@@ -51,6 +51,65 @@ static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest,
 		await register_dependencies(c, m, depth + 1)
 
 
+## Registers an already resolved manifest and its dependency tree.
+static func register_manifest(c: DotCloudClient, m: DotCloudManifest) -> void:
+	if c.job == null:
+		return
+	c._job_manifests[m.key()] = m
+	var plan := c.plan_for(m)
+	c.job.add_pack(m.key(), int(plan["missing_bytes"]), int(plan["missing_files"]))
+	await register_dependencies(c, m, 1)
+
+
+## The download-only pass over every registered manifest, [member DotCloudConfig.parallel_packs] at a time. Returns {key: DotError} for the failures.
+static func download_all(c: DotCloudClient) -> Dictionary:
+	var manifests: Array = c._job_manifests.values()
+	var failed := {}
+	var state := {"next": 0, "live": 0}
+	var worker := func() -> void:
+		while int(state["next"]) < manifests.size():
+			var i: int = state["next"]
+			state["next"] = i + 1
+			var m: DotCloudManifest = manifests[i]
+			if c.is_mounted(m.content_id, m.version):
+				continue
+			var key := m.key()
+			var got: DotResult = await c._preflight_requirements(m, key)
+			if got.ok:
+				got = await c._download(m, PackedStringArray(), key)
+			if not got.ok:
+				failed[key] = got.error
+		state["live"] = int(state["live"]) - 1
+	for _w in mini(maxi(1, c.config.parallel_packs), manifests.size()):
+		state["live"] = int(state["live"]) + 1
+		worker.call()
+	while int(state["live"]) > 0:
+		await c.get_tree().process_frame
+	return failed
+
+
+## One file of [param m] from the store, fetched alone when missing.
+static func read_file(c: DotCloudClient, m: DotCloudManifest, path: String) -> DotResult:
+	var wanted: DotCloudFile = null
+	for f in m.files:
+		if f.path == path:
+			wanted = f
+			break
+	if wanted == null:
+		return DotResult.fail(DotError.CODE_INVALID, "The pack has no %s." % path, m.key())
+	if not c.store.has(wanted.sha256):
+		var sub := DotCloudManifest.new()
+		sub.content_id = m.content_id
+		sub.version = m.version
+		sub.mount_root = m.mount_root
+		sub.mirrors = m.mirrors
+		sub.files = [wanted]
+		var fetched: DotResult = await c._download(sub, PackedStringArray(), m.key(), false)
+		if not fetched.ok:
+			return fetched
+	return c.store.read(wanted.sha256)
+
+
 ## [method DotCloudClient.ensure] for one dependency, reusing the manifest [method register_dependencies] already fetched.
 static func ensure_dependency(c: DotCloudClient, dep: Dictionary, below: PackedStringArray) -> DotResult:
 	var id := StringName(str(dep["id"]))

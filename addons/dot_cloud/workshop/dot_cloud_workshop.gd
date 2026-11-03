@@ -89,6 +89,9 @@ var _http: DotHttp = null
 var _prepared: bool = false
 var _platform_refusal_logged: bool = false
 var _syncing: bool = false
+## When true, [method sync] plans, asks and registers the packs in the caller's open job but mounts nothing until [method mount_pending] (API 20).
+var defer_mount: bool = false
+var _pending: Array[Dictionary] = []
 var _game_id: String = ""
 var _list: DotCloudWorkshopList = null
 var _summary: Dictionary = {}
@@ -159,6 +162,8 @@ func sync(game_content_id: String) -> DotResult:
 	_syncing = false
 	if not res.ok:
 		return res
+	if defer_mount:
+		return DotResult.success(summary)
 	DotLog.info(CHANNEL, "synced", {
 		"game": game_content_id, "revision": summary["revision"], "mounted": (summary["mounted"] as Array).size(),
 		"skipped": (summary["skipped"] as Array).size(), "failed": (summary["failed"] as Array).size(),
@@ -383,6 +388,7 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 			):
 				skipped.append(_skip(id, version, REASON_SCRIPT_POLICY))
 				continue
+			c["manifest"] = manifest
 			missing = int(cloud_client.plan_for(manifest)["missing_bytes"])
 			store_limit = cloud_client.store.limit_bytes()
 			referenced = cloud_client.store.referenced_bytes()
@@ -408,6 +414,34 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 		else:
 			to_mount.append(c)
 
+	if defer_mount:
+		# Register in the caller's open job so its total is fixed; the mount waits for [method mount_pending].
+		for c in to_mount:
+			if c.has("manifest"):
+				await cloud_client.job_register_manifest(c["manifest"])
+		_pending = to_mount
+		return
+	await _mount_planned(cloud_client, to_mount, summary)
+
+
+## Mounts what a [member defer_mount] sync planned. The packs are expected to be in the store already (the caller ran [method DotCloudClient.job_download]).
+func mount_pending() -> DotResult:
+	var cloud_client := _cloud()
+	if cloud_client == null or _summary.is_empty():
+		return DotResult.fail(DotError.CODE_STATE, "No deferred Workshop sync to mount.")
+	var to_mount := _pending
+	_pending = []
+	await _mount_planned(cloud_client, to_mount, _summary)
+	DotLog.info(CHANNEL, "synced", {
+		"game": _game_id, "mounted": (_summary["mounted"] as Array).size(),
+		"skipped": (_summary["skipped"] as Array).size(), "failed": (_summary["failed"] as Array).size(),
+	})
+	synced.emit(_summary)
+	return DotResult.success(_summary)
+
+
+func _mount_planned(cloud_client: DotCloudClient, to_mount: Array[Dictionary], summary: Dictionary) -> void:
+	var failed: Array = summary["failed"]
 	var total := to_mount.size()
 	var bytes_total := 0
 	for c in to_mount:

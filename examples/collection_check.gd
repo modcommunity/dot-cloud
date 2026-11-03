@@ -86,12 +86,32 @@ func _run(args: Dictionary) -> void:
 	print("  plan: %d packs, %d files, %s" % [deps.size(), total_files, DotPaths.format_bytes(total_bytes)])
 
 	if args.has("download"):
-		var last: Array = [{}]
-		client.job_progress_changed.connect(func(s: Dictionary) -> void: last[0] = s)
+		var snaps: Array = []
+		client.job_progress_changed.connect(func(s: Dictionary) -> void: snaps.append(s))
+		client.begin_job("collection_check")
+		var reg := await client.job_register(deps)
+		_check("every pack registers before any byte moves", reg.ok and not snaps.is_empty(), str(reg.error) if not reg.ok else "")
+		var from := snaps.size()
+		var fixed := int(snaps[-1].get("total_bytes", 0)) if not snaps.is_empty() else 0
+		var dl := await client.job_download()
+		_check("the download pass completes", dl.ok and dl.value.is_empty(), str(dl.value))
+		var ordered := true
+		var prev := -1.0
+		for s: Dictionary in snaps.slice(from):
+			ordered = ordered and int(s["total_bytes"]) == fixed and float(s["fraction"]) >= prev and str(s["phase"]) == "download"
+			prev = float(s["fraction"])
+		_check("the total stayed fixed and the bar never went back", ordered and fixed > 0, "total %d" % fixed)
+		var mid := snaps.size()
+		client.job_begin_unpack()
 		var got := await client.ensure(id, version)
-		_check("the collection downloads and mounts", got.ok, str(got.error) if not got.ok else "")
-		var s: Dictionary = last[0]
-		_check("one job counted every pack", int(s.get("total_packs", 0)) == deps.size() and int(s.get("done_packs", 0)) == deps.size(), str(s))
-		print("  job: %d of %d packs, %d of %d bytes, fraction %.2f" % [s.get("done_packs", 0), s.get("total_packs", 0), s.get("done_bytes", 0), s.get("total_bytes", 0), s.get("fraction", 0.0)])
+		client.end_job()
+		_check("the collection mounts from the store", got.ok, str(got.error) if not got.ok else "")
+		var after_bytes := true
+		for s: Dictionary in snaps.slice(mid):
+			after_bytes = after_bytes and int(s["done_bytes"]) == fixed
+		_check("unpacking moved no bytes", after_bytes)
+		var s: Dictionary = snaps[-1]
+		_check("one job counted every pack", int(s.get("total_packs", 0)) >= deps.size() and int(s.get("done_packs", 0)) == int(s.get("total_packs", 0)), str(s))
+		print("  job: %d of %d packs, %d of %d bytes, unpacked %d of %d" % [s.get("done_packs", 0), s.get("total_packs", 0), s.get("done_bytes", 0), s.get("total_bytes", 0), s.get("unpack_done", 0), s.get("unpack_total", 0)])
 	DotPaths.remove_tree(cache)
 	print("\ncollection_check: %d failed" % _failures)

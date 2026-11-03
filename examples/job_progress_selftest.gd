@@ -3,8 +3,8 @@ extends Node
 ## DotCloudJobProgress: the aggregate maths of a many-pack job, on a fake clock.
 ## Run: godot --headless --path . res://examples/job_progress_selftest.tscn
 
-const CHECKS := 27
-const SECTIONS := 5
+const CHECKS := 35
+const SECTIONS := 6
 
 var _failures := 0
 var _checks := 0
@@ -20,6 +20,7 @@ func _ready() -> void:
 	_parallel()
 	_retries()
 	_rate()
+	_unpack()
 	_check("every section finished", _started == SECTIONS and _finished == SECTIONS, "%d of %d" % [_finished, SECTIONS])
 	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
 	print("\n%d checks, %d failed" % [_checks, _failures])
@@ -133,6 +134,35 @@ func _rate() -> void:
 	j.set_pack_done("a", 3000)
 	_check("changed carries the snapshot", seen.size() == 1 and seen[0]["done_bytes"] == 3000)
 	_check("describe lists the packs", j.describe()["packs"] == PackedStringArray(["a"]))
+	_end()
+
+
+func _unpack() -> void:
+	_begin("unpack phase")
+	var j := _job()
+	j.add_pack("a", 1000, 1)
+	j.add_pack("b", 3000, 1)
+	j.note_unpacked()
+	_check("an unpack tick before the phase is ignored", j.snapshot()["unpack_done"] == 0)
+	_check("downloading is the first phase", j.snapshot()["phase"] == "download")
+	j.set_pack_done("a", 1000)
+	j.set_pack_done("b", 3000)
+	var before: float = float(j.snapshot()["done_bytes"]) / float(j.snapshot()["total_bytes"])
+	j.begin_unpack()
+	var s := j.snapshot()
+	_check("the phase flips to unpack", s["phase"] == "unpack")
+	_check("the count defaults to the pack count", s["unpack_total"] == 2 and s["unpack_done"] == 0, str(s))
+	j.note_unpacked()
+	s = j.snapshot()
+	_check("each mount ticks the count", s["unpack_done"] == 1)
+	_check("the byte fraction does not move", float(s["done_bytes"]) / float(s["total_bytes"]) == before)
+	j.note_unpacked()
+	j.note_unpacked()
+	_check("the count never passes the total", j.snapshot()["unpack_done"] <= j.snapshot()["unpack_total"], str(j.snapshot()))
+	var k := _job()
+	k.add_pack("a", 100, 1)
+	k.begin_unpack(5)
+	_check("an explicit total is honoured", k.snapshot()["unpack_total"] == 5)
 	_end()
 
 

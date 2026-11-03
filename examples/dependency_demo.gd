@@ -5,8 +5,8 @@ extends Node
 ## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 85
-const SECTIONS := 10
+const CHECKS := 96
+const SECTIONS := 11
 
 var _failures: int = 0
 var _checks: int = 0
@@ -43,6 +43,7 @@ func _run() -> void:
 	await _section_concurrent()
 	await _section_collection()
 	await _section_parallel()
+	await _section_two_phase()
 	_section_vram_tags()
 
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
@@ -234,6 +235,43 @@ func _section_parallel() -> void:
 	_check("first failure in list order is named", failed.error != null and failed.error.message.contains("par_missing@1") and not failed.error.message.contains("par_missing2"), str(failed.error))
 	_check("a later acquire still works", (await broke.ensure(&"par_3", "1")).ok)
 	broke.queue_free()
+	_end()
+
+
+func _section_two_phase() -> void:
+	_begin("two phase")
+	var deps: Array = [{"id": "map_a", "version": "1"}, {"id": "map_b", "version": "1"}]
+	var client := _client("two_phase", true)
+	var snaps: Array = []
+	client.job_progress_changed.connect(func(s: Dictionary) -> void: snaps.append(s))
+	client.begin_job()
+	var reg := await client.job_register(deps)
+	_check("packs register before any download", reg.ok, str(reg.error) if not reg.ok else "")
+	var total := int(snaps[-1].get("total_bytes", 0)) if not snaps.is_empty() else 0
+	var from := snaps.size()
+	_check("the total is known up front", total > 0, str(total))
+	var dl := await client.job_download()
+	_check("the download pass succeeds", dl.ok and dl.value.is_empty(), str(dl.error) if not dl.ok else str(dl.value))
+	_check("nothing is mounted by the download pass", not client.is_mounted(&"map_a", "1") and not client.is_mounted(&"map_b", "1"))
+	var last: Dictionary = snaps[-1] if not snaps.is_empty() else {}
+	_check("the total did not grow while downloading", int(last.get("total_bytes", -1)) == total and int(last.get("done_bytes", -1)) == total, str(last))
+	var mono := true
+	var prev := -1
+	for s: Dictionary in snaps.slice(from):
+		var d := int(s["done_bytes"])
+		mono = mono and d >= prev and int(s["total_bytes"]) == total
+		prev = d
+	_check("the total never moved and progress never went back", mono, "%d snapshots" % snaps.size())
+	client.job_begin_unpack()
+	_check("the unpack phase announces itself", str(snaps[-1].get("phase", "")) == "unpack", str(snaps[-1]))
+	for id in ["map_a", "map_b"]:
+		var got := await client.ensure(StringName(id), "1")
+		_check("%s mounts from the store" % id, got.ok, str(got.error) if not got.ok else "")
+	last = snaps[-1]
+	_check("unpack counted every pack", int(last.get("unpack_done", 0)) == int(last.get("unpack_total", -1)) and int(last.get("unpack_total", 0)) >= 2, str(last))
+	_check("the bytes did not move while unpacking", int(last.get("done_bytes", -1)) == total, str(last))
+	client.end_job()
+	client.queue_free()
 	_end()
 
 

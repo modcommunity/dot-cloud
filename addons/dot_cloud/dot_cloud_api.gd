@@ -39,5 +39,8 @@ extends RefCounted
 #     the per-device Off / Ask / Auto switch for suggested packs; ask prompts once through ask_fn and a refusal skips only those.
 # 18: DotCloudJobProgress, DotCloudClient.job / begin_job / end_job / job_progress_changed (one overall bar for a many-pack job).
 # 19: DotCloudConfig.parallel_packs (default 4), DotCloudDownloaderPool, DotCloudClient.pool: a collection's dependencies download side by side.
-const LEVEL := 19
+# 20: DotCloudClient.job_register / job_register_manifest / job_download / job_begin_unpack / read_pack_file, DotCloudJobProgress.begin_unpack /
+#     note_unpacked (snapshot gains phase, unpack_done, unpack_total), DotCloudWorkshop.defer_mount / mount_pending: one outer job whose total
+#     is fixed up front, every download first and every mount after. Additive; a caller that never opens an outer job is unchanged.
+const LEVEL := 20
 const OLDEST := 1

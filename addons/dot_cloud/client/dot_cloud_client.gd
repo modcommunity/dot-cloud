@@ -449,6 +449,8 @@ func _acquire_inner(
 
 	_acquired[key] = manifest
 	_index_manifest(manifest)
+	if job != null:
+		job.note_unpacked()
 
 	_set_phase(Phase.READY, "Ready.")
 	content_ready.emit(manifest, str(mounted.value))
@@ -490,6 +492,40 @@ func end_job() -> void:
 		job.finish_all()
 		job = null
 		_job_manifests.clear()
+
+
+## Registers the missing bytes of [param refs] ([code]{id, version}[/code], with their dependency trees) in the open job, so its total is fixed before [method job_download] moves a byte. Needs [method begin_job]; a ref whose manifest will not resolve is left out and fails later with its context.
+func job_register(refs: Array) -> DotResult:
+	if job == null:
+		return DotResult.fail(DotError.CODE_STATE, "job_register needs an open job.", "call begin_job first")
+	var synthetic := DotCloudManifest.new()
+	synthetic.dependencies.assign(refs)
+	await _Job.register_dependencies(self, synthetic, 0)
+	return DotResult.success(true)
+
+
+## [method job_register] for a manifest the caller already resolved and verified (a Workshop plan).
+func job_register_manifest(manifest: DotCloudManifest) -> void:
+	if job != null:
+		await _Job.register_manifest(self, manifest)
+
+
+## Downloads everything the job registered and mounts nothing, [member DotCloudConfig.parallel_packs] packs at a time. The value is [code]{key: DotError}[/code] for the packs that failed (they are left for the mount pass to report); this never fails as a whole.
+func job_download() -> DotResult:
+	if job == null:
+		return DotResult.fail(DotError.CODE_STATE, "job_download needs an open job.", "call begin_job first")
+	return DotResult.success(await _Job.download_all(self))
+
+
+## Ends the download half: the job's snapshot now says "unpack" with a count, and each pack mounted from here ticks it.
+func job_begin_unpack() -> void:
+	if job != null:
+		job.begin_unpack()
+
+
+## One file of a pack as bytes from the store, fetching only that file when it is not there yet (a game's descriptor, read before the pack is mounted).
+func read_pack_file(manifest: DotCloudManifest, path: String) -> DotResult:
+	return await _Job.read_file(self, manifest, path)
 
 
 ## Where the dependency [param content_id] of a mounted pack is mounted, or "" when it is not mounted here.
@@ -571,7 +607,7 @@ func _preflight_requirements(manifest: DotCloudManifest, key: String) -> DotResu
 		sub.mount_root = manifest.mount_root
 		sub.mirrors = manifest.mirrors
 		sub.files = [req]
-		var fetched := await _download(sub, PackedStringArray(), key)
+		var fetched := await _download(sub, PackedStringArray(), key, false)
 		if not fetched.ok:
 			DotLog.debug(CHANNEL, "requirements preflight could not fetch", {"content": key})
 			return DotResult.success({})
@@ -613,7 +649,8 @@ func _apply_side(manifest: DotCloudManifest) -> void:
 func _download(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray,
-	key: String
+	key: String,
+	track: bool = true
 ) -> DotResult:
 	_set_phase(Phase.PLANNING, "Checking what needs downloading…")
 
@@ -629,7 +666,7 @@ func _download(
 		}
 	)
 
-	if job != null:
+	if job != null and track:
 		job.add_pack(key, int(plan["missing_bytes"]), int(plan["missing_files"]))
 
 	if int(plan["missing_files"]) == 0:
@@ -644,7 +681,7 @@ func _download(
 	_boosted += 1
 	scheduler.set_boost(600.0)
 	var synced := await worker.sync(manifest, groups)
-	if job != null and synced.ok:
+	if job != null and synced.ok and track:
 		job.finish_pack(key)
 	_boosted -= 1
 	if _boosted == 0:

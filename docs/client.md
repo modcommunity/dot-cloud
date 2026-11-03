@@ -49,3 +49,7 @@ Without threads (a browser), `load()` of a delivered scene compiles its whole sc
 ## Overall progress of a many-pack job (API 18)
 
 `DotCloudClient.job_progress_changed(snapshot)` carries one `DotCloudJobProgress` snapshot for everything a dependency chain or a workshop sync downloads: `fraction`, `done_bytes` / `total_bytes`, `done_packs` / `total_packs`, `bytes_per_sec`, `eta_sec` (-1 unknown). Totals come from the planned manifests before the first byte moves. Values are set, never added (monotonic, clamped to the pack total), so a retry or a resume is never counted twice; `examples/job_progress_selftest.tscn` covers it.
+
+## One bar for a whole launch
+
+A caller that fetches several packs (the shell's solo launch) opens one outer job with `begin_job`, registers every pack's missing bytes up front with `job_register(refs)` (or `job_register_manifest`), runs `await job_download()` to fetch everything without mounting, then calls `job_begin_unpack()` and `ensure`s each pack, which now finds everything in the store. The total is fixed before the first byte, the fraction only rises, and the snapshot's `phase` flips from `download` to `unpack` with `unpack_done` / `unpack_total` counting mounts. `read_pack_file(manifest, path)` fetches one file of a pack without mounting it, so a launch can read a game's descriptor before the total is fixed. `DotCloudWorkshop.defer_mount` plans and registers subscribed packs during `sync()` and holds the mounting until `mount_pending()`.
