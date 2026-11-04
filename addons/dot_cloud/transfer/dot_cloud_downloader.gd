@@ -200,10 +200,17 @@ func sync(
 				{"needed": _total_bytes, "free": free})
 			pruned = DotResult.success(0)
 		else:
+			var report := await store.quota_report()
+			var hint := {
+				"partitioned": " This page's storage is kept apart from the game site's own, so downloads made there do not count here; open the game directly or clear some content.",
+				"near-full": " The browser's storage is nearly full. Delete downloaded content you no longer need.",
+				"unreadable": " The browser would not say how much room is left.",
+			}.get(report["quota_cause"], " Use \"Clear downloaded content\" in the menu to make room.")
 			pruned = DotResult.fail(
 				DotError.CODE_QUOTA,
-				"Not enough room for this content: it needs %s and the browser has %s free. Use \"Clear downloaded content\" in the menu to make room."
-					% [DotPaths.format_bytes(_total_bytes), DotPaths.format_bytes(free)]
+				"Not enough room for this content: it needs %s and the browser has %s free.%s"
+					% [DotPaths.format_bytes(_total_bytes), DotPaths.format_bytes(free), hint],
+				str(report["quota_cause"])
 			)
 	if not pruned.ok:
 		_running = false

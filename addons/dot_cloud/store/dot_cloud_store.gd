@@ -30,9 +30,19 @@ var _limit_bytes: int = 0
 ## [method DotWeb.estimate_storage]. A test sets it to stand in for a browser.
 var free_bytes_provider: Callable = Callable()
 
+## What packs the cache holds, for [method inventory].
+var packs: DotCloudPackBook
+
+## Takes a content key, true while it is mounted (set by [DotCloudClient]); [method delete] refuses those.
+var in_use_fn: Callable = Callable()
+
+## -1 ask the page, 0 top-level, 1 embedded in another site; a test or the shell may set it. Decides [code]partitioned[/code] in [method quota_report].
+var embedded: int = -1
+
 
 func _init(p_config: DotCloudConfig) -> void:
 	config = p_config
+	packs = DotCloudPackBook.new(config.cache_dir.path_join("inventory.json"))
 
 
 ## Creates the cache directories, loads the index, and resolves the size limit.
@@ -47,7 +57,10 @@ func open() -> DotResult:
 		DotWeb.request_persistent_storage()
 
 	_load_index()
+	packs.load_file()
 	await _resolve_limit()
+	if packs.any_pinned():
+		_request_persist()
 
 	DotLog.info(
 		CHANNEL,
@@ -320,9 +333,10 @@ func prune(need_bytes: int = 0) -> DotResult:
 	if target <= 0:
 		return DotResult.success(0)
 
+	var pinned := packs.pinned_hashes()
 	var candidates: Array = []
 	for h in _index:
-		if (_index[h]["refs"] as Array).is_empty():
+		if (_index[h]["refs"] as Array).is_empty() and not pinned.has(h):
 			candidates.append(h)
 
 	candidates.sort_custom(func(a: String, b: String) -> bool:
@@ -405,11 +419,12 @@ func clear_all() -> DotResult:
 	DotPaths.remove_tree(config.partials_dir())
 	# And the packs: [DotCloudMounter] keeps a `.pck` per mounted set under `<cache_dir>/packs/`, a second
 	# copy of everything played; they are rebuilt from the objects on the next mount.
-	DotPaths.remove_tree(config.cache_dir.path_join("packs"))
 
 	_index.clear()
 	_total_bytes = 0
 	_index_dirty = true
+	packs.records.clear()
+	packs.dirty = true
 	flush_index()
 
 	DotPaths.ensure_dir(config.objects_dir())
@@ -642,6 +657,7 @@ func _rebuild_index() -> void:
 
 
 func flush_index() -> void:
+	packs.save()
 	if not _index_dirty:
 		return
 
@@ -694,6 +710,8 @@ func describe() -> Dictionary:
 		"referenced": DotPaths.format_bytes(referenced_bytes()),
 		"limit": DotPaths.format_bytes(_limit_bytes) if _limit_bytes > 0 else "unlimited",
 		"over_limit": is_over_limit(),
+		"packs": packs.records.size(),
+		"pinned_packs": packs.records.values().filter(func(r: Dictionary) -> bool: return bool(r["pinned"])).size(),
 	}
 
 
@@ -705,3 +723,156 @@ func describe_lines() -> PackedStringArray:
 	for k in keys:
 		out.append("%-16s %s" % [str(k), str(d[k])])
 	return out
+
+
+## Notes a pack as held (and just used). Called by [DotCloudClient] once its objects are in.
+func record_pack(manifest: DotCloudManifest) -> void:
+	packs.record(manifest, int(Time.get_unix_time_from_system()))
+	flush_index()
+
+
+## One entry per pack: id, version, kind (game|map|weapon|workshop), game, name, bytes, last_used (unix s), pinned, platform (web|app).
+## A record whose objects are all gone (browser eviction) is dropped. Bytes count shared objects in every pack that uses them.
+func inventory() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var gone: Array = []
+	for k in packs.records:
+		var r: Dictionary = packs.records[k]
+		var bytes := 0
+		var present := 0
+		for h in (r["hashes"] as Array):
+			if _index.has(h):
+				bytes += int(_index[h]["size"])
+				present += 1
+		if present == 0 and not (r["hashes"] as Array).is_empty():
+			gone.append(k)
+			continue
+		out.append({
+			"id": r["id"], "version": r["version"], "kind": r["kind"], "game": r["game"], "name": r["name"],
+			"bytes": bytes, "last_used": int(r["last_used"]), "pinned": bool(r["pinned"]),
+			"platform": "web" if DotPlatform.is_web() else "app",
+		})
+	for k in gone:
+		packs.records.erase(k)
+		packs.dirty = true
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["last_used"]) > int(b["last_used"]))
+	return out
+
+
+## Pins every version of [param id]: eviction skips its objects. Pinning on web also asks the browser for persistent storage.
+func set_pinned(id: String, pinned: bool) -> DotResult:
+	var keys := packs.keys_for_id(id)
+	if keys.is_empty():
+		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
+	for k in keys:
+		packs.records[k]["pinned"] = pinned
+	packs.dirty = true
+	flush_index()
+	if pinned:
+		_request_persist()
+	DotLog.info(CHANNEL, "pin changed", {"id": id, "pinned": pinned})
+	return DotResult.success(keys.size())
+
+
+## "Keep content downloaded" for a game: pins its packs now and those it downloads later.
+func set_game_pinned(game: String, pinned: bool) -> DotResult:
+	var n := 0
+	for k in packs.records:
+		if packs.records[k]["game"] == game:
+			packs.records[k]["pinned"] = pinned
+			n += 1
+	var at := packs.pinned_games.find(game)
+	if pinned and at < 0:
+		packs.pinned_games.append(game)
+	elif not pinned and at >= 0:
+		packs.pinned_games.remove_at(at)
+	packs.dirty = true
+	flush_index()
+	if pinned:
+		_request_persist()
+	return DotResult.success(n)
+
+
+## Deletes a pack's objects, except those another pack still needs. Refuses a pack mounted in this process (its files cannot be unmounted): [code]CODE_STATE[/code].
+func delete(id: String, version: String = "") -> DotResult:
+	var keys := packs.keys_for_id(id, version)
+	if keys.is_empty():
+		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
+	for k in keys:
+		if in_use_fn.is_valid() and bool(in_use_fn.call(k)):
+			return DotResult.fail(DotError.CODE_STATE, "That content is in use; restart to delete it.", k)
+
+	var shared := packs.hashes_used_outside(keys)
+	var freed := 0
+	for k in keys:
+		for h in (packs.records[k]["hashes"] as Array):
+			if shared.has(h) or not _index.has(h):
+				continue
+			var size := int(_index[h]["size"])
+			if DirAccess.remove_absolute(path_for(h)) != OK and FileAccess.file_exists(path_for(h)):
+				DotLog.warn(CHANNEL, "could not delete object", {"hash": str(h).substr(0, 12)})
+				continue
+			_forget(h)
+			freed += size
+		release_refs(k)
+		packs.records.erase(k)
+	packs.dirty = true
+	DotWeb.sync_filesystem()
+	flush_index()
+	DotLog.info(CHANNEL, "deleted content", {"id": id, "freed": DotPaths.format_bytes(freed)})
+	return DotResult.success(freed)
+
+
+## Deletes every pack that is not pinned and not in use; returns the bytes freed. [method clear_all] is the one that takes pinned packs too.
+func clear_unpinned() -> DotResult:
+	var freed := 0
+	var ids := {}
+	for k in packs.records.keys():
+		var r: Dictionary = packs.records[k]
+		if not bool(r["pinned"]) and not (in_use_fn.is_valid() and bool(in_use_fn.call(k))):
+			ids[k] = r
+	for k in ids:
+		var done := delete(ids[k]["id"], ids[k]["version"])
+		if done.ok:
+			freed += int(done.value)
+	return DotResult.success(freed)
+
+
+## Free space and why it may be small: [code]{free, quota, usage, quota_cause}[/code], numbers -1 when unknown.
+## [code]quota_cause[/code] is "" (plenty), "unreadable", "near-full" (under a twentieth or 100 MiB left) or "partitioned" (embedded in another site, whose
+## storage the browser keeps apart from the game site's own). A hint for wording an error, not a measurement of the cause.
+## Must be awaited.
+func quota_report() -> Dictionary:
+	var free := await free_bytes()
+	var quota := -1
+	var usage := -1
+	if DotPlatform.is_web():
+		var est := await DotWeb.estimate_storage()
+		if est.ok:
+			quota = int((est.value as Dictionary).get("quota", -1))
+			usage = int((est.value as Dictionary).get("usage", -1))
+	var cause := ""
+	if free < 0:
+		cause = "unreadable"
+	elif quota > 0 and (free < quota / 20 or free < 100 * 1024 * 1024):
+		cause = "partitioned" if _is_embedded() else "near-full"
+	elif quota <= 0 and free < 100 * 1024 * 1024:
+		cause = "partitioned" if _is_embedded() else "near-full"
+	return {"free": free, "quota": quota, "usage": usage, "quota_cause": cause}
+
+
+func _is_embedded() -> bool:
+	if embedded >= 0:
+		return embedded == 1
+	if not DotPlatform.is_web():
+		return false
+	var loc: Variant = DotWeb.get_global("location")
+	if loc == null:
+		return false
+	var ancestors: Variant = loc.ancestorOrigins
+	return ancestors != null and int(ancestors.length) > 0
+
+
+func _request_persist() -> void:
+	if DotPlatform.is_web():
+		DotWeb.request_persistent_storage()

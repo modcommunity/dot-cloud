@@ -199,6 +199,7 @@ func start() -> DotResult:
 		await store.verify_all(scheduler)
 
 	mounter = DotCloudMounter.new(config)
+	store.in_use_fn = func(key: String) -> bool: return mounter.is_mounted(key)
 
 	_build_sources()
 
@@ -670,6 +671,7 @@ func _download(
 		job.add_pack(key, int(plan["missing_bytes"]), int(plan["missing_files"]))
 
 	if int(plan["missing_files"]) == 0:
+		store.record_pack(manifest)
 		return DotResult.success(true)
 
 	_set_phase(
@@ -688,6 +690,8 @@ func _download(
 		scheduler.clear_boost()
 	pool.give_back(worker)
 
+	if synced.ok:
+		store.record_pack(manifest)
 	return synced
 
 
