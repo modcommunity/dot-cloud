@@ -5,12 +5,19 @@ extends RefCounted
 
 const CHANNEL := "cloud"
 
+## Project settings (all optional): msec of script compiling per frame under the cover, msec the cover may wait
+## (0 = until every script is warmed), msec per frame for scripts left after that, and extra directories to skip.
+const SET_BUDGET := "dot_cloud/warm/budget_msec"
+const SET_BLOCKING := "dot_cloud/warm/blocking_msec"
+const SET_TAIL_BUDGET := "dot_cloud/warm/background_budget_msec"
+const SET_SKIP := "dot_cloud/warm/skip_dirs"
+
 
 ## True for a file under a tooling directory at any depth: a pack ships `addons/<x>/examples/`, whose scripts do not parse in a running game.
 static func _skipped(path: String) -> bool:
 	var parts := path.split("/")
 	for i in parts.size() - 1:
-		if DotCloudClient.WARM_SKIP_DIRS.has(parts[i]):
+		if DotCloudClient.WARM_SKIP_DIRS.has(parts[i]) or (ProjectSettings.get_setting(SET_SKIP, PackedStringArray()) as PackedStringArray).has(parts[i]):
 			return true
 	return false
 
@@ -47,6 +54,7 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 		return loader
 
 	var scripts := PackedStringArray()
+	var seen := {}
 	for key in keys:
 		var manifest := c.manifest_for(key)
 		if manifest == null:
@@ -59,7 +67,8 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 			# A tokenized script ships as x.gdc behind x.gd.remap; load the .gd path either way.
 			if path.get_extension() == "gdc":
 				path = path.trim_suffix("c")
-			if path.get_extension() == "gd" and ResourceLoader.exists(path) and not scripts.has(path):
+			if path.get_extension() == "gd" and ResourceLoader.exists(path) and not seen.has(path) and not ResourceLoader.has_cached(path):
+				seen[path] = true
 				scripts.append(path)
 
 	while c._prewarming:
@@ -67,12 +76,18 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 	var t0 := Time.get_ticks_msec()
 	var named := DotCloudSliceLoader.named_class_scripts(scripts)
 	var scan_ms := Time.get_ticks_msec() - t0
+	# Under the cover the frame can be long (it only animates a bar); the default 16 ms yields twice as often for nothing.
+	loader.budget_msec = int(ProjectSettings.get_setting(SET_BUDGET, 40))
+	loader.deadline_msec = int(ProjectSettings.get_setting(SET_BLOCKING, 0))
 	var res := await loader.load_all(tree, named + scripts, false)
+	var deferred := loader.remaining.size()
+	if deferred > 0:
+		loader.load_rest(tree, int(ProjectSettings.get_setting(SET_TAIL_BUDGET, 3)))
 
 	DotLog.info(CHANNEL, "scripts warmed", {
 		"content": ",".join(keys), "pack_scripts": scripts.size(), "addon_classes": named.size(),
 		"scan_ms": scan_ms, "ms": Time.get_ticks_msec() - t0, "frames": loader.frames_yielded,
-		"ok": res.ok, "why": "" if res.ok else str(res.error),
+		"deferred": deferred, "ok": res.ok, "why": "" if res.ok else str(res.error),
 	})
 	# Which scripts cost the join its seconds; read at DEBUG so a slow web join can be diagnosed from its log.
 	for entry in loader.slowest:

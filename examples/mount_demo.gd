@@ -27,7 +27,7 @@ const _Sections := preload("res://examples/selftest/mount_sections.gd")
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 113
+const CHECKS := 115
 
 var _failures: int = 0
 var _checks: int = 0
