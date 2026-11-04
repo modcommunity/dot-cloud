@@ -545,6 +545,9 @@ func _check_side_references(
 ## Files to publish, as paths relative to [param source_dir].
 func _collect(source_dir: String) -> PackedStringArray:
 	var out := PackedStringArray()
+	# Outside a project there is no `.godot/imported/` to take outputs from, so a marker would name a file
+	# the pack lacks and every load of its source would fail; the raw source ships instead.
+	var keep_markers := include_imported and _project_root_of(source_dir) != ""
 
 	for rel in DotPaths.list_files_recursive(source_dir):
 		# The engine's imported form and its markers are decided before the exclusions, because `.godot` (excluded dir)
@@ -571,7 +574,7 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 		# The suffix rules below would drop a marker; decided here, after the directory rules, because
 		# `.import` is excluded for packs of only scenes and scripts.
-		if include_imported and rel.ends_with(".import"):
+		if keep_markers and rel.ends_with(".import"):
 			out.append(rel)
 			continue
 

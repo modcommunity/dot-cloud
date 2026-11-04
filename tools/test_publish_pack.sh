@@ -91,5 +91,9 @@ chk "missing --host-addons argument fails" "[ $? -ne 0 ]"
 mkdir -p "$W/h/examples" "$W/h/sub/examples"; echo e > "$W/h/examples/e.gd"; echo n > "$W/h/sub/examples/n.txt"
 rm -rf ho; hp
 chk "root examples/ left out, nested examples/ kept" "[ $? -eq 0 ] && ! grep -q 'examples/e.gd' ho/manifest.json && grep -q 'sub/examples/n.txt' ho/manifest.json"
+# a source outside any Godot project ships its raw images and no .import markers (a marker would name a ctex the pack lacks)
+mkdir -p "$W/h/tex"; echo png > "$W/h/tex/t.png"; echo 'path="res://.godot/imported/t.png-x.ctex"' > "$W/h/tex/t.png.import"
+rm -rf ho; hp
+chk "no project: raw image kept, .import marker dropped" "[ $? -eq 0 ] && grep -q 'tex/t.png\"' ho/manifest.json && ! grep -q 't.png.import' ho/manifest.json"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
