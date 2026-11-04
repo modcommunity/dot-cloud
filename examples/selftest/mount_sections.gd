@@ -111,6 +111,18 @@ static func slice_loader(h: Node) -> void:
 			threaded or (ticks[0] >= 1 and loader.frames_yielded >= 1),
 			"%d ticks, %d yields" % [ticks[0], loader.frames_yielded])
 
+	var capped := DotCloudSliceLoader.new()
+	capped.budget_msec = 0
+	capped.deadline_msec = 1
+	await h.get_tree().create_timer(0.01).timeout
+	var cres := await capped.load_all(h.get_tree(), paths, false)
+	var first := capped.loaded.size()
+	h._check("a deadline loads at least one and defers the rest or finishes",
+		cres.ok and first >= 1 and first + capped.remaining.size() == paths.size(), "%d + %d" % [first, capped.remaining.size()])
+	await capped.load_rest(h.get_tree(), 0)
+	h._check("load_rest finishes what the deadline left",
+		capped.remaining.is_empty() and capped.loaded.size() == paths.size(), str(capped.loaded.size()))
+
 	var bad := await DotCloudSliceLoader.new().load_all(h.get_tree(), PackedStringArray(["res://nope.gd"]), false)
 	h._check("a missing path fails", not bad.ok)
 	h._check("with CODE_IO", bad.error.code == DotError.CODE_IO)

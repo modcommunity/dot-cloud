@@ -9,6 +9,13 @@ signal progress(done: int, total: int, path: String)
 ## Longest a frame may spend loading before it yields, when not threaded.
 var budget_msec: int = 16
 
+## When above 0, [method load_all] stops after this many msec of loading and leaves the rest in [member remaining],
+## for [method load_rest] to finish at a small per-frame cost once the cover is down.
+var deadline_msec: int = 0
+
+## Paths [method load_all] left unloaded because [member deadline_msec] ran out.
+var remaining: PackedStringArray = PackedStringArray()
+
 ## Frames that passed while the last load_all ran.
 var frames_yielded: int = 0
 
@@ -29,7 +36,9 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 	frames_yielded = 0
 	loaded.clear()
 	slowest.clear()
+	remaining = PackedStringArray()
 	var total := paths.size()
+	var started := Time.get_ticks_msec()
 
 	if threaded:
 		return await _load_threaded(tree, paths)
@@ -37,7 +46,11 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 	var done := 0
 	var slice_start := Time.get_ticks_msec()
 
-	for path in paths:
+	for i in total:
+		var path := paths[i]
+		if deadline_msec > 0 and Time.get_ticks_msec() - started >= deadline_msec:
+			remaining = paths.slice(i)
+			break
 		var t_load := Time.get_ticks_msec()
 		var res: Resource = load(path) if ResourceLoader.exists(path) else null
 		_note_slow(Time.get_ticks_msec() - t_load, path)
@@ -54,6 +67,22 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 			slice_start = Time.get_ticks_msec()
 
 	return DotResult.success(done)
+
+
+## Loads [member remaining] in the background, at most [param budget] msec per frame, appending to [member loaded].
+## Failures are skipped: a script that fails here fails again, with its own error, where it is used.
+func load_rest(tree: SceneTree, budget: int = 3) -> void:
+	var todo := remaining
+	remaining = PackedStringArray()
+	var slice_start := Time.get_ticks_msec()
+	for path in todo:
+		if ResourceLoader.exists(path):
+			var res: Resource = load(path)
+			if res != null:
+				loaded.append(res)
+		if Time.get_ticks_msec() - slice_start >= budget:
+			await tree.process_frame
+			slice_start = Time.get_ticks_msec()
 
 
 func _note_slow(ms: int, path: String) -> void:
