@@ -78,7 +78,7 @@ chk "--dry-run builds with no token and sends nothing" "[ $? -eq 0 ] && [ -f '$W
 mkdir -p "$W/h/addons/dot_core" "$W/h/addons/zz_x" "$W/hostdir/dot_core" "$W/hostdir/other"; echo c > "$W/h/addons/dot_core/c.gd"; echo x > "$W/h/addons/zz_x/x.gd"; echo r > "$W/h/root.txt"
 printf '# lock\ndot-core\tv1\n' > "$W/addons.lock"
 hp() { "$HERE/publish_pack.sh" --source "$W/h" --id hostdemo --version 1.0.0 --out "$W/ho" --dry-run "$@" > "$W/out" 2>&1; }
-hp
+hp --pack-addon dot_core
 chk "no --host-addons packs both and says so" "[ $? -eq 0 ] && grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json && grep -q 'no --host-addons' out"
 rm -rf ho; hp --host-addons "$W/addons.lock"
 chk "lock: dot_core left out, zz_x kept, logged" "[ $? -eq 0 ] && ! grep -q dot_core ho/manifest.json && grep -q zz_x ho/manifest.json && grep -q 'left out 1 host-owned addon(s): dot_core' out"
@@ -102,5 +102,15 @@ chk "root examples/ left out, nested examples/ kept" "[ $? -eq 0 ] && ! grep -q 
 mkdir -p "$W/h/tex"; echo png > "$W/h/tex/t.png"; echo 'path="res://.godot/imported/t.png-x.ctex"' > "$W/h/tex/t.png.import"
 rm -rf ho; hp
 chk "no project: raw image kept, .import marker dropped" "[ $? -eq 0 ] && grep -q 'tex/t.png\"' ho/manifest.json && ! grep -q 't.png.import' ho/manifest.json"
+# resolved family addons (what a copy with links resolved looks like) are left out; a pile of other addons is refused
+mkdir -p "$W/h/addons/dot_core" "$W/h/addons/pg_timer"; echo a > "$W/h/addons/dot_core/x.gd"; echo b > "$W/h/addons/pg_timer/y.gd"
+rm -rf ho; hp
+chk "dot_* addon left out, own adapter kept" "[ $? -eq 0 ] && ! grep -q 'dot_core/x.gd' ho/manifest.json && grep -q 'pg_timer/y.gd' ho/manifest.json"
+rm -rf ho; hp --pack-addon dot_core
+chk "--pack-addon packs a dot_ addon on purpose" "[ $? -eq 0 ] && grep -q 'dot_core/x.gd' ho/manifest.json"
+for i in 1 2 3 4 5 6; do mkdir -p "$W/h/addons/own$i"; echo z > "$W/h/addons/own$i/z.gd"; done
+rm -rf ho; hp
+chk "more than 5 packed addons is refused" "[ $? -ne 0 ] && grep -q Refusing out"
+rm -rf "$W/h/addons"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
