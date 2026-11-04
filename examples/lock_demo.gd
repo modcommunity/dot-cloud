@@ -4,8 +4,8 @@ extends Node
 ## Run: godot --headless --path . res://examples/lock_demo.tscn
 
 const WORK := "user://dot_cloud_lock_demo"
-const CHECKS := 35
-const SECTIONS := 4
+const CHECKS := 39
+const SECTIONS := 5
 
 var _failures: int = 0
 var _checks: int = 0
@@ -31,6 +31,7 @@ func _run() -> void:
 	_section_lists()
 	await _section_mount()
 	_section_parser()
+	_section_res_paths()
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
 	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
 	print("\n%d checks, %d failed" % [_checks, _failures])
@@ -159,6 +160,18 @@ func _section_parser() -> void:
 	_check("flow remove", l["remove"] == [["repo", "dot-voice"], ["pack", "a/b"]])
 	_check("block entries", l["entries"] == [["repo", "dot-core"], ["repo", "dot-vote"], ["repo", "game-arena"], ["pack", "o/p"]], str(l["entries"]))
 	_check("dotenv", DotCloudLock.parse_dotenv(_write("e.env", "A=1\n#B=2\nC = 'x y'\n")) == {"A": "1", "C": "x y"})
+	_end()
+
+
+func _section_res_paths() -> void:
+	_begin("publisher res:// paths")
+	var pub := DotCloudPublisher.new()
+	var spaced := pub._res_paths_in("path=\"res://maps/t/color_golden yellow.png\"\nx = 'res://a b, c.png'")
+	_check("quoted path keeps spaces", spaced.has("maps/t/color_golden yellow.png"), str(spaced))
+	_check("single-quoted keeps space and comma", spaced.has("a b, c.png"), str(spaced))
+	var plain := pub._res_paths_in("[res://a/b.png, res://c.tres] load(res://d.gd)")
+	_check("unquoted ends at separator", Array(plain) == ["a/b.png", "c.tres", "d.gd"], str(plain))
+	_check("no truncated spaced stem", not spaced.has("maps/t/color_golden"), str(spaced))
 	_end()
 
 

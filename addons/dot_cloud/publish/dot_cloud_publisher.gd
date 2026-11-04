@@ -650,8 +650,15 @@ func _res_paths_in(text: String) -> PackedStringArray:
 		if at < 0:
 			break
 
+		# A quoted path may hold spaces and commas ("color_golden yellow.png"): it ends at its quote.
+		var quote := text[at - 1] if at > 0 and text[at - 1] in ['"', "'"] else ""
 		var j := at + 6
-		while j < text.length() and not (text[j] in ['"', "'", " ", "\t", "\n", "\r", ",", "]", ")"]):
+		while j < text.length():
+			var c := text[j]
+			if c in ["\n", "\r", "\t"] or (quote != "" and c == quote):
+				break
+			if quote == "" and c in ['"', "'", " ", ",", "]", ")"]:
+				break
 			j += 1
 
 		var path := text.substr(at + 6, j - (at + 6))
