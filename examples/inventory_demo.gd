@@ -8,8 +8,8 @@ extends Control
 
 const WORK := "user://dot_cloud_inventory_demo"
 const OBJ := 1024
-const SECTIONS := 6
-const CHECKS := 60
+const SECTIONS := 7
+const CHECKS := 73
 
 @onready var _output: RichTextLabel = $Output
 
@@ -34,6 +34,7 @@ func _run() -> void:
 	await _section_game_pin()
 	await _section_quota()
 	await _section_bridge()
+	await _section_review()
 
 	_check("every section ran to its last line", _completed == _entered and _entered == SECTIONS,
 		"%d of %d" % [_completed, SECTIONS])
@@ -226,7 +227,7 @@ func _section_bridge() -> void:
 	var future := await bridge.handle({"dot": "dot-inventory", "op": "list", "id": 12, "v": 99}, site)
 	_check("unknown version refused", future["ok"] == false and future["error"]["code"] == DotError.CODE_VERSION)
 
-	var del := await bridge.handle({"dot": "dot-inventory", "op": "delete", "id": 13, "pack": "q"}, site)
+	var del := await bridge.handle({"dot": "dot-inventory", "op": "delete", "id": 13, "pack": "q", "force": true}, site)
 	_check("delete ok", del["ok"] == true and not store.has(h2))
 	var nodel := await bridge.handle({"dot": "dot-inventory", "op": "delete", "id": 14}, site)
 	_check("delete needs a pack", nodel["ok"] == false)
@@ -245,6 +246,66 @@ func _section_bridge() -> void:
 	_check("clear_all uses the host hook", all["ok"] == true and hit[0])
 	var json := JSON.stringify(list)
 	_check("replies are JSON-safe", json != "" and JSON.parse_string(json) is Dictionary)
+	store.close()
+	_done()
+
+
+func _section_review() -> void:
+	_section("[b]7. review fixes[/b]")
+	var store := await _open("r", 0)
+	var h1 := _put(store, 50)
+	var h2 := _put(store, 51)
+	store.record_pack(_manifest("pa", "1", "game", "pa", [h1]))
+	store.record_pack(_manifest("pa", "2", "game", "pa", [h2]))
+	store.set_pinned("pa", true)
+	var r := store.delete("pa", "1")
+	_check("delete of a pinned pack refused", not r.ok and r.error.code == DotError.CODE_STATE and store.has(h1))
+	var all_versions := store.delete("pa")
+	_check("delete without version refused when pinned", not all_versions.ok and store.inventory().size() == 2)
+	_check("force deletes a pinned pack", store.delete("pa", "1", true).ok and not store.has(h1))
+
+	store.set_game_pinned("pa", true)
+	store.set_pinned("pa", false)
+	store.record_pack(_manifest("pa", "2", "game", "pa", [h2]))
+	_check("re-record keeps an unpin", _find(store.inventory(), "pa").get("pinned") == false)
+
+	var long_id := "g".repeat(DotCloudPackBook.MAX_GAME_ID + 1)
+	_check("overlong game id refused", store.set_game_pinned(long_id, true).error.code == DotError.CODE_INVALID)
+	for i in range(DotCloudPackBook.MAX_PINNED_GAMES):
+		store.set_game_pinned("cap%d" % i, true)
+	_check("pinned_games is capped", store.packs.pinned_games.size() <= DotCloudPackBook.MAX_PINNED_GAMES
+		and not store.set_game_pinned("one-too-many", true).ok)
+
+	var book_path := store.packs.path
+	var good := "a".repeat(64)
+	DotPaths.write_json(book_path, {"version": DotCloudPackBook.VERSION, "pinned_games": [], "packs": {
+		"x@1": {"id": "x", "version": "1", "hashes": [good, "zz", 5, "../../etc"]}}}, false)
+	var book := DotCloudPackBook.new(book_path)
+	book.load_file()
+	_check("bad hashes dropped on load", (book.records["x@1"]["hashes"] as Array) == [good])
+
+	var site := "https://moddingcommunity.com"
+	var bridge := DotCloudInventoryBridge.new(store, PackedStringArray([site, "null"]))
+	_check("origin null refused", (await bridge.handle({"dot": "dot-inventory", "op": "list", "id": 1}, "null")).is_empty())
+	var odd := await bridge.handle({"dot": "dot-inventory", "op": "list", "id": 2, "v": [1]}, site)
+	_check("array version answered with an error", odd.get("ok") == false)
+	var odd2 := await bridge.handle({"dot": "dot-inventory", "op": "list", "id": 3, "v": {"a": 1}}, site)
+	_check("dictionary version answered with an error", odd2.get("ok") == false)
+
+	store.record_pack(_manifest("bp", "1", "map", "bp", [h2]))
+	store.set_pinned("bp", true)
+	var nb := await bridge.handle({"dot": "dot-inventory", "op": "delete", "id": 4, "pack": "bp"}, site)
+	_check("bridge delete of pinned refused", nb["ok"] == false and nb["error"]["code"] == DotError.CODE_STATE)
+	var fb := await bridge.handle({"dot": "dot-inventory", "op": "delete", "id": 5, "pack": "bp", "force": true}, site)
+	_check("bridge delete with force ok", fb["ok"] == true)
+
+	var pck_dir := store.config.cache_dir.path_join("packs")
+	DirAccess.make_dir_recursive_absolute(pck_dir)
+	var f := FileAccess.open(pck_dir.path_join("m.pck"), FileAccess.WRITE)
+	f.store_8(1)
+	f.close()
+	store.clear_all()
+	_check("clear_all removes mounter pck copies", not FileAccess.file_exists(pck_dir.path_join("m.pck")))
 	store.close()
 	_done()
 

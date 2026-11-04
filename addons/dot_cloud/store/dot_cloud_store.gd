@@ -419,6 +419,7 @@ func clear_all() -> DotResult:
 	DotPaths.remove_tree(config.partials_dir())
 	# And the packs: [DotCloudMounter] keeps a `.pck` per mounted set under `<cache_dir>/packs/`, a second
 	# copy of everything played; they are rebuilt from the objects on the next mount.
+	DotPaths.remove_tree(config.cache_dir.path_join("packs"))
 
 	_index.clear()
 	_total_bytes = 0
@@ -776,6 +777,10 @@ func set_pinned(id: String, pinned: bool) -> DotResult:
 
 ## "Keep content downloaded" for a game: pins its packs now and those it downloads later.
 func set_game_pinned(game: String, pinned: bool) -> DotResult:
+	if pinned and game.length() > DotCloudPackBook.MAX_GAME_ID:
+		return DotResult.fail(DotError.CODE_INVALID, "Game id too long.")
+	if pinned and packs.pinned_games.size() >= DotCloudPackBook.MAX_PINNED_GAMES and not packs.pinned_games.has(game):
+		return DotResult.fail(DotError.CODE_INVALID, "Too many pinned games.")
 	var n := 0
 	for k in packs.records:
 		if packs.records[k]["game"] == game:
@@ -794,11 +799,13 @@ func set_game_pinned(game: String, pinned: bool) -> DotResult:
 
 
 ## Deletes a pack's objects, except those another pack still needs. Refuses a pack mounted in this process (its files cannot be unmounted): [code]CODE_STATE[/code].
-func delete(id: String, version: String = "") -> DotResult:
+func delete(id: String, version: String = "", force: bool = false) -> DotResult:
 	var keys := packs.keys_for_id(id, version)
 	if keys.is_empty():
 		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
 	for k in keys:
+		if not force and bool(packs.records[k].get("pinned", false)):
+			return DotResult.fail(DotError.CODE_STATE, "That content is pinned; unpin it or force the delete.", k)
 		if in_use_fn.is_valid() and bool(in_use_fn.call(k)):
 			return DotResult.fail(DotError.CODE_STATE, "That content is in use; restart to delete it.", k)
 

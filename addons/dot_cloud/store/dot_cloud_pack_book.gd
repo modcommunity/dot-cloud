@@ -6,6 +6,8 @@ extends RefCounted
 
 const CHANNEL := "cloud.store"
 const VERSION := 1
+const MAX_PINNED_GAMES := 64
+const MAX_GAME_ID := 128
 const KINDS: PackedStringArray = ["game", "map", "weapon", "workshop"]
 
 ## key ("id@version") -> {id, version, kind, game, name, hashes:Array, last_used:int, pinned:bool}
@@ -34,10 +36,16 @@ func load_file() -> void:
 	for k in (d["packs"] as Dictionary):
 		var e: Variant = d["packs"][k]
 		if e is Dictionary and str(e.get("id", "")) != "" and e.get("hashes") is Array:
+			var good: Array = []
+			for h in (e["hashes"] as Array):
+				if h is String and h.length() == 64 and h.is_valid_hex_number(false):
+					good.append(h)
+			e["hashes"] = good
 			records[str(k)] = e
 	if d.get("pinned_games") is Array:
 		for g in (d["pinned_games"] as Array):
-			pinned_games.append(str(g))
+			if pinned_games.size() < MAX_PINNED_GAMES and str(g).length() <= MAX_GAME_ID:
+				pinned_games.append(str(g))
 
 
 func save() -> void:
@@ -64,7 +72,7 @@ func record(manifest: DotCloudManifest, now: int) -> void:
 		"name": manifest.display_name,
 		"hashes": Array(manifest.unique_hashes()),
 		"last_used": now,
-		"pinned": bool(existing.get("pinned", false)) or (game != "" and game in pinned_games),
+		"pinned": bool(existing.get("pinned", false)) if not existing.is_empty() else (game != "" and game in pinned_games),
 	}
 	dirty = true
 

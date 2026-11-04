@@ -24,7 +24,7 @@ func _init(p_store: DotCloudStore, p_origins: PackedStringArray = PackedStringAr
 
 
 func is_origin_allowed(origin: String) -> bool:
-	return origin != "" and origin != "*" and allowed_origins.has(origin)
+	return origin != "" and origin != "*" and origin != "null" and allowed_origins.has(origin)
 
 
 ## Whether [param message] is addressed to this bridge, so a transport can ignore unrelated page traffic.
@@ -39,7 +39,8 @@ func handle(message: Dictionary, origin: String) -> Dictionary:
 		return {}
 	var rid: Variant = message.get("id")
 	var op := str(message.get("op", ""))
-	if int(message.get("v", VERSION)) != VERSION:
+	var v: Variant = message.get("v", VERSION)
+	if not (v is int or v is float) or int(v) != VERSION:
 		return _reply(rid, op, DotResult.fail(DotError.CODE_VERSION, "Unsupported bridge version."))
 	if not OPS.has(op):
 		return _reply(rid, op, DotResult.fail(DotError.CODE_INVALID, "Unknown op."))
@@ -65,7 +66,7 @@ func _run(op: String, m: Dictionary) -> DotResult:
 		"delete":
 			if id == "":
 				return DotResult.fail(DotError.CODE_INVALID, "delete needs pack.")
-			return store.delete(id, str(m.get("version", "")))
+			return store.delete(id, str(m.get("version", "")), m.get("force") == true)
 		"clear":
 			return store.clear_unpinned()
 		"clear_all":
