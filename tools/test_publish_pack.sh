@@ -28,6 +28,13 @@ chk "republish keeps the entry's into" "grep -q '\.stores/x' content.lock.json"
 chk "only the changed object travelled" "[ \$(( \$(grep -c '^PUT' log) - P1 )) -le 2 ]"
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" versions --id demo > "$W/v" 2>&1
 chk "versions lists both" "grep -q 1.0.0 v && grep -q 1.0.1 v"
+"$HERE/publish_pack.sh" frobnicate --source src --id demo > "$W/o2" 2>&1; RC=$?
+chk "unknown verb exits 2 and publishes nothing" "[ $RC -eq 2 ] && grep -q 'unknown verb' o2 && ! grep -q 'frobnicate' log"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" publish --source src --id demo versions > "$W/o2" 2>&1
+chk "stray word after publish (wrapper 'versions') exits 2" "[ $? -eq 2 ] && grep -q unexpected o2"
+NPUT=$(grep -c '^PUT' log)
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source src --id demo --version latest > "$W/o2" 2>&1
+chk "non-semver --version exits 2" "[ $? -eq 2 ] && grep -q 'not semver' o2 && [ \$(grep -c '^PUT' log) -eq $NPUT ]"
 TOK=wrong pub --bump patch
 chk "wrong token fails" "[ $? -ne 0 ]"
 chk "lock untouched by failure" "grep -q '\"version\": \"1.0.1\"' content.lock.json"

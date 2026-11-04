@@ -15,7 +15,12 @@
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CMD=publish; [ "${1:-}" = publish ] || [ "${1:-}" = versions ] || [ "${1:-}" = relock ] && { CMD=$1; shift; }
+CMD=publish
+case "${1:-}" in
+    publish|versions|relock) CMD=$1; shift ;;
+    -*|"") ;;
+    *) echo "publish_pack: unknown verb '$1' (publish, versions or relock; flags start with --)" >&2; exit 2 ;;
+esac
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
 SRC=""; HOST=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
 abs() { case $1 in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
@@ -30,8 +35,15 @@ while [ $# -gt 0 ]; do
         --host-addons) HOST+=("${2:?}"); shift 2 ;;
         --dry-run) DRY=1; shift ;;
         --no-import) IMPORT=""; shift ;;
+        --version) case "${2:-}" in
+                [0-9]*.[0-9]*.[0-9]*) [[ "$2" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || { echo "publish_pack: --version '$2' is not semver (X.Y.Z)" >&2; exit 2; } ;;
+                *) echo "publish_pack: --version '${2:-}' is not semver (X.Y.Z)" >&2; exit 2 ;;
+            esac
+            ARGS+=(--version "$2"); shift 2 ;;
         --token) echo "publish_pack: the token is never an argument; set DOT_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
-        *) ARGS+=("$1"); shift ;;
+        --id|--bump|--into|--kind|--asset|--name|--meta|--exclude-dir) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
+        -*) ARGS+=("$1"); shift ;;
+        *) echo "publish_pack: unexpected argument '$1' (a verb such as 'versions' goes before any flag; the per-game publish.sh wrappers only publish)" >&2; exit 2 ;;
     esac
 done
 # host_names ARG: the addon folder names ARG lists, one per line, normalised to underscores.
