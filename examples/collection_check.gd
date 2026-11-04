@@ -1,10 +1,8 @@
 extends Node
 
-## Loads a published collection (a manifest with no payload beyond its licence that lists map packs) and reports the aggregate job.
-## Resolves and verifies the collection and every dependency manifest, prints the totals the one progress bar
-## would show; with --download also fetches everything into a temp cache and prints the final snapshot.
-## Run: godot --headless --path . res://examples/collection_check.tscn -- --base URL --key PEM --key-id ID \
-##        --id gamemann/game-arena-all-maps --version 1.0.0 [--download] [--min-packs N]
+## Loads a published map-pack collection, verifies every dependency manifest and prints the totals
+## one progress bar would show; --download also fetches everything into a temp cache.
+## Run: res://examples/collection_check.tscn -- --base URL --key PEM --key-id ID --id ID --version V
 
 const CHANNEL := "collection_check"
 

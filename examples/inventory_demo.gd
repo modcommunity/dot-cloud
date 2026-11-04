@@ -1,10 +1,7 @@
 extends Control
 
-## The downloaded-content inventory: what the store lists, pinning against eviction, deleting, "keep this game's content", the quota hint, and the postMessage bridge's message handling. No network.
-##
-## [codeblock]
-## godot --headless --path . res://examples/inventory_demo.tscn
-## [/codeblock]
+## The downloaded-content inventory: listing, pinning, deleting, "keep this game's content", the
+## quota hint and the postMessage bridge's handling. No network. Run: res://examples/inventory_demo.tscn
 
 const WORK := "user://dot_cloud_inventory_demo"
 const OBJ := 1024

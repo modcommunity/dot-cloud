@@ -182,10 +182,8 @@ func discard_partial(sha256: String) -> void:
 		DotWeb.sync_filesystem()
 
 
-## Promotes a verified partial into the object store.
-## Verification happens here and nowhere else: the partial is hashed against its name before the move,
-## which lets every other read skip verification and discards a mismatch instead of retrying corrupt bytes.
-## [param scheduler] slices the hashing; null hashes synchronously (fine for small files only).
+## Promotes a verified partial into the object store; the hash is checked here and nowhere else,
+## and a mismatch is discarded, not retried. [param scheduler] slices the hashing (null: synchronous).
 func commit_partial(
 	sha256: String,
 	scheduler: DotScheduler = null
@@ -387,10 +385,8 @@ func prune(need_bytes: int = 0) -> DotResult:
 	return DotResult.success(freed)
 
 
-## Bytes the origin can still write right now (quota minus usage), or -1 when that cannot be
-## measured. The ceiling from [method open] is a share of the quota and is used to decide what to
-## evict; only this figure may refuse a download, since anything below the quota still fits.
-## Must be awaited.
+## Bytes the origin can still write now (quota minus usage), or -1 when unmeasurable. Only this
+## figure may refuse a download; the ceiling from [method open] only decides eviction. Await it.
 func free_bytes() -> int:
 	if free_bytes_provider.is_valid():
 		return int(await free_bytes_provider.call())
@@ -438,10 +434,9 @@ func clear_all() -> DotResult:
 	return removed
 
 
-## Removes partials that can never be resumed into anything useful; cheap, worth doing at startup.
-## A partial is dead when old, or when its object is already in the store (a transfer that fell back
-## to another source, e.g. HTTP half then netchan via [method put_bytes]). Keeping those for
-## [param max_age_sec] would hold the largest files twice, under the disk pressure that caused the failover.
+## Removes partials that can never be resumed; cheap, worth doing at startup. A partial is dead when
+## older than [param max_age_sec] or when its object is already stored (a transfer that fell back to
+## another source), since keeping it would hold the largest files twice under disk pressure.
 func sweep_partials(max_age_sec: float = 86400.0) -> int:
 	var now := int(Time.get_unix_time_from_system())
 	var removed := 0
@@ -845,10 +840,9 @@ func clear_unpinned() -> DotResult:
 	return DotResult.success(freed)
 
 
-## Free space and why it may be small: [code]{free, quota, usage, quota_cause}[/code], numbers -1 when unknown.
-## [code]quota_cause[/code] is "" (plenty), "unreadable", "near-full" (under a twentieth or 100 MiB left) or "partitioned" (embedded in another site, whose
-## storage the browser keeps apart from the game site's own). A hint for wording an error, not a measurement of the cause.
-## Must be awaited.
+## Free space: [code]{free, quota, usage, quota_cause}[/code], numbers -1 when unknown.
+## [code]quota_cause[/code] is "", "unreadable", "near-full" (under a twentieth or 100 MiB left) or
+## "partitioned" (embedded in another site). A hint for wording an error only. Await it.
 func quota_report() -> Dictionary:
 	var free := await free_bytes()
 	var quota := -1
