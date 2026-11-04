@@ -30,10 +30,10 @@ script = ExtResource("1")
 """)
 
 	var tokens := work.path_join("tokens")
-	var code := OS.execute("godot", ["--headless", "--path", proj, "--import"], [], true)
+	var code := OS.execute(OS.get_executable_path(), ["--headless", "--path", proj, "--import"], [], true)
 	var ran: Array = []
 	var tool_path := ProjectSettings.globalize_path("res://addons/dot_cloud/publish/tokenize_scripts.sh")
-	code = OS.execute("bash", [tool_path, proj, tokens], ran, true)
+	code = OS.execute("env", ["GODOT=" + OS.get_executable_path(), "bash", tool_path, proj, tokens], ran, true)
 	_check(code == 0, "tokenize_scripts.sh succeeds", str(ran))
 	_check(FileAccess.file_exists(tokens.path_join("game/thing.gdc")), "and writes game/thing.gdc")
 	_check(not FileAccess.file_exists(proj.path_join("export_presets.cfg")), "and leaves no preset in the project")
