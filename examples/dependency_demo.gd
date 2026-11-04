@@ -5,7 +5,7 @@ extends Node
 ## Run: godot --headless --path . res://examples/dependency_demo.tscn
 
 const WORK := "user://dot_cloud_dependency_demo"
-const CHECKS := 96
+const CHECKS := 98
 const SECTIONS := 11
 
 var _failures: int = 0
@@ -336,6 +336,8 @@ func _section_vram_tags() -> void:
 	var etc := DotCloudPublisher.vram_platforms("_imported/albedo.webp-ab.etc2.ctex")
 	_check("s3tc is desktop and web", s3.has("linux") and s3.has("windows") and s3.has("web") and not s3.has("android"))
 	_check("etc2 is mobile and web", etc.has("android") and etc.has("ios") and etc.has("web") and not etc.has("linux"))
+	_check("baked s3tc.res is desktop", "linux" in DotCloudPublisher.vram_platforms("pbr/a/albedo.s3tc.res") and not "android" in DotCloudPublisher.vram_platforms("pbr/a/albedo.s3tc.res"))
+	_check("baked etc2.res is mobile", "android" in DotCloudPublisher.vram_platforms("pbr/a/albedo.etc2.res") and not "linux" in DotCloudPublisher.vram_platforms("pbr/a/albedo.etc2.res"))
 	_check("plain ctex is for all", DotCloudPublisher.vram_platforms("_imported/x.ctex").is_empty())
 	_check("an ordinary file is for all", DotCloudPublisher.vram_platforms("pbr/a.bin").is_empty())
 	_end()

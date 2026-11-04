@@ -733,16 +733,16 @@ func _platforms_for(path: String) -> PackedStringArray:
 	return vram_platforms(path) if tag_vram_textures else PackedStringArray()
 
 
-## Tag a VRAM-compressed texture's per-format output (`.s3tc.ctex`, `.etc2.ctex`, `.bptc`, `.astc`) with
+## Tag a VRAM-compressed texture's per-format output (`.s3tc.ctex`, `.etc2.ctex`, `.bptc`, `.astc`, and dot-map's baked `.s3tc.res`/`.etc2.res`) with
 ## the platforms that use it (API 15), so a desktop client does not download the phone copy.
 ## A browser and macOS get both, since the format depends on the GPU. A rule from [member platform_rules] wins.
 var tag_vram_textures: bool = true
 
 
 static func vram_platforms(path: String) -> PackedStringArray:
-	if path.ends_with(".s3tc.ctex") or path.ends_with(".bptc.ctex"):
+	if path.ends_with(".s3tc.ctex") or path.ends_with(".bptc.ctex") or path.ends_with(".s3tc.res"):
 		return PackedStringArray(["windows", "linux", "macos", "web"])
-	if path.ends_with(".etc2.ctex") or path.ends_with(".astc.ctex"):
+	if path.ends_with(".etc2.ctex") or path.ends_with(".astc.ctex") or path.ends_with(".etc2.res"):
 		return PackedStringArray(["android", "ios", "macos", "web"])
 	return PackedStringArray()
 
