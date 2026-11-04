@@ -26,6 +26,10 @@ var _total_bytes: int = 0
 ## it depends on a quota the browser only reports asynchronously.
 var _limit_bytes: int = 0
 
+## Returns the bytes the browser would still let us write, or -1 when unknown; empty means ask
+## [method DotWeb.estimate_storage]. A test sets it to stand in for a browser.
+var free_bytes_provider: Callable = Callable()
+
 
 func _init(p_config: DotCloudConfig) -> void:
 	config = p_config
@@ -367,6 +371,30 @@ func prune(need_bytes: int = 0) -> DotResult:
 		)
 
 	return DotResult.success(freed)
+
+
+## Bytes the origin can still write right now (quota minus usage), or -1 when that cannot be
+## measured. The ceiling from [method open] is a share of the quota and is used to decide what to
+## evict; only this figure may refuse a download, since anything below the quota still fits.
+## Must be awaited.
+func free_bytes() -> int:
+	if free_bytes_provider.is_valid():
+		return int(await free_bytes_provider.call())
+	if not DotPlatform.is_web():
+		return -1
+
+	var est := await DotWeb.estimate_storage()
+	if not est.ok:
+		return -1
+	var quota := int((est.value as Dictionary).get("quota", 0))
+	if quota <= 0:
+		return -1
+	return maxi(0, quota - int((est.value as Dictionary).get("usage", 0)))
+
+
+## Whether [method free_bytes] is meaningful here, so a full ceiling can be second-guessed.
+func has_measured_free() -> bool:
+	return free_bytes_provider.is_valid() or DotPlatform.is_web()
 
 
 ## Deletes everything, including referenced objects, for a "clear downloaded content" button.

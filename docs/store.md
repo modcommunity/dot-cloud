@@ -28,7 +28,7 @@ A partial's bytes are verified by nothing until the whole object commits; see [s
 | | |
 | --- | --- |
 | **Web filesystem** | `user://` is an IndexedDB mirror. `DotWeb.sync_filesystem()` is called after every committed object, not once at the end: a tab closed mid-download must keep what finished. |
-| **Web quota** | `DotCloudStore._resolve_limit()` awaits `navigator.storage.estimate()` and uses `web_quota_fraction` of it. An unavailable estimate falls back to the configured ceiling; never assume unlimited. |
+| **Web quota** | `DotCloudStore._resolve_limit()` awaits `navigator.storage.estimate()` and uses `web_quota_fraction` of it. An unavailable estimate falls back to the configured ceiling; never assume unlimited. | That ceiling only decides what to evict: when eviction cannot meet it, `DotCloudDownloader.sync` re-measures `free_bytes()` (quota minus usage) and refuses only when that is below what is still to download; an unmeasurable estimate means try anyway.
 | **Web CORS** | Every fetch is subject to it and `fetch()` will not say why it failed. A content host must send `Access-Control-Allow-Origin`, `Access-Control-Allow-Headers: Range`, and `Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, ETag`. Without `Range`, resume is impossible; without the exposed headers, undetectable. Same-origin content avoids all of it. |
 | **No threads on web** | Hashing goes through `DotHashJob` on a `DotScheduler`, sliced against a frame budget when there is no worker. |
 | **Mobile** | `mobile_cache_bytes` (1 GiB) replaces `cache_bytes` (4 GiB). Filling a phone's storage gets the app killed. |

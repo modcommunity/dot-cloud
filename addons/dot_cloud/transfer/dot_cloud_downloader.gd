@@ -191,9 +191,24 @@ func sync(
 	# byte 900,000,000. A shortfall we cannot meet is reported now, while the
 	# player can still be told something useful.
 	var pruned := store.prune(_total_bytes)
+	if not pruned.ok and pruned.error.code == DotError.CODE_QUOTA and store.has_measured_free():
+		# The ceiling is a share of the quota counted against everything already stored, so it
+		# refuses downloads the browser would accept. Only the measured free space may refuse.
+		var free := await store.free_bytes()
+		if free < 0 or free >= _total_bytes:
+			DotLog.info(CHANNEL, "over the cache ceiling but the browser has room; going on",
+				{"needed": _total_bytes, "free": free})
+			pruned = DotResult.success(0)
+		else:
+			pruned = DotResult.fail(
+				DotError.CODE_QUOTA,
+				"Not enough room for this content: it needs %s and the browser has %s free. Use \"Clear downloaded content\" in the menu to make room."
+					% [DotPaths.format_bytes(_total_bytes), DotPaths.format_bytes(free)]
+			)
 	if not pruned.ok:
 		_running = false
-		var failed := pruned.wrap("Not enough room for this content.")
+		var failed := pruned if pruned.error.message.begins_with("Not enough room") \
+			else pruned.wrap("Not enough room for this content.")
 		sync_finished.emit(failed)
 		return failed
 

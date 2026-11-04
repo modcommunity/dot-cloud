@@ -35,7 +35,7 @@ var _checks: int = 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 12
+const CHECKS := 14
 
 
 func _ready() -> void:
@@ -269,6 +269,34 @@ func _run() -> void:
 	rogue.raw_bytes = "{}".to_utf8_buffer()
 	var rogue_check := _client.verify_manifest(rogue)
 	_check("unsigned refused", not rogue_check.ok)
+
+	# 12. a ceiling smaller than the content: only the measured free space may refuse.
+	for case in [{"free": 64 * 1024 * 1024, "ok": true}, {"free": 1024, "ok": false}]:
+		var tiny := DotCloudConfig.new()
+		tiny.cache_dir = WORK.path_join("tiny_%d" % int(case["free"]))
+		tiny.require_signed_manifests = true
+		tiny.trusted_keys = config.trusted_keys
+		tiny.cache_bytes = 1024 * 1024
+		var c2 := DotCloudClient.new()
+		c2.name = "TinyClient%d" % int(case["free"])
+		c2.config = tiny
+		c2.config_file = ""
+		c2.local_search_dirs = PackedStringArray([publish_dir])
+		c2.allow_netchan_fallback = false
+		add_child(c2)
+		var up := await c2.start()
+		if not up.ok:
+			return _fail("tiny client start", up)
+		var room: int = case["free"]
+		c2.store.free_bytes_provider = func() -> int: return room
+		var got := await c2.acquire_manifest(manifest)
+		var wants_ok: bool = case["ok"]
+		if wants_ok:
+			_check("browser room beats ceiling", got.ok, "" if got.ok else str(got.error))
+		else:
+			var said := str(got.error) if not got.ok else "ACCEPTED"
+			_check("no room refuses", not got.ok and said.contains("free"), said)
+		c2.queue_free()
 
 	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
 
