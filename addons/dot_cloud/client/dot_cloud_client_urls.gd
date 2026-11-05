@@ -32,9 +32,15 @@ func manifest_urls_for(
 	for base in local_search_dirs:
 		for url in _expand_all(base, content_id, version):
 			out.append(url)
+	out.append_array(_http_manifest_urls(content_id, version))
+	return out
+
+
+## The network half of [method manifest_urls_for].
+func _http_manifest_urls(content_id: StringName, version: String) -> PackedStringArray:
+	var out := PackedStringArray()
 	for base in resolved_http_base_urls():
-		for url in _expand_all(base, content_id, version):
-			out.append(url)
+		out.append_array(_expand_all(base, content_id, version))
 	return out
 
 
