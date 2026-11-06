@@ -20,6 +20,7 @@ extends Control
 ## [/codeblock]
 
 const WORK := "user://dot_cloud_mount_demo"
+const Uids := preload("res://addons/dot_cloud/mount/dot_cloud_mounter_uids.gd")
 const _Sections := preload("res://examples/selftest/mount_sections.gd")
 
 @onready var _output: RichTextLabel = $Output
@@ -27,7 +28,7 @@ const _Sections := preload("res://examples/selftest/mount_sections.gd")
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 113
+const CHECKS := 122
 
 var _failures: int = 0
 var _checks: int = 0
@@ -75,6 +76,7 @@ func _run() -> void:
 	await _section_republished_version()
 	await _Sections.corrupt_object(self)
 	await _section_queries()
+	_section_uid_refusal()
 	await _Sections.uids(self)
 	await _section_two_publishers()
 	await _section_namespaced_ids()
@@ -703,6 +705,72 @@ func _mount_row(described: Dictionary, key: String) -> Dictionary:
 		return (mounts as Dictionary)[key]
 
 	return {}
+
+# --- 8. A refused uid is only an error when the held file differs ----------
+
+var _records: Array = []
+
+
+func _on_record(rec: Dictionary) -> void:
+	_records.append(rec)
+
+
+func _section_uid_refusal() -> void:
+	_sections_started += 1
+	_line("[b]8. refused uids: identical content is quiet[/b]")
+
+	var dir := WORK.path_join("uidref")
+	DotPaths.remove_tree(dir)
+	DirAccess.make_dir_recursive_absolute(dir)
+	var cases := {"same": ["pixels", "pixels"], "diff": ["pixels", "other"], "gone": ["pixels", ""]}
+	var first_id := 0x5a17e0c10d01
+
+	DotLog.signals().record.connect(_on_record)
+	var n := 0
+	for key in cases:
+		var held := dir.path_join("held_%s.bin" % key)
+		var wanted := dir.path_join("pack_%s.bin" % key)
+		var held_body: String = cases[key][0]
+		var wanted_body: String = cases[key][1]
+		var id := first_id + n
+		n += 1
+		_write(held, held_body)
+		_write(wanted, wanted_body)
+		_write(wanted + ".import", "[remap]\nuid=\"%s\"\n" % ResourceUID.id_to_text(id))
+		if key == "gone":
+			DirAccess.remove_absolute(held)
+		ResourceUID.add_id(id, held)
+
+		var f := DotCloudFile.new()
+		f.path = "pack_%s.bin.import" % key
+		var files: Array[DotCloudFile] = [f]
+		_records.clear()
+		var count: int = Uids.register(files, dir, "mounted_elsewhere")
+		var errors := _records.filter(func(r): return int(r["level"]) >= DotLog.Level.ERROR)
+		var warns := _records.filter(func(r): return int(r["level"]) == DotLog.Level.WARN)
+
+		_check("%s: nothing registered" % key, count == 0, "%d" % count)
+
+		if key == "same":
+			_check("same: no error or warning logged", errors.is_empty() and warns.is_empty(),
+				"%d errors, %d warnings" % [errors.size(), warns.size()])
+			_check("same: summary logged at info", _records.any(
+				func(r): return int(r["level"]) == DotLog.Level.INFO))
+		else:
+			_check("%s: still reported as an error" % key, errors.size() == 1, "%d" % errors.size())
+			_check("%s: per-uid warning kept" % key, warns.size() == 1, "%d" % warns.size())
+
+		ResourceUID.remove_id(id)
+
+	DotLog.signals().record.disconnect(_on_record)
+	DotPaths.remove_tree(dir)
+	_sections_finished += 1
+
+
+func _write(path: String, text: String) -> void:
+	var fa := FileAccess.open(path, FileAccess.WRITE)
+	fa.store_string(text)
+	fa.close()
 
 
 func _manifest(id: String, version: String, entries: Array) -> DotCloudManifest:

@@ -19,6 +19,7 @@ static func register(
 ) -> int:
 	var registered := 0
 	var refused := 0
+	var differing := 0
 	var content_root := "res://%s/" % mount_root
 
 	for f in files:
@@ -58,10 +59,15 @@ static func register(
 				continue
 
 			if not held.begins_with(content_root):
+				refused += 1
+
+				if _same_content(held, source):
+					continue
+
+				differing += 1
 				DotLog.warn(CHANNEL, "a pack claims a uid the host already owns; refused", {
 					"uid": uid_text, "held": held, "wanted": source,
 				})
-				refused += 1
 				continue
 
 			ResourceUID.set_id(id, source)
@@ -70,12 +76,22 @@ static func register(
 
 		registered += 1
 
-	if refused > 0:
-		DotLog.error(CHANNEL, "a pack tried to take uids that are not its own", {
+	if refused > 0 and differing == 0:
+		DotLog.info(CHANNEL, "a pack's uids are already held by identical files; kept the host's", {
 			"refused": refused, "prefix": prefix,
+		})
+	elif differing > 0:
+		DotLog.error(CHANNEL, "a pack tried to take uids that are not its own", {
+			"refused": refused, "differing": differing, "prefix": prefix,
 		})
 
 	return registered
+
+
+## True when both files read and hash the same; an unreadable one counts as different.
+static func _same_content(a: String, b: String) -> bool:
+	var ha := FileAccess.get_sha256(a)
+	return ha != "" and ha == FileAccess.get_sha256(b)
 
 
 ## The `uid="uid://…"` line of an import marker, or empty.
