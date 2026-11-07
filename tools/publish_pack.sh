@@ -9,6 +9,9 @@
 # --host-addons leaves out the addons/<name> folders the host already owns (a duplicate class_name breaks the pack). The argument is an
 # addons.lock (repo<TAB>ref), a directory of addon folders (dot-server-deploy/addons) or a directory holding addons.lock or addons/, or a
 # plain list of names, one per line. Names match with - and _ alike. Without it every addon under the source's addons/ is packed.
+# Family addons (dot_*) are the host's and are never packed, whatever the tree looks like: heavy runs the per-game publish.sh on another box
+# from a copy with links resolved, where a wrapper that finds linked addons by symlink sees none. --pack-addon NAME packs one on purpose.
+# More than 5 addon folders left in the pack is refused (a game ships a handful of its own adapters at most).
 # Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
 # an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
 # The source's project is imported first (--no-import skips it): a fresh clone has .import markers but no .godot/imported outputs.
@@ -22,7 +25,7 @@ case "${1:-}" in
     *) echo "publish_pack: unknown verb '$1' (publish, versions or relock; flags start with --)" >&2; exit 2 ;;
 esac
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
-SRC=""; HOST=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
+SRC=""; HOST=(); PACKADD=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
 abs() { case $1 in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 while [ $# -gt 0 ]; do
     case $1 in
@@ -33,6 +36,7 @@ while [ $# -gt 0 ]; do
         --lock) LOCK="${2:?}"; shift 2 ;;
         --source) SRC="$(abs "${2:?}")"; ARGS+=(--source "$SRC"); shift 2 ;;
         --host-addons) HOST+=("${2:?}"); shift 2 ;;
+        --pack-addon) PACKADD+=("${2:?}"); shift 2 ;;
         --dry-run) DRY=1; shift ;;
         --no-import) IMPORT=""; shift ;;
         --version) case "${2:-}" in
@@ -70,6 +74,23 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ -d "$SRC/addons" ]; then
         done
         echo "publish_pack: --host-addons left out ${#LEFT[@]} host-owned addon(s): ${LEFT[*]:-none}" >&2
         echo "publish_pack: packing ${#KEPT[@]} other addon(s): ${KEPT[*]:-none}" >&2
+    fi
+fi
+if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ -d "$SRC/addons" ]; then
+    EXC=" "; for ((i=0; i<${#ARGS[@]}; i++)); do [ "${ARGS[i]}" = --exclude-dir ] && EXC+="${ARGS[i+1]} "; done
+    NPACK=0
+    for d in "$SRC"/addons/*/; do
+        [ -d "$d" ] || continue
+        n="$(basename "$d")"
+        case "$EXC" in *" $n "*) continue ;; esac
+        if [[ $n == dot_* ]] && ! printf '%s\n' "${PACKADD[@]:-}" | grep -qxF "$n"; then
+            ARGS+=(--exclude-dir "$n"); EXC+="$n "; echo "publish_pack: addons/$n is a family addon, left out (--pack-addon $n to pack it)" >&2; continue
+        fi
+        NPACK=$((NPACK+1))
+    done
+    if [ "$NPACK" -gt 5 ]; then
+        echo "publish_pack: $NPACK addon folders would be packed from $SRC/addons; a pack carries a handful of its own at most. Linked addons reach servers through addons.lock. Refusing (a copy with resolved links, as heavy's staging box makes, looks like this)." >&2
+        exit 2
     fi
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
