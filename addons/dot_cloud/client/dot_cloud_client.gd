@@ -1015,9 +1015,11 @@ func fetch_manifest(manifest_url: String) -> DotResult:
 	# A pack's objects live beside its manifest, so where it came from is always a valid mirror;
 	# without it a client pointed at a content root asks for objects one directory too high.
 	# Appended, never prepended: a mirror the publisher named is where the operator wants load.
-	if not is_local_manifest_url(manifest_url):
-		var here := manifest_url.get_base_dir()
-
+	# A manifest kept on disk names no pack directory, so each HTTP base's own one is used instead.
+	var homes := PackedStringArray([manifest_url]) if not is_local_manifest_url(manifest_url) \
+		else _http_manifest_urls(manifest.content_id, manifest.version)
+	for url in homes:
+		var here := url.get_base_dir()
 		if here != "" and not manifest.mirrors.has(here):
 			manifest.mirrors.append(here)
 

@@ -43,7 +43,7 @@ const DEAD_BASE := "http://127.0.0.1:1"
 ## Every check this suite runs, including the one that compares against it. The section
 ## counter cannot see a section that aborted after announcing itself — its remaining checks
 ## simply never run — and a total can. See docs/testing.md.
-const CHECKS := 36
+const CHECKS := 37
 
 var _failures: int = 0
 var _checks: int = 0
@@ -221,6 +221,14 @@ func _test_base_url_resolution() -> void:
 	_check(
 		"and an absolute base builds the manifest URL it always did",
 		Array(absolute.manifest_urls_for(&"surf_mesa"))
+			== ["https://games.example.net/content/surf_mesa/manifest.json"]
+	)
+
+	# A manifest kept on disk takes its mirrors from these, or its objects go to the content root.
+	absolute.local_search_dirs = PackedStringArray(["user://kept_manifests"])
+	_check(
+		"a kept manifest's pack directory is each HTTP base's, never the local directory",
+		Array(absolute._http_manifest_urls(&"surf_mesa", "1"))
 			== ["https://games.example.net/content/surf_mesa/manifest.json"]
 	)
 
