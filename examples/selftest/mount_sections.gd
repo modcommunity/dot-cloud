@@ -111,6 +111,22 @@ static func slice_loader(h: Node) -> void:
 			threaded or (ticks[0] >= 1 and loader.frames_yielded >= 1),
 			"%d ticks, %d yields" % [ticks[0], loader.frames_yielded])
 
+	# Batch cap: never more than max_per_frame resources between two frames, and the cover's frames keep ticking.
+	var batched := DotCloudSliceLoader.new()
+	batched.budget_msec = 100000
+	batched.max_per_frame = 3
+	var ticks_b := [0]
+	var counter_b := func() -> void: ticks_b[0] += 1
+	h.get_tree().process_frame.connect(counter_b)
+	var bres := await batched.load_all(h.get_tree(), paths, false)
+	h.get_tree().process_frame.disconnect(counter_b)
+	h._check("batched: loaded all", bres.ok and batched.loaded.size() == paths.size())
+	h._check("batched: at most 3 resources in any frame", batched.peak_per_frame <= 3 and batched.peak_per_frame >= 1,
+		str(batched.peak_per_frame))
+	h._check("batched: one frame passed per batch", ticks_b[0] >= paths.size() / 3 and batched.frames_yielded >= paths.size() / 3,
+		"%d ticks, %d yields for %d paths" % [ticks_b[0], batched.frames_yielded, paths.size()])
+	h._check("batched: no frame over 100 ms", batched.peak_frame_msec < 100, "%d ms" % batched.peak_frame_msec)
+
 	var capped := DotCloudSliceLoader.new()
 	capped.budget_msec = 0
 	capped.deadline_msec = 1
