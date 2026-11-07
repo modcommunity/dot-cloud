@@ -16,6 +16,14 @@ var deadline_msec: int = 0
 ## Paths [method load_all] left unloaded because [member deadline_msec] ran out.
 var remaining: PackedStringArray = PackedStringArray()
 
+## When above 0, a frame loads at most this many resources before it yields, whatever the time budget says.
+var max_per_frame: int = 0
+
+## Most resources loaded in one frame, and the longest span of loading in one frame (msec), by the last non-threaded load_all.
+## A single load() cannot be split, so peak_frame_msec is bounded below by the slowest resource.
+var peak_per_frame: int = 0
+var peak_frame_msec: int = 0
+
 ## Frames that passed while the last load_all ran.
 var frames_yielded: int = 0
 
@@ -37,6 +45,8 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 	loaded.clear()
 	slowest.clear()
 	remaining = PackedStringArray()
+	peak_per_frame = 0
+	peak_frame_msec = 0
 	var total := paths.size()
 	var started := Time.get_ticks_msec()
 
@@ -45,6 +55,7 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 
 	var done := 0
 	var slice_start := Time.get_ticks_msec()
+	var in_slice := 0
 
 	for i in total:
 		var path := paths[i]
@@ -59,10 +70,15 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 
 		loaded.append(res)
 		done += 1
+		in_slice += 1
+		peak_per_frame = maxi(peak_per_frame, in_slice)
 		progress.emit(done, total, path)
 
-		if Time.get_ticks_msec() - slice_start >= budget_msec:
+		var spent := Time.get_ticks_msec() - slice_start
+		peak_frame_msec = maxi(peak_frame_msec, spent)
+		if spent >= budget_msec or (max_per_frame > 0 and in_slice >= max_per_frame):
 			frames_yielded += 1
+			in_slice = 0
 			await tree.process_frame
 			slice_start = Time.get_ticks_msec()
 
