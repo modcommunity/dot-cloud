@@ -19,6 +19,7 @@ extends RefCounted
 
 const CHANNEL := "cloud.pub"
 const _Sides := preload("dot_cloud_publisher_sides.gd")
+const _Groups := preload("dot_cloud_publisher_groups.gd")
 const _Rewrite := preload("dot_cloud_publisher_rewrite.gd")
 const _Finish := preload("dot_cloud_publisher_finish.gd")
 const TOKENS_ENGINE_FILE := "engine.txt"
@@ -30,6 +31,11 @@ const LICENCE_FILE := "licence.json"
 ## The file at the source root that says which files only one side fetches (API 8):
 ## [code]{"client": ["lightmaps/"], "server": ["server/*.json"]}[/code]. See [member side_rules].
 const SIDES_FILE := "sides.json"
+
+## The file at the source root that puts files in download groups, read next to [constant SIDES_FILE] and
+## merged with [member group_rules]: [code]{"course_a": ["worlds/course_a.*"]}[/code] or
+## [code]{"worlds/course_a.*": "course_a"}[/code]. A pattern matching nothing is refused.
+const GROUPS_FILE := "groups.json"
 
 var content_id: String = ""
 var version: String = "0.0.0"
@@ -348,6 +354,9 @@ func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extr
 	var total_bytes := 0
 	var rewritten := 0
 	var seen := {}
+	var file_groups := _Groups.groups_for(self, source_dir, relatives)
+	if not file_groups.ok:
+		return file_groups
 
 	for rel in relatives:
 		# `extra` entries come from the project root or [member extra_files]; the rest from the source.
@@ -380,7 +389,7 @@ func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extr
 		entry.sha256 = digest
 		entry.size = size
 		entry.required = not _is_optional(entry.path)
-		entry.groups = _groups_for(entry.path)
+		entry.groups = _groups_for(entry.path, file_groups.value.get(rel, PackedStringArray()))
 		entry.platforms = _platforms_for(entry.path)
 		entry.side = str(sides.get(rel, DotCloudFile.SIDE_BOTH))
 
@@ -710,11 +719,14 @@ func _is_optional(path: String) -> bool:
 	return false
 
 
-func _groups_for(path: String) -> PackedStringArray:
+func _groups_for(path: String, from_file: PackedStringArray = PackedStringArray()) -> PackedStringArray:
 	var out := PackedStringArray()
 	for prefix in group_rules:
 		if path.begins_with(str(prefix)):
 			out.append(str(group_rules[prefix]))
+	for g in from_file:
+		if not out.has(g):
+			out.append(g)
 	return out
 
 

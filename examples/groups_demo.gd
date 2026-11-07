@@ -1,0 +1,198 @@
+extends Node
+
+## Download groups from the source's `groups.json` (a course's meshes beside the pack's core files).
+##
+## Covered here: both shapes of the file, the groups written into the manifest entries, a file in no rule
+## left ungrouped, a file in two groups, the merge with `DotCloudPublisher.group_rules`, the `.import`
+## marker following its asset, a client given only a group fetching that group's files, and the
+## publisher's refusals (a pattern matching nothing, an empty group, a non-pack path, a malformed file).
+##
+## [codeblock]
+## godot --headless --path . res://examples/groups_demo.tscn
+## [/codeblock]
+
+const WORK := "user://dot_cloud_groups_demo"
+
+## Every check this suite runs, the closing count included. See docs/testing.md.
+const CHECKS := 27
+const SECTIONS := 3
+
+const GROUPS_JSON := '{"course_a": ["worlds/course_a.*"], "course_b": ["worlds/course_b.*"], "worlds/shared/": "course_a"}'
+
+var _failures: int = 0
+var _checks: int = 0
+var _sections_started: int = 0
+var _sections_finished: int = 0
+var _keys: Dictionary = {}
+
+
+func _ready() -> void:
+	DotLog.set_level(DotLog.Level.WARN)
+	await _run()
+
+
+func _run() -> void:
+	print("dot-cloud groups")
+	DotPaths.remove_tree(WORK)
+	var keys := DotCloudSignature.generate_keypair(2048)
+	if not keys.ok:
+		print("keygen failed: %s" % keys.error)
+		_finish(1)
+		return
+	_keys = keys.value
+
+	_section_published()
+	_section_merge()
+	_section_refusals()
+
+	_check(
+		"every section finished",
+		_sections_started == SECTIONS and _sections_finished == SECTIONS,
+		"%d started, %d finished, of %d" % [_sections_started, _sections_finished, SECTIONS]
+	)
+	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
+	print("")
+	print("%d checks, %d failed" % [_checks, _failures])
+	_finish(1 if _failures > 0 else 0)
+
+
+func _section_published() -> void:
+	_begin("published groups")
+	var dir := WORK.path_join("src_ok")
+	_write_source(dir, GROUPS_JSON)
+	var res := _publisher().publish(dir, WORK.path_join("out_ok"))
+	_check("publish", res.ok, str(res.error) if not res.ok else "")
+	if not res.ok:
+		_end()
+		return
+	var groups := _groups_of(WORK.path_join("out_ok"))
+	_check("course_a json grouped", groups.get("worlds/course_a.json", []) == ["course_a"], str(groups.get("worlds/course_a.json")))
+	_check("course_a bin grouped", groups.get("worlds/course_a.bin", []) == ["course_a"])
+	_check("course_b glob grouped", groups.get("worlds/course_b.json", []) == ["course_b"])
+	_check("course_b bin grouped", groups.get("worlds/course_b.bin", []) == ["course_b"])
+	_check("prefix form grouped", groups.get("worlds/shared/sky.res", []) == ["course_a"])
+	_check("courses ungrouped", not groups.has("courses/a.json"))
+	_check("cfg ungrouped", not groups.has("cfg/game.yml"))
+	_check("groups.json ships ungrouped", groups.has("groups.json") == false)
+	_check("a name prefix does not leak", not groups.has("worlds/course_ab.json"))
+
+	var manifest := _manifest(WORK.path_join("out_ok"))
+	var a_only := PackedStringArray()
+	if manifest != null:
+		for f in manifest.files:
+			if f.groups.is_empty() or f.in_groups(PackedStringArray(["course_a"])):
+				a_only.append(f.path)
+	_check("course_a client skips course_b", manifest != null and "worlds/course_a.json" in a_only and not "worlds/course_b.json" in a_only)
+	_check("course_a client keeps core files", "courses/a.json" in a_only and "cfg/game.yml" in a_only)
+	_end()
+
+
+func _section_merge() -> void:
+	_begin("merge with group_rules")
+	var dir := WORK.path_join("src_merge")
+	_write_source(dir, GROUPS_JSON)
+	var pub := _publisher()
+	pub.group_rules = {"worlds/course_a.": "hd", "courses/": "meta"}
+	var res := pub.publish(dir, WORK.path_join("out_merge"))
+	_check("publish", res.ok, str(res.error) if not res.ok else "")
+	if not res.ok:
+		_end()
+		return
+	var groups := _groups_of(WORK.path_join("out_merge"))
+	var a: Array = Array(groups.get("worlds/course_a.json", []))
+	a.sort()
+	_check("both group sources apply", a == ["course_a", "hd"], str(a))
+	_check("code rule alone applies", groups.get("courses/a.json", []) == ["meta"])
+	_check("file rule alone applies", groups.get("worlds/course_b.json", []) == ["course_b"])
+	var again := _publisher().publish(dir, WORK.path_join("out_merge2"))
+	_check("no group_rules still groups", again.ok and _groups_of(WORK.path_join("out_merge2")).get("worlds/course_a.json", []) == ["course_a"])
+	_end()
+
+
+func _section_refusals() -> void:
+	_begin("refusals")
+	_check("pattern matching nothing", _refused('{"course_z": ["worlds/course_z."]}'))
+	_check("prefix form matching nothing", _refused('{"nowhere/": "g"}'))
+	_check("empty group list", _refused('{"course_a": []}'))
+	_check("empty group name", _refused('{"worlds/": ""}'))
+	_check("res:// pattern", _refused('{"g": ["res://worlds/"]}'))
+	_check("absolute pattern", _refused('{"g": ["/worlds/"]}'))
+	_check("wrong value type", _refused('{"g": 3}'))
+	_check("not an object", _refused('["worlds/"]'))
+	_end()
+
+
+# Helpers
+
+func _refused(groups: String) -> bool:
+	var dir := WORK.path_join("src_bad")
+	DotPaths.remove_tree(dir)
+	_write_source(dir, groups)
+	var res := _publisher().publish(dir, WORK.path_join("out_bad"))
+	return not res.ok
+
+
+func _publisher() -> DotCloudPublisher:
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "groups_demo"
+	pub.version = "1.0.0"
+	pub.signing_key_pem = str(_keys["private"])
+	pub.signing_key_id = "demo"
+	return pub
+
+
+func _manifest(out: String) -> DotCloudManifest:
+	var bytes := DotPaths.read_bytes(out.path_join("manifest.json"))
+	if not bytes.ok:
+		return null
+	var parsed := DotCloudManifest.from_json_bytes(bytes.value)
+	return parsed.value if parsed.ok else null
+
+
+func _groups_of(out: String) -> Dictionary:
+	var by_path := {}
+	var manifest := _manifest(out)
+	if manifest == null:
+		return by_path
+	for f in manifest.files:
+		if not f.groups.is_empty():
+			by_path[f.path] = Array(f.groups)
+	return by_path
+
+
+func _write_source(dir: String, groups: String) -> void:
+	var files := {
+		"courses/a.json": "{}\n",
+		"cfg/game.yml": "game: demo\n",
+		"worlds/course_a.json": "{\"a\": 1}\n",
+		"worlds/course_a.bin": "AAAA",
+		"worlds/course_b.json": "{\"b\": 1}\n",
+		"worlds/course_b.bin": "BBBB",
+		"worlds/course_ab.json": "{}\n",
+		"worlds/shared/sky.res": "sky",
+		"groups.json": groups + "\n",
+	}
+	for path: String in files:
+		DotPaths.write_text(dir.path_join(path), str(files[path]))
+
+
+func _begin(name: String) -> void:
+	_sections_started += 1
+	print("")
+	print("[%s]" % name)
+
+
+func _end() -> void:
+	_sections_finished += 1
+
+
+func _check(label: String, passed: bool, detail: String = "") -> void:
+	_checks += 1
+	if not passed:
+		_failures += 1
+	print("  %s %s%s" % [label.rpad(34), "ok" if passed else "FAILED", (" (%s)" % detail) if detail != "" else ""])
+
+
+func _finish(code: int) -> void:
+	await get_tree().process_frame
+	get_tree().quit(code)

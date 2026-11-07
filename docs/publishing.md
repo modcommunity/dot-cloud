@@ -65,6 +65,16 @@ A pattern ending in `/` is a directory prefix; anything else is a `String.match`
 
 The tag is part of the signed payload; how a fetcher uses it, and why an older build is unaffected, is in [mounting.md](mounting.md#a-pack-can-leave-files-out-per-side).
 
+## Download groups from the source: `groups.json`
+
+A pack whose parts are fetched on demand (a game's courses, each with its own meshes) says which files form a group in a `groups.json` at the source root, read next to `sides.json` and merged with `DotCloudPublisher.group_rules`. Either shape, or both in one file:
+
+```json
+{ "course_a": ["worlds/course_a.*"], "worlds/shared/": "course_a" }
+```
+
+`{group: [patterns]}` and `{pattern: group}` (the shape of `sides.json` and of `group_rules`). Patterns are the sides rules' (a trailing `/` is a directory prefix, anything else a `String.match` glob over the pack path); an `.import` marker also matches by the asset it stands for. The publisher writes the groups into each entry's `groups` in the manifest, and `ensure(content_id, version, groups)` fetches the files of those groups plus every ungrouped file. Refused at publish, as `CODE_INVALID`: a pattern that matches nothing (a typo would publish the files ungrouped and say nothing), a group listing no pattern, an empty group name, a `res://` or absolute pattern, and a value that is neither a list nor a group name. The file ships with the pack. A build that predates the file ignores it and publishes ungrouped, so the pack still works and only fetches more.
+
 ## A scene's references move with the pack
 
 Godot writes a scene's script and resource references as **absolute** `res://` paths, and a pack does not mount where its content was authored. A published scene naming `res://game/thing.gd`, mounted at `res://dot_cloud/<id>/<version>/`, mounts, loads, and fails only when something calls a method on a script that is not there. It is the same constraint `class_name` has ("the pack is data, the code ships in the build") by a second route, and why every game here uses relative preloads.
