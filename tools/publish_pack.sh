@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
             esac
             ARGS+=(--version "$2"); shift 2 ;;
         --token) echo "publish_pack: the token is never an argument; set DOT_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
-        --id|--bump|--into|--kind|--asset|--name|--meta|--exclude-dir) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
+        --id|--bump|--into|--kind|--asset|--name|--meta|--exclude-dir|--depends|--min-engine|--entry|--mount-root) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
         -*) ARGS+=("$1"); shift ;;
         *) echo "publish_pack: unexpected argument '$1' (a verb such as 'versions' goes before any flag; the per-game publish.sh wrappers only publish)" >&2; exit 2 ;;
     esac
