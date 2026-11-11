@@ -42,5 +42,7 @@ extends RefCounted
 # 20: DotCloudClient.job_register / job_register_manifest / job_download / job_begin_unpack / read_pack_file, DotCloudJobProgress.begin_unpack /
 #     note_unpacked (snapshot gains phase, unpack_done, unpack_total), DotCloudWorkshop.defer_mount / mount_pending: one outer job whose total
 #     is fixed up front, every download first and every mount after. Additive; a caller that never opens an outer job is unchanged.
-const LEVEL := 20
+# 21: DotCloudInventoryReport (the account site's downloaded-content report body and its pending actions) and the
+#     bridge's `sync` op. Additive.
+const LEVEL := 21
 const OLDEST := 1

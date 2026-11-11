@@ -5,8 +5,8 @@ extends Control
 
 const WORK := "user://dot_cloud_inventory_demo"
 const OBJ := 1024
-const SECTIONS := 7
-const CHECKS := 73
+const SECTIONS := 8
+const CHECKS := 92
 
 @onready var _output: RichTextLabel = $Output
 
@@ -32,6 +32,7 @@ func _run() -> void:
 	await _section_quota()
 	await _section_bridge()
 	await _section_review()
+	await _section_site_report()
 
 	_check("every section ran to its last line", _completed == _entered and _entered == SECTIONS,
 		"%d of %d" % [_completed, SECTIONS])
@@ -303,6 +304,72 @@ func _section_review() -> void:
 	f.close()
 	store.clear_all()
 	_check("clear_all removes mounter pck copies", not FileAccess.file_exists(pck_dir.path_join("m.pck")))
+	store.close()
+	_done()
+
+
+func _section_site_report() -> void:
+	_section("[b]8. the account site's report and sync[/b]")
+	var store := await _open("s", 0)
+	var h1 := _put(store, 60)
+	var h2 := _put(store, 61)
+	var h3 := _put(store, 62)
+	store.record_pack(_manifest("sa", "1", "game", "sa", [h1]))
+	store.record_pack(_manifest("sm", "2", "map", "sa", [h2]))
+	store.record_pack(_manifest("sw", "3", "weapon", "sa", [h3]))
+
+	var report := DotCloudInventoryReport.body(store.inventory())
+	var packs: Array = report["packs"]
+	_check("three packs reported", packs.size() == 3 and (report["ack"] as Array).is_empty(), str(packs.size()))
+	var first: Dictionary = packs[0]
+	_check("site field names", first.has_all(["packId", "version", "name", "kind", "game", "bytes", "pinned", "lastUsed"]))
+	_check("bytes carried", int(first["bytes"]) == OBJ, str(first["bytes"]))
+	_check("lastUsed is a UTC datetime", str(first["lastUsed"]).ends_with("Z") and str(first["lastUsed"]).contains("T"), str(first["lastUsed"]))
+	_check("report is JSON-safe", JSON.parse_string(JSON.stringify(report)) is Dictionary)
+
+	var odd := DotCloudInventoryReport.body([
+		{"id": "", "version": "1"}, {"id": "ok", "version": ""}, {"id": "x".repeat(161), "version": "1"},
+		"not a row", {"id": "fine", "version": "1", "bytes": -5, "last_used": 0, "name": "n".repeat(300)}])
+	var kept: Array = odd["packs"]
+	_check("unusable rows dropped", kept.size() == 1 and kept[0]["packId"] == "fine", str(kept.size()))
+	_check("negative bytes clamp, no use time is null, name cut", kept[0]["bytes"] == 0 and kept[0]["lastUsed"] == null and str(kept[0]["name"]).length() == DotCloudInventoryReport.MAX_NAME)
+
+	var big: Array = []
+	for i in DotCloudInventoryReport.MAX_PACKS + 5:
+		big.append({"id": "p%d" % i, "version": "1"})
+	_check("report cut at the site's limit", (DotCloudInventoryReport.body(big)["packs"] as Array).size() == DotCloudInventoryReport.MAX_PACKS)
+	var acks := DotCloudInventoryReport.body([], [{"packId": "a", "version": "1", "action": "delete"}, {"packId": "a", "version": "1", "action": "explode"}, {"packId": "", "action": "pin"}])
+	_check("only well-formed acks pass through", (acks["ack"] as Array).size() == 1)
+
+	var out := DotCloudInventoryReport.apply_pending(store, [
+		{"packId": "sa", "version": "1", "action": "pin"},
+		{"packId": "sm", "version": "2", "action": "delete"},
+		{"packId": "ghost", "version": "1", "action": "delete"},
+		{"packId": "sw", "version": "3", "action": "explode"},
+		"junk"])
+	_check("pin and delete carried out", out["done"] == 2 and bool(_find(store.inventory(), "sa")["pinned"]) and _find(store.inventory(), "sm").is_empty() and not store.has(h2))
+	_check("unknown pack refused and acknowledged", out["refused"] == 1 and (out["ack"] as Array).size() == 1 and out["ack"][0]["packId"] == "ghost")
+	_check("unknown action skipped", store.has(h3) and not _find(store.inventory(), "sw").is_empty())
+
+	var pinned_delete := DotCloudInventoryReport.apply_pending(store, [{"packId": "sa", "version": "1", "action": "delete"}])
+	_check("delete of a pinned pack waits, not acknowledged", pinned_delete["refused"] == 1 and (pinned_delete["ack"] as Array).is_empty() and store.has(h1))
+	var unpin := DotCloudInventoryReport.apply_pending(store, [{"packId": "sa", "version": "1", "action": "unpin"}])
+	_check("unpin carried out", unpin["done"] == 1 and not bool(_find(store.inventory(), "sa")["pinned"]))
+
+	store.in_use_fn = func(key: String) -> bool: return key.begins_with("sw")
+	var mounted := DotCloudInventoryReport.apply_pending(store, [{"packId": "sw", "version": "3", "action": "delete"}])
+	_check("delete of a mounted pack waits for a restart", mounted["refused"] == 1 and (mounted["ack"] as Array).is_empty() and store.has(h3))
+
+	var site := "https://moddingcommunity.com"
+	var bridge := DotCloudInventoryBridge.new(store, PackedStringArray([site]))
+	var sync := await bridge.handle({"dot": "dot-inventory", "op": "sync", "id": 30, "pending": [{"packId": "ghost", "version": "1", "action": "pin"}]}, site)
+	var value: Dictionary = sync.get("value", {})
+	_check("sync answers with the report body", sync.get("ok") == true and (value["packs"] as Array).size() == 2 and value["done"] == 0 and value["refused"] == 1)
+	_check("sync carries the acknowledgement", (value["ack"] as Array).size() == 1 and value["ack"][0]["action"] == "pin")
+	var bad := await bridge.handle({"dot": "dot-inventory", "op": "sync", "id": 31, "pending": "nope"}, site)
+	_check("sync refuses pending that is not a list", bad["ok"] == false and bad["error"]["code"] == DotError.CODE_INVALID)
+	var plain := await bridge.handle({"dot": "dot-inventory", "op": "sync", "id": 32}, site)
+	_check("sync with nothing pending just reports", plain["ok"] == true and (plain["value"]["packs"] as Array).size() == 2)
 	store.close()
 	_done()
 
