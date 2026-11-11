@@ -63,6 +63,9 @@ var mirror_list: DotCloudMirrorList = null
 
 ## Consecutive failures (network or hash) a base may have before it is tried last for [member cooldown_sec].
 const BASE_FAILURES_BEFORE_DEMOTION := 2
+## Bounds of one unpack slice between yields to the frame loop (see [method unpack_slice_budget]).
+const UNPACK_SLICE_MIN_MS := 24
+const UNPACK_SLICE_MAX_MS := 64
 
 ## base -> {fails, until_ms}. Per base, so one dead mirror never trips the source breaker.
 var _base_health: Dictionary = {}
@@ -284,6 +287,15 @@ func fetch_bundle(
 	return last.wrap("Could not fetch the content bundle.")
 
 
+## Work-slice length (ms) for the next stretch of bundle unpacking, given how long the last
+## yield to the next frame took. A frame that comes back quickly means the tab has time to
+## spare, so the floor (most of a 60 Hz frame) is enough; a slow frame (a busy or throttled
+## browser tab, a weak phone) is mostly fixed per-frame overhead, so a longer slice spends less
+## of the join on it. Clamped to [constant UNPACK_SLICE_MIN_MS]..[constant UNPACK_SLICE_MAX_MS].
+static func unpack_slice_budget(last_frame_ms: int) -> int:
+	return clampi(int(last_frame_ms * 1.5), UNPACK_SLICE_MIN_MS, UNPACK_SLICE_MAX_MS)
+
+
 func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> DotResult:
 	var zip := ZIPReader.new()
 	var err := zip.open(path)
@@ -293,6 +305,7 @@ func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> D
 	var bytes := 0
 	var tree := Engine.get_main_loop() as SceneTree
 	var slice_start := Time.get_ticks_msec()
+	var budget_ms := UNPACK_SLICE_MIN_MS
 	for entry in zip.get_files():
 		if not wanted.has(entry) or store.has(entry):
 			continue
@@ -305,9 +318,11 @@ func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> D
 		bytes += body.size()
 		# Hashing thousands of entries in one frame freezes a browser tab; 8 ms slices made the
 		# unpack frame-rate bound (7 s for 758 objects), so spend most of a frame per slice.
-		if tree != null and Time.get_ticks_msec() - slice_start > 24:
+		if tree != null and Time.get_ticks_msec() - slice_start > budget_ms:
+			var yielded := Time.get_ticks_msec()
 			await tree.process_frame
 			slice_start = Time.get_ticks_msec()
+			budget_ms = unpack_slice_budget(slice_start - yielded)
 	zip.close()
 	DotWeb.sync_filesystem()
 	return DotResult.success({"objects": objects, "bytes": bytes})
