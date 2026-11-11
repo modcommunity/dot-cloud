@@ -9,7 +9,8 @@ const MAX_DEPTH := 4
 ## Resolves a manifest's dependency tree ahead of the downloads and registers each pack's missing bytes,
 ## so the job's total is known before the first byte. Manifests are kept for [method ensure_dependency].
 ## One level is fetched [member DotCloudConfig.parallel_packs] at a time and registered in list order, so the job's totals do not depend on which fetch finished first; a manifest that fails to resolve is skipped here and fails in [method ensure_all] with its context.
-static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest, depth: int) -> void:
+## [param groups] are fetched of this level's packs only, not of theirs.
+static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest, depth: int, groups: PackedStringArray = PackedStringArray()) -> void:
 	if depth >= MAX_DEPTH or c.job == null:
 		return
 	var wanted: Array = []
@@ -46,17 +47,21 @@ static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest,
 			continue
 		var m: DotCloudManifest = resolved.value
 		c._job_manifests[m.key()] = m
-		var plan := c.plan_for(m)
+		if not groups.is_empty():
+			c._job_groups[m.key()] = groups
+		var plan := c.plan_for(m, groups)
 		c.job.add_pack(m.key(), int(plan["missing_bytes"]), int(plan["missing_files"]))
 		await register_dependencies(c, m, depth + 1)
 
 
 ## Registers an already resolved manifest and its dependency tree.
-static func register_manifest(c: DotCloudClient, m: DotCloudManifest) -> void:
+static func register_manifest(c: DotCloudClient, m: DotCloudManifest, groups: PackedStringArray = PackedStringArray()) -> void:
 	if c.job == null:
 		return
 	c._job_manifests[m.key()] = m
-	var plan := c.plan_for(m)
+	if not groups.is_empty():
+		c._job_groups[m.key()] = groups
+	var plan := c.plan_for(m, groups)
 	c.job.add_pack(m.key(), int(plan["missing_bytes"]), int(plan["missing_files"]))
 	await register_dependencies(c, m, 1)
 
@@ -76,7 +81,7 @@ static func download_all(c: DotCloudClient) -> Dictionary:
 			var key := m.key()
 			var got: DotResult = await c._preflight_requirements(m, key)
 			if got.ok:
-				got = await c._download(m, PackedStringArray(), key)
+				got = await c._download(m, c._job_groups.get(key, PackedStringArray()), key)
 			if not got.ok:
 				failed[key] = got.error
 		state["live"] = int(state["live"]) - 1
