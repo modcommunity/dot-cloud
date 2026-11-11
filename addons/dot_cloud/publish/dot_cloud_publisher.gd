@@ -73,7 +73,9 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 
 ## Skip worktree checkouts (a top-level `wt-*` folder) and folders the source's root `.gitignore` ignores by a
 ## directory pattern (`/name/`, `name/`, `/wt-*/`): they are scratch or linked copies, never the game's own content.
-## Only patterns ending in `/` count, so a file pattern never hides a folder. Off with `--include-ignored`.
+## Only patterns ending in `/` count, so a file pattern never hides a folder; the one exception is a top-level symlink
+## (a bootstrap link to a sibling checkout), which a slash-less pattern such as `maps` or `/dot_*` also hides.
+## Off with `--include-ignored`.
 var skip_ignored_dirs: bool = true
 
 ## Top-level folders of the source skipped entirely: `examples/` holds editor-only suites and demos, whose scripts do not parse in a web export (they name classes a shell lacks) and which no game scene loads.
@@ -621,11 +623,34 @@ func _ignored_dir_patterns(source_dir: String) -> PackedStringArray:
 	var f := FileAccess.open(source_dir.path_join(".gitignore"), FileAccess.READ)
 	if f == null:
 		return out
+	# Git ignores a symlink by a slash-less pattern (a trailing `/` matches only a real folder), so a bootstrap link
+	# to a sibling checkout is "ignored" by `maps` or `/dot_*`; a pack must not follow it into that checkout.
+	var links := _top_level_links(source_dir)
 	for line in f.get_as_text().split("\n"):
 		var l := line.strip_edges()
-		if l.is_empty() or l.begins_with("#") or l.begins_with("!") or not l.ends_with("/"):
+		if l.is_empty() or l.begins_with("#") or l.begins_with("!"):
 			continue
-		out.append(l.trim_suffix("/"))
+		if l.ends_with("/"):
+			out.append(l.trim_suffix("/"))
+			continue
+		var anchored := l.trim_prefix("/")
+		if anchored.contains("/"):
+			continue
+		for link in links:
+			if link.match(anchored):
+				out.append("/" + link)
+	return out
+
+
+## Names of the symlinks directly inside [param source_dir].
+func _top_level_links(source_dir: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var d := DirAccess.open(source_dir)
+	if d == null:
+		return out
+	for name in d.get_directories():
+		if d.is_link(source_dir.path_join(name)):
+			out.append(name)
 	return out
 
 
