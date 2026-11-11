@@ -183,12 +183,17 @@ func wanted_on_side(fetch_side: String) -> bool:
 	return not side in [SIDE_CLIENT, SIDE_SERVER]
 
 
+## The group selection meaning every group (API 22): what a process hosting any map of a pack asks for.
+## The publisher refuses it as a group name, so it never collides with a real one.
+const ALL_GROUPS := "*"
+
+
 ## Whether this file is in any of [param selected] groups.
 ##
 ## An ungrouped file is always wanted — treating "no group" as "no group
 ## selected it" would make the common manifest fetch nothing.
 func in_groups(selected: PackedStringArray) -> bool:
-	if groups.is_empty():
+	if groups.is_empty() or selected.has(ALL_GROUPS):
 		return true
 	for g in groups:
 		if selected.has(g):

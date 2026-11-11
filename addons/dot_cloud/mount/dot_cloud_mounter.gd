@@ -21,6 +21,9 @@ const _Uids := preload("dot_cloud_mounter_uids.gd")
 ## [code]options.uid_policy[/code]: only add ids the process does not know yet.
 const UID_ADD_ONLY := "add_only"
 
+## [code]options.groups[/code] (API 22): the download groups to mount beside the ungrouped files, a
+## [PackedStringArray]. What the downloader fetched for the same groups; absent mounts ungrouped files only.
+
 var config: DotCloudConfig
 
 ## content_key -> {manifest, prefix, mounted_at, files}
@@ -46,7 +49,7 @@ func mount(
 		return engine_check
 
 	var key := manifest.key()
-	var wanted := manifest.wanted_files()
+	var wanted := manifest.wanted_files(_groups_of(options))
 	var identity := _mount_identity(manifest, wanted)
 
 	# The key is not proof the content is the same: `content_id@version` is not derived from the bytes, so two
@@ -171,20 +174,29 @@ func mount(
 	return DotResult.success(prefix)
 
 
-## Whether [param manifest] is mounted with every file it now wants: false when the same content was
-## mounted for a narrower side or group set, so [method mount] would add the rest.
+## Whether [param manifest] is mounted with every file it now wants for [param groups]: false when the
+## same content was mounted for a narrower side or group set, so [method mount] would add the rest.
 ## Different content under the key reads as covered; [method mount] is where that is refused.
-func covers(manifest: DotCloudManifest) -> bool:
+func covers(manifest: DotCloudManifest, groups: PackedStringArray = PackedStringArray()) -> bool:
 	var held: Dictionary = _mounts.get(manifest.key(), {})
 	if held.is_empty():
 		return false
 	if str(held.get("whole", "")) != _mount_identity(manifest, manifest.files):
 		return true
 	var paths: Dictionary = held.get("paths", {})
-	for f in manifest.wanted_files():
+	for f in manifest.wanted_files(groups):
 		if not paths.has(f.path):
 			return false
 	return true
+
+
+static func _groups_of(options: Dictionary) -> PackedStringArray:
+	var raw: Variant = options.get("groups", PackedStringArray())
+	if raw is PackedStringArray:
+		return raw
+	if raw is Array:
+		return PackedStringArray(raw)
+	return PackedStringArray()
 
 
 ## The files [param wanted] has that the mount in [param held] lacks, as a second pack at the

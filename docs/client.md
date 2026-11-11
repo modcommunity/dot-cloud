@@ -29,6 +29,8 @@ Load-bearing details:
 - **A scheme-less string is not automatically a path.** A page served from its content's origin (the one CORS-free browser configuration) uses a root-relative URL like `/content/x/1.0.0/manifest.json`. So the three file schemes are local outright, anything else with a scheme is not, and a bare path is local only if the file is actually there.
 - **A published directory holds the manifest and its objects**, so `ensure` adopts the directory a local manifest came from into the local source.
 
+**Groups are fetched and mounted, then topped up.** `groups` selects the files of those download groups beside every ungrouped file (docs/publishing.md); `"*"` (`DotCloudFile.ALL_GROUPS`) selects every group, which is what a server or solo host that may load any map asks for. Asking again with another group fetches and mounts only the difference (docs/mounting.md). A game that knows its own root but not the id and version it was published as calls `ensure_groups_at(path, groups)`, typically `["map-<id>"]` on a map change; it finds the acquired content holding `path` and tops it up, and answers `""` when nothing acquired holds it, which is the run-from-source case where every file is already on disk.
+
 `download_manifest()` and `resolve_manifest()` are the download-without-mount halves `ensure()` is built from; the addon-pack path uses them because an addon pack must never also be mounted at its own content prefix.
 
 A failed sync says why: `DotCloudDownloader` keeps the first required file's failure in the summary's detail, while the summary's code stays `CODE_NETWORK` regardless, because callers branch on codes.
