@@ -4,7 +4,7 @@ extends Node
 ## Run: godot --headless --path . res://examples/lock_demo.tscn
 
 const WORK := "user://dot_cloud_lock_demo"
-const CHECKS := 48
+const CHECKS := 50
 const SECTIONS := 6
 
 var _failures: int = 0
@@ -201,8 +201,27 @@ func _section_ignored_dirs() -> void:
 	var pub := DotCloudPublisher.new()
 	var got := pub._collect(src)
 	_check("collect drops wt-kp and the ignored dir", Array(got) == ["keep/b.txt"], str(got))
+	# A gitignored symlink (no trailing slash: git would not match a link with one) is left out, a real folder of the
+	# same style is not.
+	var tgt := WORK.path_join("ign_target")
+	DotPaths.ensure_dir(tgt)
+	var tw := FileAccess.open(tgt.path_join("big.bin"), FileAccess.WRITE)
+	tw.store_string("x")
+	tw.close()
+	OS.execute("ln", ["-s", ProjectSettings.globalize_path(tgt), ProjectSettings.globalize_path(src.path_join("maps"))])
+	OS.execute("ln", ["-s", ProjectSettings.globalize_path(tgt), ProjectSettings.globalize_path(src.path_join("shipped"))])
+	DotPaths.ensure_dir(src.path_join("realdir"))
+	var rw := FileAccess.open(src.path_join("realdir/r.txt"), FileAccess.WRITE)
+	rw.store_string("x")
+	rw.close()
+	var g2 := FileAccess.open(src.path_join(".gitignore"), FileAccess.WRITE)
+	g2.store_string("/tmpx/\nmaps\n/realdir\n")
+	g2.close()
+	var got2 := pub._collect(src)
+	_check("gitignored symlink left out", not Array(got2).any(func(x): return str(x).begins_with("maps/")), str(got2))
+	_check("unignored symlink and real dir kept", got2.has("shipped/big.bin") and got2.has("realdir/r.txt"), str(got2))
 	pub.skip_ignored_dirs = false
-	_check("opt-out keeps them", pub._collect(src).size() == 3, str(pub._collect(src)))
+	_check("opt-out keeps them", pub._collect(src).size() == 6, str(pub._collect(src)))
 	_end()
 
 
