@@ -2,8 +2,8 @@
 # Local test of lock_verify.sh against a python http.server fixture CDN (no network, no token, nothing published). Run: tools/test_lock_verify.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-T="$(mktemp -d)"; PASS=0; FAIL=0; PID=""
-trap 'kill $PID 2>/dev/null; rm -rf "$T"' EXIT
+T="$(mktemp -d)"; PASS=0; FAIL=0; PID=""; PID2=""; export LOCK_VERIFY_BACKOFF=0.01
+trap 'kill $PID $PID2 2>/dev/null; rm -rf "$T"' EXIT
 chk() { if eval "$2"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $1"; fi; }
 python3 -I - "$T" <<'PY'
 import base64, hashlib, json, os, sys
@@ -36,6 +36,30 @@ class H(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
 http.server.ThreadingHTTPServer(("127.0.0.1", 18201), functools.partial(H, directory=sys.argv[1])).serve_forever()
 PY
+cat > "$T/flaky_server.py" <<'PY'
+# fixture CDN with edge throttling: the first request for the manifest answers 403, the first two for the first object 429 (Retry-After 0),
+# one for the second object 503; the third object answers 429 every time (stays throttled)
+import functools, http.server, sys
+seen = {}
+class H(http.server.SimpleHTTPRequestHandler):
+    def _gate(self):
+        k = (self.command, self.path); seen[k] = seen.get(k, 0) + 1; n = seen[k]
+        if self.path.endswith("manifest.json"): code = 403 if n == 1 else 0
+        elif "/objects/" in self.path:
+            code = 0
+            if self.path.endswith(sys.argv[2]): code = 429
+            elif self.path.endswith(sys.argv[3]) and n <= 2: code = 429
+            elif self.path.endswith(sys.argv[4]) and n <= 1: code = 503
+        else: code = 0
+        if code: self.send_response(code); self.send_header("Retry-After", "0"); self.send_header("Content-Length", "0"); self.end_headers(); return True
+        return False
+    def do_GET(self):
+        if not self._gate(): super().do_GET()
+    def do_HEAD(self):
+        if not self._gate(): super().do_HEAD()
+    def log_message(self, *a): pass
+http.server.ThreadingHTTPServer(("127.0.0.1", 18202), functools.partial(H, directory=sys.argv[1])).serve_forever()
+PY
 python3 -I "$T/cdn_server.py" "$T/cdn" >/dev/null 2>&1 & PID=$!
 sleep 1
 V="$HERE/lock_verify.sh"
@@ -56,4 +80,21 @@ chk "diff lists + - ~" "grep -q '  ~ b.txt' $T/o && grep -q '  + d.txt' $T/o && 
 "$V" --lock "$T/content.lock.json" --only nothing > "$T/o" 2>&1; chk "no match exits non-zero" "[ $? -ne 0 ]"
 "$V" --lock "$T/content.lock.json" --diff 1.0.0 > "$T/o" 2>&1; chk "--diff without --only is usage" "[ $? -eq 2 ]"
 "$V" --lock "$T/content.lock.json" --cdn http://127.0.0.1:1 > "$T/o" 2>&1; chk "dead base fails" "[ $? -eq 1 ] && grep -q FAIL $T/o"
+# throttling: object files are regenerated first (the earlier tests damaged one), then the flaky server fronts the same tree
+python3 -I - "$T" <<'PY'
+import hashlib, json, os, sys
+t = sys.argv[1]; d = t + "/cdn/content/o/demo/1.0.0/objects"
+shas = sorted(hashlib.sha256(x).hexdigest() for x in (b"one", b"two", b"three"))
+open(t + "/shas", "w").write(" ".join(shas))
+lock = json.load(open(t + "/content.lock.json")); lock["origin"] = "http://127.0.0.1:18202/content"
+m = open(t + "/cdn/content/o/demo/1.0.0/manifest.json", "rb").read(); lock["packs"][0].update(version="1.0.0", manifest_sha256=hashlib.sha256(m).hexdigest())
+json.dump(lock, open(t + "/flaky.lock.json", "w"))
+PY
+read -r S1 S2 S3 < "$T/shas"
+python3 -I "$T/flaky_server.py" "$T/cdn" "$S3" "$S1" "$S2" >/dev/null 2>&1 & PID2=$!
+sleep 1
+LOCK_VERIFY_TRIES=1 "$V" --lock "$T/flaky.lock.json" > "$T/o" 2>&1; chk "TRIES=1 turns off retrying and reports the manifest 403 as rate limited/blocked" "[ $? -eq 1 ] && grep -q 'manifest.json answered 403 (rate limited or blocked' $T/o"
+"$V" --lock "$T/flaky.lock.json" > "$T/o" 2>"$T/e"; RC=$?
+chk "403/429/503 retried; a permanently 429 object is rate limited, not missing" "[ $RC -eq 1 ] && grep -q '1 object(s) could not be checked: rate limited' $T/o && ! grep -q 'object(s) missing' $T/o && grep -q 'stayed throttled' $T/e"
+chk "manifest 403 on first try was retried (no manifest failure)" "! grep -q 'manifest.json answered' $T/o"
 echo "lock_verify: $PASS passed, $FAIL failed"; [ "$FAIL" -eq 0 ]
