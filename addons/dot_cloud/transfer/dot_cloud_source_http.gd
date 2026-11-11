@@ -328,7 +328,7 @@ func _unpack_bundle(path: String, store: DotCloudStore, wanted: Dictionary) -> D
 	return DotResult.success({"objects": objects, "bytes": bytes})
 
 
-## Base URLs to try for [param manifest], best first: the sticky preference, the manifest's
+## Base URLs to try for [param manifest], best first: the sticky preference when this pack offers it, the manifest's
 ## own mirrors, published mirrors carrying the pack (rank order), then the origin last. A base
 ## that failed twice in a row is moved to the end for [member cooldown_sec], never removed.
 func bases_for(manifest: DotCloudManifest) -> PackedStringArray:
@@ -338,11 +338,6 @@ func bases_for(manifest: DotCloudManifest) -> PackedStringArray:
 func _resolve_bases(manifest: DotCloudManifest) -> PackedStringArray:
 	var out := PackedStringArray()
 	var origin_side := PackedStringArray()
-
-	# The origin is never sticky over published mirrors, or one bad mirror moves every later
-	# file of the session back onto the origin.
-	if _preferred_base != "" and not (mirror_list != null and mirror_list.is_origin_url(_preferred_base)):
-		out.append(_preferred_base)
 
 	for u in manifest.mirrors:
 		if mirror_list != null and mirror_list.is_origin_url(u):
@@ -362,6 +357,12 @@ func _resolve_bases(manifest: DotCloudManifest) -> PackedStringArray:
 	for u in base_urls:
 		if not out.has(u):
 			out.append(u)
+
+	# Bases are pack directories, so the preference only counts when this pack offers it: another
+	# pack's directory 404s every object first. The origin is never sticky over published mirrors.
+	if out.has(_preferred_base) and not (mirror_list != null and mirror_list.is_origin_url(_preferred_base)):
+		out.remove_at(out.find(_preferred_base))
+		out.insert(0, _preferred_base)
 
 	var healthy := PackedStringArray()
 	var cooling := PackedStringArray()

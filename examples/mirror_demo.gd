@@ -14,7 +14,7 @@ const CAROL := "carol/big"
 const VERSION := "1.0.0"
 
 ## Every check this suite runs, including the one that compares against it.
-const CHECKS := 72
+const CHECKS := 74
 
 var _failures := 0
 var _checks := 0
@@ -217,6 +217,17 @@ func _test_bases() -> void:
 	order = Array(src.bases_for(m))
 	_check("a base that failed twice is tried last, not removed",
 		order.size() == 4 and order[3] == "https://m1.example/content/alice/map/1.0.0", str(order))
+	src._preferred_base = "https://m2.example/content/alice/map/1.0.0"
+	order = Array(src.bases_for(m))
+	_check("the preferred base leads its own pack", order[0] == src._preferred_base, str(order))
+	var other := DotCloudManifest.new()
+	other.content_id = BOB
+	other.version = VERSION
+	other.mirrors = PackedStringArray(["https://cdn.example/content/%s/%s" % [BOB, VERSION]])
+	order = Array(src.bases_for(other))
+	_check("another pack's directory is never tried for this pack",
+		not order.has(src._preferred_base) and order[0] == "https://m2.example/content/%s/%s" % [BOB, VERSION],
+		str(order))
 	_sections_completed += 1
 
 
