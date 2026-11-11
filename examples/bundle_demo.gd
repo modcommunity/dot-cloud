@@ -6,7 +6,7 @@ extends Control
 const TestServer := preload("res://examples/http_test_server.gd")
 const WORK := "user://dot_cloud_bundle_demo"
 const SMALL := 40
-const CHECKS := 19
+const CHECKS := 21
 
 @onready var _output: RichTextLabel = $Output
 
@@ -39,6 +39,10 @@ func _run() -> void:
 		big[j] = (j * 13 + (j >> 9)) & 0xFF
 	DotPaths.write_bytes(src.path_join("big.bin"), big)
 
+	# Folders a repository keeps beside its content are not runtime content and stay out of the pack.
+	for junk in ["reports/sheet.png", "tools/make.py", "art-src/model.blend", "docs/notes.txt"]:
+		DotPaths.write_bytes(src.path_join(junk), PackedByteArray([1, 2, 3, 4]))
+
 	var pub := DotCloudPublisher.new()
 	pub.content_id = "bundle_arena"
 	pub.version = "1.0.0"
@@ -47,6 +51,13 @@ func _run() -> void:
 	var published := pub.publish(src, WORK.path_join("published"))
 	_check("published", published.ok, "" if published.ok else str(published.error))
 	var manifest: DotCloudManifest = published.value["manifest"]
+	var shipped_junk := 0
+	for f in manifest.files:
+		for root in ["reports/", "tools/", "art-src/", "docs/"]:
+			if f.path.begins_with(root):
+				shipped_junk += 1
+	_check("repository-only folders are not published", shipped_junk == 0, str(shipped_junk))
+	_check("runtime files are still published", manifest.files.size() == SMALL + 1, str(manifest.files.size()))
 	var decl := manifest.usable_bundle()
 	_check("manifest declares a bundle of the small objects", int(decl.get("count", 0)) == SMALL, str(decl.get("count")))
 	_check("the bundle is far smaller than the pack", int(decl.get("size", 1 << 30)) < 3 * 1024 * 1024)
