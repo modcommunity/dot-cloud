@@ -12,7 +12,7 @@ The pieces and where they live:
 | The sync client | dot-cloud `workshop/` | `DotCloudWorkshop` (registry name `dot_workshop`), `DotCloudWorkshopList`, `DotCloudWorkshopDevice` |
 | The site API | website-city | `GET /api/app/v1/workshop`, `POST /api/app/v1/workshop/scope` |
 | Solo launch and the panel | dot-server-deploy `client/` | `TmcSoloSession`, `TmcWorkshopPanel` |
-| Consumers | dot-map, dot-weapon, dot-props, dot-npc, game-playground | `follow_content(index)` on each catalogue |
+| Consumers | dot-map, dot-weapon, dot-props, dot-npc, game-playlot | `follow_content(index)` on each catalogue |
 
 ## Why the sync client is in dot-cloud and not a new addon
 
@@ -69,10 +69,10 @@ Every entry has `kind`, `id` (unique within the pack and kind, `[a-z0-9_]+`), `n
 | `weapon` | `def` (a `DotWeaponDef` `.tres`), optional `slot` | dot-weapon `DotWeaponCatalogue` |
 | `prop` | `def` (a `DotPropDef` `.tres`) or `scene` | dot-props `DotPropCatalogue` |
 | `npc` | `def` (a dot-npc definition `.tres`) or `scene` | dot-npc `DotNpcCatalogue` |
-| `entity` | `script` (a path to a script a game spawns as an entity, game-playground's shape) | the game |
-| `tool` | `script` | the game (game-playground's tool gun) |
+| `entity` | `script` (a path to a script a game spawns as an entity, game-playlot's shape) | the game |
+| `tool` | `script` | the game (game-playlot's tool gun) |
 | `sound` | `stream` | dot-audio, or the game |
-| `script` | `script`, `hook` (the hook name, for example `playground`) | the game's hook loader (game-playground's `playground_hook.gd` contract) |
+| `script` | `script`, `hook` (the hook name, for example `playground`) | the game's hook loader (game-playlot's `playground_hook.gd` contract) |
 | `addon` | `dir` | **not mounted from a subscription** (see [online isolation](#online-isolation)) |
 | `game` | none; uses `accepts` | the site and the shell; never subscribable |
 
