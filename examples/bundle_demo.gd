@@ -6,7 +6,7 @@ extends Control
 const TestServer := preload("res://examples/http_test_server.gd")
 const WORK := "user://dot_cloud_bundle_demo"
 const SMALL := 40
-const CHECKS := 21
+const CHECKS := 26
 
 @onready var _output: RichTextLabel = $Output
 
@@ -61,6 +61,13 @@ func _run() -> void:
 	var decl := manifest.usable_bundle()
 	_check("manifest declares a bundle of the small objects", int(decl.get("count", 0)) == SMALL, str(decl.get("count")))
 	_check("the bundle is far smaller than the pack", int(decl.get("size", 1 << 30)) < 3 * 1024 * 1024)
+
+	var S := DotCloudSourceHttp
+	_check("unpack budget: a fast frame keeps the floor", S.unpack_slice_budget(1) == S.UNPACK_SLICE_MIN_MS and S.unpack_slice_budget(16) == S.UNPACK_SLICE_MIN_MS)
+	_check("unpack budget: a 33 ms frame gets a longer slice", S.unpack_slice_budget(33) == 49, str(S.unpack_slice_budget(33)))
+	_check("unpack budget: capped", S.unpack_slice_budget(5000) == S.UNPACK_SLICE_MAX_MS)
+	_check("unpack budget: never below the floor for 0 or negative", S.unpack_slice_budget(0) == S.UNPACK_SLICE_MIN_MS and S.unpack_slice_budget(-5) == S.UNPACK_SLICE_MIN_MS)
+	_check("unpack budget: monotonic", S.unpack_slice_budget(40) <= S.unpack_slice_budget(50))
 
 	var solo_meta := {"solo": true}
 	var omitted := DotCloudRegistry.complete_body(1, 2, 3, "sha")
