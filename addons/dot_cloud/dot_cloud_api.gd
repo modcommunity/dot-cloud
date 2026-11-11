@@ -44,5 +44,7 @@ extends RefCounted
 #     is fixed up front, every download first and every mount after. Additive; a caller that never opens an outer job is unchanged.
 # 21: DotCloudInventoryReport (the account site's downloaded-content report body and its pending actions) and the
 #     bridge's `sync` op. Additive.
-const LEVEL := 21
+# 22: grouped files are mounted, not only downloaded: DotCloudMounter.mount's `groups` option and covers' groups,
+#     DotCloudClient.ensure_groups_at (a game's per-map top-up) and DotCloudFile.ALL_GROUPS ("*", every group). Additive.
+const LEVEL := 22
 const OLDEST := 1

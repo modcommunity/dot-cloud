@@ -4,8 +4,9 @@ extends Node
 ##
 ## Covered here: both shapes of the file, the groups written into the manifest entries, a file in no rule
 ## left ungrouped, a file in two groups, the merge with `DotCloudPublisher.group_rules`, the `.import`
-## marker following its asset, a client given only a group fetching that group's files, and the
-## publisher's refusals (a pattern matching nothing, an empty group, a non-pack path, a malformed file).
+## marker following its asset, a client given only a group fetching that group's files, a mounted pack
+## topped up with one group and then every group (`ensure_groups_at`, `"*"`), and the publisher's refusals
+## (a pattern matching nothing, an empty group, the name `*`, a non-pack path, a malformed file).
 ##
 ## [codeblock]
 ## godot --headless --path . res://examples/groups_demo.tscn
@@ -14,8 +15,8 @@ extends Node
 const WORK := "user://dot_cloud_groups_demo"
 
 ## Every check this suite runs, the closing count included. See docs/testing.md.
-const CHECKS := 27
-const SECTIONS := 3
+const CHECKS := 38
+const SECTIONS := 4
 
 const GROUPS_JSON := '{"course_a": ["worlds/course_a.*"], "course_b": ["worlds/course_b.*"], "worlds/shared/": "course_a"}'
 
@@ -42,6 +43,7 @@ func _run() -> void:
 	_keys = keys.value
 
 	_section_published()
+	await _section_mounted()
 	_section_merge()
 	_section_refusals()
 
@@ -87,6 +89,36 @@ func _section_published() -> void:
 	_end()
 
 
+## A client mounts the core files, then one group on a "map change", then every group, as one host would.
+func _section_mounted() -> void:
+	_begin("mounted groups")
+	var manifest := _manifest(WORK.path_join("out_ok"))
+	_check("manifest read", manifest != null)
+	if manifest == null:
+		_end()
+		return
+	var prefix := manifest.mount_prefix()
+	var client := _make_client(WORK.path_join("out_ok"))
+	var first := await client.acquire_manifest(manifest)
+	_check("core mounted", first.ok and FileAccess.file_exists(prefix.path_join("courses/a.json")), str(first.error) if not first.ok else "")
+	_check("ungrouped ask mounts no group", not FileAccess.file_exists(prefix.path_join("worlds/course_a.json")))
+	_check("a group not yet covered", not client.mounter.covers(manifest, PackedStringArray(["course_a"])))
+
+	var topped := await client.ensure_groups_at(prefix.path_join("worlds"), PackedStringArray(["course_a"]))
+	_check("top-up answers the prefix", topped.ok and str(topped.value) == prefix, str(topped.error) if not topped.ok else str(topped.value))
+	_check("topped-up group readable", FileAccess.file_exists(prefix.path_join("worlds/course_a.json")) and FileAccess.file_exists(prefix.path_join("worlds/shared/sky.res")))
+	_check("other group still absent", not FileAccess.file_exists(prefix.path_join("worlds/course_b.json")))
+	_check("the group is now covered", client.mounter.covers(manifest, PackedStringArray(["course_a"])))
+
+	var elsewhere := await client.ensure_groups_at("res://not_acquired/x", PackedStringArray(["course_b"]))
+	_check("unacquired path is a no-op", elsewhere.ok and str(elsewhere.value) == "" and not FileAccess.file_exists(prefix.path_join("worlds/course_b.json")))
+
+	var all := await client.acquire_manifest(manifest, PackedStringArray([DotCloudFile.ALL_GROUPS]))
+	_check("every group mounted", all.ok and FileAccess.file_exists(prefix.path_join("worlds/course_b.bin")), str(all.error) if not all.ok else "")
+	client.queue_free()
+	_end()
+
+
 func _section_merge() -> void:
 	_begin("merge with group_rules")
 	var dir := WORK.path_join("src_merge")
@@ -115,6 +147,7 @@ func _section_refusals() -> void:
 	_check("prefix form matching nothing", _refused('{"nowhere/": "g"}'))
 	_check("empty group list", _refused('{"course_a": []}'))
 	_check("empty group name", _refused('{"worlds/": ""}'))
+	_check("group named *", _refused('{"*": ["worlds/"]}'))
 	_check("res:// pattern", _refused('{"g": ["res://worlds/"]}'))
 	_check("absolute pattern", _refused('{"g": ["/worlds/"]}'))
 	_check("wrong value type", _refused('{"g": 3}'))
@@ -130,6 +163,23 @@ func _refused(groups: String) -> bool:
 	_write_source(dir, groups)
 	var res := _publisher().publish(dir, WORK.path_join("out_bad"))
 	return not res.ok
+
+
+func _make_client(published: String) -> DotCloudClient:
+	var config := DotCloudConfig.new()
+	config.cache_dir = WORK.path_join("cache")
+	config.require_signed_manifests = true
+	config.trusted_keys = {"demo": str(_keys["public"])}
+	config.side = "both"
+	var client := DotCloudClient.new()
+	client.name = "Cloud_groups"
+	client.config = config
+	client.config_file = ""
+	client.register_service = false
+	client.local_search_dirs = PackedStringArray([published])
+	client.allow_netchan_fallback = false
+	add_child(client)
+	return client
 
 
 func _publisher() -> DotCloudPublisher:

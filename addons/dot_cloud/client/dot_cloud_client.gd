@@ -368,7 +368,7 @@ func acquire_manifest(
 
 	# Mounted, and with every file this side wants: a process that mounted it as a client
 	# and now hosts it too goes on to fetch and mount the rest (DotCloudMounter.covers).
-	if mounter.is_mounted(key) and mounter.covers(manifest):
+	if mounter.is_mounted(key) and mounter.covers(manifest, groups):
 		_index_manifest(manifest)
 		_set_phase(Phase.READY, "Ready.")
 		return _ready_result(manifest)
@@ -379,7 +379,11 @@ func acquire_manifest(
 
 	if _inflight.has(key):
 		DotLog.debug(CHANNEL, "joining an acquisition already running", {"content": key})
-		return await _await_inflight(key)
+		var joined := await _await_inflight(key)
+		# The running one may have asked for fewer groups (a map top-up joining the boot fetch).
+		if joined.ok and not mounter.covers(manifest, groups):
+			return await acquire_manifest(manifest, groups, chain)
+		return joined
 
 	# Released by wrapping, not by remembering: with four returns below, a leaked entry would make
 	# every later caller wait for an acquisition that is not running.
@@ -444,7 +448,9 @@ func _acquire_inner(
 
 	_set_phase(Phase.MOUNTING, "Preparing content…")
 
-	var mounted := await mounter.mount(manifest, store, scheduler, opts)
+	var mount_opts := opts.duplicate()
+	mount_opts["groups"] = groups
+	var mounted := await mounter.mount(manifest, store, scheduler, mount_opts)
 	if not mounted.ok:
 		return _fail(mounted.error)
 
@@ -757,7 +763,7 @@ func ensure(
 		)
 		if manifest != null:
 			_apply_side(manifest)
-			if not mounter.covers(manifest):
+			if not mounter.covers(manifest, groups):
 				return await acquire_manifest(manifest, groups, chain)
 			_index_manifest(manifest)
 			_set_phase(Phase.READY, "Ready.")
@@ -771,6 +777,22 @@ func ensure(
 		return resolved
 
 	return await acquire_manifest(resolved.value, groups, chain)
+
+
+## Fetches and mounts [param groups] of the content mounted where [param path] lives (API 22): the top-up a
+## game asks for on a map change, knowing its own root but not the id and version it was published as.
+## Value: the mount prefix, or "" when no acquired content holds [param path] (run from source, nothing to fetch).
+func ensure_groups_at(path: String, groups: PackedStringArray) -> DotResult:
+	for key: String in _acquired:
+		var manifest: DotCloudManifest = _acquired[key]
+		var prefix := manifest.mount_prefix().trim_suffix("/")
+		if path != prefix and not path.begins_with(prefix + "/"):
+			continue
+		var got := await acquire_manifest(manifest, groups)
+		if not got.ok:
+			return got
+		return DotResult.success(prefix)
+	return DotResult.success("")
 
 
 ## Mounts what a repository's `content.lock.json` pins, the in-game twin of dot-bootstrap's fetch_lock.sh.

@@ -75,6 +75,8 @@ static func _rules(doc: Dictionary) -> DotResult:
 			var pattern: String = pair[0]
 			if str(pair[1]).strip_edges() == "":
 				return _bad("an empty group name")
+			if str(pair[1]).strip_edges() == DotCloudFile.ALL_GROUPS:
+				return _bad("'%s' means every group to a client, so it cannot name one" % DotCloudFile.ALL_GROUPS)
 			if pattern.strip_edges() == "" or pattern.begins_with("res://") or pattern.begins_with("/"):
 				return _bad("'%s' is not a pack path (relative to the source root, like worlds/ or worlds/a.*)" % pattern)
 			list.append(pair)
