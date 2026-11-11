@@ -142,6 +142,8 @@ func _apply_options(pub: DotCloudPublisher, opts: Dictionary, claim: Dictionary)
 			return EXIT_USAGE
 		pub.dependencies.append({"id": dep.substr(0, at), "version": dep.substr(at + 1)})
 
+	pub.skip_ignored_dirs = not opts.has("include-ignored")
+
 	for dir_name in _multi(opts, "exclude-dir"):
 		pub.exclude_dirs.append(dir_name)
 
@@ -608,6 +610,7 @@ Commands
     --min-engine V       minimum Godot version
     --depends ID@V       content mounted first, one exact version (repeatable)
     --exclude-dir NAME   leave out any folder of this name (repeatable)
+    --include-ignored    also pack wt-* worktrees and folders the source's .gitignore ignores (skipped by default)
     --with-sources       also ship each imported asset's source file
     --mirror URL         base URL clients fetch from  (repeatable)
     --key PATH           private key PEM; omit to publish unsigned

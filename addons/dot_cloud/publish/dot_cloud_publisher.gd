@@ -71,6 +71,11 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 	".git", ".godot", ".svn", "__pycache__",
 ])
 
+## Skip worktree checkouts (a top-level `wt-*` folder) and folders the source's root `.gitignore` ignores by a
+## directory pattern (`/name/`, `name/`, `/wt-*/`): they are scratch or linked copies, never the game's own content.
+## Only patterns ending in `/` count, so a file pattern never hides a folder. Off with `--include-ignored`.
+var skip_ignored_dirs: bool = true
+
 ## Top-level folders of the source skipped entirely: `examples/` holds editor-only suites and demos, whose scripts do not parse in a web export (they name classes a shell lacks) and which no game scene loads.
 ## The same holds for the folders every game repository keeps beside its content and nothing loads at runtime:
 ## tests, tools, docs, CI, review `reports/` and `screenshots/` (PNG sheets, megabytes each) and `art-src/`
@@ -564,6 +569,7 @@ func _collect(source_dir: String) -> PackedStringArray:
 	# Outside a project there is no `.godot/imported/` to take outputs from, so a marker would name a file
 	# the pack lacks and every load of its source would fail; the raw source ships instead.
 	var keep_markers := include_imported and _project_root_of(source_dir) != ""
+	var ignored := _ignored_dir_patterns(source_dir) if skip_ignored_dirs else PackedStringArray()
 
 	for rel in DotPaths.list_files_recursive(source_dir):
 		# The engine's imported form and its markers are decided before the exclusions, because `.godot` (excluded dir)
@@ -585,6 +591,9 @@ func _collect(source_dir: String) -> PackedStringArray:
 				skip = true
 				break
 
+		if not skip and skip_ignored_dirs and is_ignored_dir_path(rel, ignored):
+			skip = true
+
 		if skip:
 			continue
 
@@ -604,6 +613,42 @@ func _collect(source_dir: String) -> PackedStringArray:
 
 	out.sort()
 	return out
+
+
+## Directory patterns of [param source_dir]'s root `.gitignore` (those ending in `/`), as written minus the trailing slash.
+func _ignored_dir_patterns(source_dir: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	var f := FileAccess.open(source_dir.path_join(".gitignore"), FileAccess.READ)
+	if f == null:
+		return out
+	for line in f.get_as_text().split("\n"):
+		var l := line.strip_edges()
+		if l.is_empty() or l.begins_with("#") or l.begins_with("!") or not l.ends_with("/"):
+			continue
+		out.append(l.trim_suffix("/"))
+	return out
+
+
+## True when a directory component of [param rel] (a file path inside the source) is a `wt-*` worktree at the top level,
+## or matches one of [param patterns] from [method _ignored_dir_patterns]: `/a/b` anchors at the root, a bare `name`
+## matches a folder of that name at any depth, `*` and `?` are wildcards within one name.
+static func is_ignored_dir_path(rel: String, patterns: PackedStringArray) -> bool:
+	var parts := rel.split("/")
+	if parts.size() < 2:
+		return false
+	if parts[0].begins_with("wt-"):
+		return true
+	for pat in patterns:
+		if pat.begins_with("/") or pat.contains("/"):
+			var anchored := pat.trim_prefix("/")
+			var n := anchored.count("/") + 1
+			if parts.size() > n and "/".join(parts.slice(0, n)).match(anchored):
+				return true
+		else:
+			for i in range(parts.size() - 1):
+				if parts[i].match(pat):
+					return true
+	return false
 
 
 ## Imported outputs an `.import` marker in this pack points at.
