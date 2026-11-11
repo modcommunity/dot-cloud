@@ -15,8 +15,8 @@ extends Node
 const WORK := "user://dot_cloud_groups_demo"
 
 ## Every check this suite runs, the closing count included. See docs/testing.md.
-const CHECKS := 38
-const SECTIONS := 4
+const CHECKS := 45
+const SECTIONS := 5
 
 const GROUPS_JSON := '{"course_a": ["worlds/course_a.*"], "course_b": ["worlds/course_b.*"], "worlds/shared/": "course_a"}'
 
@@ -44,6 +44,7 @@ func _run() -> void:
 
 	_section_published()
 	await _section_mounted()
+	await _section_job()
 	_section_merge()
 	_section_refusals()
 
@@ -119,6 +120,51 @@ func _section_mounted() -> void:
 	_end()
 
 
+## An outer job counts and downloads the groups it is given (API 23), and none otherwise.
+func _section_job() -> void:
+	_begin("job totals")
+	var manifest := _manifest(WORK.path_join("out_ok"))
+	if manifest == null:
+		_check("manifest read", false)
+		_end()
+		return
+	var core: Dictionary = await _job_total(manifest, PackedStringArray(), "job_core")
+	var one: Dictionary = await _job_total(manifest, PackedStringArray(["course_a"]), "job_one")
+	var r_all: Dictionary = await _job_total(manifest, PackedStringArray([DotCloudFile.ALL_GROUPS]), "job_all")
+	var t_core: int = int(core["total"])
+	var t_one: int = int(one["total"])
+	var t_all: int = int(r_all["total"])
+	_check("no groups, the total is the ungrouped files", t_core > 0, str(t_core))
+	_check("one group adds its files", t_one > t_core, "%d vs %d" % [t_one, t_core])
+	_check("every group adds the rest", t_all > t_one, "%d vs %d" % [t_all, t_one])
+	_check("the download moved every counted byte", int(r_all["done"]) == t_all, "%s of %d" % [r_all["done"], t_all])
+	_check("a grouped file is in the store after an all-groups job", bool(r_all["stored"]))
+	_check("a plain job leaves a grouped file out of the store", not bool(core["stored"]))
+	_check("the job drops its groups when it ends", bool(r_all["cleared"]))
+	_end()
+
+
+## Registers [param manifest] in a job of its own with [param groups], downloads, and reports totals.
+func _job_total(manifest: DotCloudManifest, groups: PackedStringArray, cache: String) -> Dictionary:
+	var client := _make_client(WORK.path_join("out_ok"), cache)
+	await client.start()
+	var snaps: Array = []
+	client.job_progress_changed.connect(func(s: Dictionary) -> void: snaps.append(s))
+	client.begin_job()
+	await client.job_register_manifest(manifest, groups)
+	var total := int(snaps[-1].get("total_bytes", 0)) if not snaps.is_empty() else 0
+	await client.job_download()
+	var done := int(snaps[-1].get("done_bytes", 0)) if not snaps.is_empty() else 0
+	var stored := false
+	for f in manifest.files:
+		if f.path == "worlds/course_b.bin":
+			stored = client.store.has(f.sha256)
+	client.end_job()
+	var cleared: bool = client._job_groups.is_empty()
+	client.queue_free()
+	return {"total": total, "done": done, "stored": stored, "cleared": cleared}
+
+
 func _section_merge() -> void:
 	_begin("merge with group_rules")
 	var dir := WORK.path_join("src_merge")
@@ -165,9 +211,9 @@ func _refused(groups: String) -> bool:
 	return not res.ok
 
 
-func _make_client(published: String) -> DotCloudClient:
+func _make_client(published: String, cache: String = "cache") -> DotCloudClient:
 	var config := DotCloudConfig.new()
-	config.cache_dir = WORK.path_join("cache")
+	config.cache_dir = WORK.path_join(cache)
 	config.require_signed_manifests = true
 	config.trusted_keys = {"demo": str(_keys["public"])}
 	config.side = "both"

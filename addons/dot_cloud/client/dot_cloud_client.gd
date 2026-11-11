@@ -324,6 +324,8 @@ var _inflight: Dictionary = {}
 var job: DotCloudJobProgress = null
 var _job_depth := 0
 var _job_manifests: Dictionary = {}
+## Pack key -> the download groups the job fetches of it (API 23); a key not here fetches ungrouped files only.
+var _job_groups: Dictionary = {}
 ## manifest URL -> pinned sha256 of the manifest file, set by [method ensure_locked].
 var _pinned: Dictionary = {}
 
@@ -499,22 +501,26 @@ func end_job() -> void:
 		job.finish_all()
 		job = null
 		_job_manifests.clear()
+		_job_groups.clear()
 
 
 ## Registers the missing bytes of [param refs] ([code]{id, version}[/code], with their dependency trees) in the open job, so its total is fixed before [method job_download] moves a byte. Needs [method begin_job]; a ref whose manifest will not resolve is left out and fails later with its context.
-func job_register(refs: Array) -> DotResult:
+##
+## [param groups] (API 23) are the download groups fetched of each ref itself, counted in the total and downloaded by [method job_download] (["*"] is all); its dependencies fetch none, as [method ensure] does.
+func job_register(refs: Array, groups: PackedStringArray = PackedStringArray()) -> DotResult:
 	if job == null:
 		return DotResult.fail(DotError.CODE_STATE, "job_register needs an open job.", "call begin_job first")
 	var synthetic := DotCloudManifest.new()
 	synthetic.dependencies.assign(refs)
-	await _Job.register_dependencies(self, synthetic, 0)
+	await _Job.register_dependencies(self, synthetic, 0, groups)
 	return DotResult.success(true)
 
 
 ## [method job_register] for a manifest the caller already resolved and verified (a Workshop plan).
-func job_register_manifest(manifest: DotCloudManifest) -> void:
+## [param groups] as in [method job_register], for this manifest.
+func job_register_manifest(manifest: DotCloudManifest, groups: PackedStringArray = PackedStringArray()) -> void:
 	if job != null:
-		await _Job.register_manifest(self, manifest)
+		await _Job.register_manifest(self, manifest, groups)
 
 
 ## Downloads everything the job registered and mounts nothing, [member DotCloudConfig.parallel_packs] packs at a time. The value is [code]{key: DotError}[/code] for the packs that failed (they are left for the mount pass to report); this never fails as a whole.
