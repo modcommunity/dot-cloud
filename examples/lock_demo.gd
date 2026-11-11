@@ -4,8 +4,8 @@ extends Node
 ## Run: godot --headless --path . res://examples/lock_demo.tscn
 
 const WORK := "user://dot_cloud_lock_demo"
-const CHECKS := 39
-const SECTIONS := 5
+const CHECKS := 48
+const SECTIONS := 6
 
 var _failures: int = 0
 var _checks: int = 0
@@ -32,6 +32,7 @@ func _run() -> void:
 	await _section_mount()
 	_section_parser()
 	_section_res_paths()
+	_section_ignored_dirs()
 	_check("every section finished", _sections_started == SECTIONS and _sections_finished == SECTIONS, "%d of %d" % [_sections_finished, SECTIONS])
 	_check("every check ran", _checks + 1 == CHECKS, "%d of %d" % [_checks + 1, CHECKS])
 	print("\n%d checks, %d failed" % [_checks, _failures])
@@ -172,6 +173,36 @@ func _section_res_paths() -> void:
 	var plain := pub._res_paths_in("[res://a/b.png, res://c.tres] load(res://d.gd)")
 	_check("unquoted ends at separator", Array(plain) == ["a/b.png", "c.tres", "d.gd"], str(plain))
 	_check("no truncated spaced stem", not spaced.has("maps/t/color_golden"), str(spaced))
+	_end()
+
+
+func _section_ignored_dirs() -> void:
+	_begin("publisher skips worktrees and gitignored dirs")
+	var pats := PackedStringArray(["wt-*", "/scratch", "build", "maps/imported"])
+	var f := DotCloudPublisher.is_ignored_dir_path
+	_check("top-level wt-* skipped", f.call("wt-kp/a.gd", PackedStringArray()))
+	_check("wt-* only at top level", not f.call("sub/wt-x/a.gd", PackedStringArray()))
+	_check("root file not a dir", not f.call("wt-file.txt", PackedStringArray()))
+	_check("anchored pattern", f.call("scratch/a.gd", pats) and not f.call("x/scratch/a.gd", pats))
+	_check("bare name at any depth", f.call("a/build/b.gd", pats) and f.call("build/b.gd", pats))
+	_check("nested anchored path", f.call("maps/imported/x.png", pats) and not f.call("maps/other/x.png", pats))
+	_check("ordinary dir kept", not f.call("scenes/a.tscn", pats))
+	var src := WORK.path_join("ign_src")
+	DotPaths.ensure_dir(src.path_join("wt-kp"))
+	DotPaths.ensure_dir(src.path_join("keep"))
+	DotPaths.ensure_dir(src.path_join("tmpx"))
+	for p in ["wt-kp/a.txt", "keep/b.txt", "tmpx/c.txt"]:
+		var w := FileAccess.open(src.path_join(p), FileAccess.WRITE)
+		w.store_string("x")
+		w.close()
+	var g := FileAccess.open(src.path_join(".gitignore"), FileAccess.WRITE)
+	g.store_string("# c\n/tmpx/\n*.log\n")
+	g.close()
+	var pub := DotCloudPublisher.new()
+	var got := pub._collect(src)
+	_check("collect drops wt-kp and the ignored dir", Array(got) == ["keep/b.txt"], str(got))
+	pub.skip_ignored_dirs = false
+	_check("opt-out keeps them", pub._collect(src).size() == 3, str(pub._collect(src)))
 	_end()
 
 
