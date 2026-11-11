@@ -72,7 +72,14 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 ])
 
 ## Top-level folders of the source skipped entirely: `examples/` holds editor-only suites and demos, whose scripts do not parse in a web export (they name classes a shell lacks) and which no game scene loads.
-var exclude_roots: PackedStringArray = PackedStringArray(["examples"])
+## The same holds for the folders every game repository keeps beside its content and nothing loads at runtime:
+## tests, tools, docs, CI, review `reports/` and `screenshots/` (PNG sheets, megabytes each) and `art-src/`
+## (editable art sources). Games used to list these one by one in their publish.sh and most missed some
+## (prop-hunt shipped 9.4 MB of report PNGs, smash-copter 5 MB). A pack that does load one of them
+## from `res://` sets this array without it.
+var exclude_roots: PackedStringArray = PackedStringArray([
+	"examples", "tests", "tools", "docs", "ci", ".github", "screenshots", "reports", "art-src",
+])
 
 ## Where an imported output lives inside a pack, instead of `.godot/imported/` as in the project.
 ## A web export cannot read files under the engine's reserved `.godot` name, though Linux can, so a
