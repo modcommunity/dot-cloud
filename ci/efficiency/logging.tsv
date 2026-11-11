@@ -1,0 +1,3 @@
+# logging
+# Baselines only shrink: scripts/<gate> --update lowers or drops entries and refuses to add.
+addons/dot_cloud/boot/dot_cloud_boot.gd::print	1
