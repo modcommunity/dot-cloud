@@ -31,9 +31,10 @@ bases = [base] if base else ([doc["origin"]] if doc.get("origin") else []) + lis
 bases = [b.rstrip("/") for b in bases]
 if not bases: sys.exit("lock_verify: the lock names no origin; pass --cdn or --from")
 
+UA = {"User-Agent": "dot-cloud-lock-verify/1"}  # the CDN answers Python's default urllib UA with 403
 def req(url, method="GET"):
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, method=method), timeout=30) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, method=method, headers=UA), timeout=30) as r:
             return r.status, (r.read() if method == "GET" else b""), r.headers.get("Content-Length")
     except urllib.error.HTTPError as e: return e.code, b"", None
     except (urllib.error.URLError, OSError) as e: return 0, b"", None
@@ -76,6 +77,10 @@ for p in doc["packs"]:
             st, _, ln = req(url, "HEAD")
             if st != 200: gone += 1
             elif ln is not None and int(ln) != size: wrong += 1
+    bun = (m.get("bundle") or {}).get("url_path")
+    if bun:  # a warning, not a failure: a client whose bundle is missing downloads the objects one by one (docs/sources.md)
+        st, _, _ = req("%s/%s/%s/%s" % (b, pid, ver, bun), "HEAD")
+        if st != 200: print("warn %s %s: bundle %s answered %s (clients fall back to per-file objects)" % (pid, ver, bun, st or "no reply"))
     if gone: errs.append("%d object(s) missing" % gone)
     if wrong: errs.append("%d object(s) with the wrong %s" % (wrong, "bytes" if deep else "size"))
     if errs: bad += 1; print("FAIL %s %s: %s" % (pid, ver, "; ".join(errs)))
