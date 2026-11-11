@@ -7,7 +7,7 @@ extends RefCounted
 const CHANNEL := "cloud.inventory"
 const PROTOCOL := "dot-inventory"
 const VERSION := 1
-const OPS: PackedStringArray = ["list", "quota", "pin", "pin_game", "delete", "clear", "clear_all"]
+const OPS: PackedStringArray = ["list", "quota", "pin", "pin_game", "delete", "clear", "clear_all", "sync"]
 
 var store: DotCloudStore
 
@@ -69,6 +69,16 @@ func _run(op: String, m: Dictionary) -> DotResult:
 			return store.delete(id, str(m.get("version", "")), m.get("force") == true)
 		"clear":
 			return store.clear_unpinned()
+		"sync":
+			# The site's account inventory: carry out what it asked for, answer with the report body to forward.
+			var pending: Variant = m.get("pending", [])
+			if not (pending is Array):
+				return DotResult.fail(DotError.CODE_INVALID, "sync needs pending as an array.")
+			var applied := DotCloudInventoryReport.apply_pending(store, pending)
+			var report := DotCloudInventoryReport.body(store.inventory(), applied["ack"])
+			report["done"] = applied["done"]
+			report["refused"] = applied["refused"]
+			return DotResult.success(report)
 		"clear_all":
 			if clear_all_fn.is_valid():
 				return await clear_all_fn.call()
