@@ -289,6 +289,9 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if not sided.ok:
 		return sided
 	var sides: Dictionary = sided.value
+	var grouped := _Groups.groups_for(self, source_dir, relatives, imported["owners"])
+	if not grouped.ok:
+		return grouped
 
 	# Maps where a reference says a file is to where this pack put it (they differ once an imported
 	# output is relocated out of `.godot/`), so a rewrite can tell its own content from the host's.
@@ -308,7 +311,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if rewrite_resource_paths:
 		DotPaths.remove_tree(staging)
 
-	var stored := _store_files(manifest, relatives, extra, source_dir, inside, sides, objects_dir, staging)
+	var stored := _store_files(manifest, relatives, extra, source_dir, inside, sides, grouped.value, objects_dir, staging)
 	if not stored.ok:
 		return stored
 	var written: int = stored.value["written"]
@@ -362,16 +365,12 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 
 
 ## Hashes, rewrites and stores every file; returns {written, deduped, bytes, rewritten, seen}.
-func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extra: Dictionary, source_dir: String, inside: Dictionary, sides: Dictionary, objects_dir: String, staging: String) -> DotResult:
+func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extra: Dictionary, source_dir: String, inside: Dictionary, sides: Dictionary, file_groups: Dictionary, objects_dir: String, staging: String) -> DotResult:
 	var written := 0
 	var deduped := 0
 	var total_bytes := 0
 	var rewritten := 0
 	var seen := {}
-	var file_groups := _Groups.groups_for(self, source_dir, relatives)
-	if not file_groups.ok:
-		return file_groups
-
 	for rel in relatives:
 		# `extra` entries come from the project root or [member extra_files]; the rest from the source.
 		var abs: String = extra.get(rel, source_dir.path_join(rel))
@@ -403,7 +402,7 @@ func _store_files(manifest: DotCloudManifest, relatives: PackedStringArray, extr
 		entry.sha256 = digest
 		entry.size = size
 		entry.required = not _is_optional(entry.path)
-		entry.groups = _groups_for(entry.path, file_groups.value.get(rel, PackedStringArray()))
+		entry.groups = _groups_for(entry.path, file_groups.get(rel, PackedStringArray()))
 		entry.platforms = _platforms_for(entry.path)
 		entry.side = str(sides.get(rel, DotCloudFile.SIDE_BOTH))
 
