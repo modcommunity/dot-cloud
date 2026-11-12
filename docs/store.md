@@ -23,6 +23,8 @@ Objects are flushed the moment they commit (a tab closed mid-download has to kee
 
 A partial's bytes are verified by nothing until the whole object commits; see [sources.md](sources.md#resume).
 
+**On web, partials are not in the cache.** `user://` there is an IndexedDB mirror saved by an asynchronous `FS.syncfs` that lists the files and reads them afterwards; a partial committed (renamed into `objects/`) or discarded in between failed the whole save with "Failed to save IDB file system" (70 times over one Fatal Contact first start), and each save also rewrote the growing partial. So `partials_dir()` is `DotCloudConfig.web_partials_dir` (`/tmp/dot_cloud_partial`, Emscripten's in-memory filesystem) on web, `commit_partial` falls back to copy and remove when the rename crosses filesystems, `open()` removes the old persisted `partial/` an earlier build left, and only the persisted case syncs on discard or sweep. The cost: a reload restarts an unfinished file instead of resuming it. An empty `web_partials_dir` restores the old behaviour (API 26).
+
 ## Platform notes
 
 | | |

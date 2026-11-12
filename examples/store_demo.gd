@@ -36,7 +36,7 @@ const SECTIONS := 6
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 56
+const CHECKS := 58
 
 var _entered := 0
 var _completed := 0
@@ -383,6 +383,24 @@ func _section_partials() -> void:
 
 	var aged := store.sweep_partials(0.0)
 	_check("stale partial swept", aged == 1 and store.partial_size(pending) == 0)
+
+	# On web partials sit in Emscripten's in-memory /tmp while objects are in the IndexedDB mirror,
+	# and a rename between two mounts is refused (EXDEV). /dev/shm is the same shape on Linux.
+	var outside := "/dev/shm/dot_cloud_store_demo.part"
+	if DirAccess.dir_exists_absolute("/dev/shm"):
+		var bytes := _blob(52, OBJ)
+		DotPaths.write_bytes(outside, bytes)
+		var dest := store.path_for(DotHash.sha256_bytes(bytes))
+		DotPaths.ensure_parent_dir(dest)
+		var moved := store._move_file(outside, dest)
+		var landed := DotPaths.read_bytes(dest)
+		_check("a partial on another filesystem moves into the cache",
+			moved.ok and landed.ok and landed.value == bytes,
+			moved.error.message if not moved.ok else "")
+		_check("and is gone from where it was", not FileAccess.file_exists(outside))
+	else:
+		_check("a partial on another filesystem moves into the cache (no /dev/shm: skipped)", true)
+		_check("and is gone from where it was (skipped)", true)
 
 	store.close()
 	_line("")

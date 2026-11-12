@@ -27,7 +27,7 @@ The delegate owns rate limiting and **must refuse hashes the client has no busin
 
 ## Resume
 
-`DotCloudSourceHttp` resumes an interrupted transfer by asking for `bytes=N-`, where N is what is already in `<cache>/partial/<hash>.part`. Those N bytes have been verified by **nothing**: `commit_partial` checks only the whole object. A partial can be wrong for reasons unconnected to the mirror serving now: a process killed mid-write, a bad sector, a caching proxy answering a range with the wrong window, an HTTP layer whose resume does not append.
+`DotCloudSourceHttp` resumes an interrupted transfer by asking for `bytes=N-`, where N is what is already in `<cache>/partial/<hash>.part` (on web, the in-memory `web_partials_dir`; see [store.md](store.md)). Those N bytes have been verified by **nothing**: `commit_partial` checks only the whole object. A partial can be wrong for reasons unconnected to the mirror serving now: a process killed mid-write, a bad sector, a caching proxy answering a range with the wrong window, an HTTP layer whose resume does not append.
 
 So a post-resume hash failure is usually **not** the mirror's fault, and treating it as one is worse than useless: `commit_partial` has already discarded the partial, so the retry that would succeed is exactly the one the mirror loop skips, and on a single-mirror host (the normal deployment) the content could never be acquired. The source restarts that one transfer from zero against the same mirror before writing it off. `http_demo`'s "poisoned partial" section plants garbage as the partial and requires the acquire to succeed.
 
