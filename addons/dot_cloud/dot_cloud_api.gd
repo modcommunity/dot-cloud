@@ -48,5 +48,6 @@ extends RefCounted
 #     DotCloudClient.ensure_groups_at (a game's per-map top-up) and DotCloudFile.ALL_GROUPS ("*", every group). Additive.
 # 23: DotCloudClient.job_register / job_register_manifest take `groups`: an outer job counts and downloads them. Additive.
 # 24: DotCloudAddonSet.groups: an addon overlay holds this side's files and the chosen groups (default every group). Additive.
-const LEVEL := 24
+# 25: groups.json rules also match an imported output relocated to _imported/ by the asset it stands for (as sides.json does). Additive.
+const LEVEL := 25
 const OLDEST := 1

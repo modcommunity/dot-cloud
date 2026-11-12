@@ -4,7 +4,7 @@ extends Node
 ##
 ## Covered here: both shapes of the file, the groups written into the manifest entries, a file in no rule
 ## left ungrouped, a file in two groups, the merge with `DotCloudPublisher.group_rules`, the `.import`
-## marker following its asset, a client given only a group fetching that group's files, a mounted pack
+## marker and the relocated `_imported/` output following their asset, a client given only a group fetching that group's files, a mounted pack
 ## topped up with one group and then every group (`ensure_groups_at`, `"*"`), and the publisher's refusals
 ## (a pattern matching nothing, an empty group, the name `*`, a non-pack path, a malformed file).
 ##
@@ -15,8 +15,8 @@ extends Node
 const WORK := "user://dot_cloud_groups_demo"
 
 ## Every check this suite runs, the closing count included. See docs/testing.md.
-const CHECKS := 45
-const SECTIONS := 5
+const CHECKS := 49
+const SECTIONS := 6
 
 const GROUPS_JSON := '{"course_a": ["worlds/course_a.*"], "course_b": ["worlds/course_b.*"], "worlds/shared/": "course_a"}'
 
@@ -46,6 +46,7 @@ func _run() -> void:
 	await _section_mounted()
 	await _section_job()
 	_section_merge()
+	_section_imported()
 	_section_refusals()
 
 	_check(
@@ -184,6 +185,27 @@ func _section_merge() -> void:
 	_check("file rule alone applies", groups.get("worlds/course_b.json", []) == ["course_b"])
 	var again := _publisher().publish(dir, WORK.path_join("out_merge2"))
 	_check("no group_rules still groups", again.ok and _groups_of(WORK.path_join("out_merge2")).get("worlds/course_a.json", []) == ["course_a"])
+	_end()
+
+
+## An imported asset ships as its marker plus the engine's output, relocated to `_imported/`. A rule
+## written against the asset (`worlds/course_a.*`) must group the output too, as the sides rules do,
+## or a pack has to list `_imported/<asset>-*` patterns beside every rule.
+func _section_imported() -> void:
+	_begin("imported outputs follow their asset")
+	var dir := WORK.path_join("src_imported")
+	_write_source(dir, '{"course_a": ["worlds/course_a.*"], "course_b": ["worlds/course_b.*"]}')
+	DotPaths.write_text(dir.path_join("project.godot"), "config_version=5\n")
+	DotPaths.write_text(dir.path_join("worlds/course_a.png.import"), "[remap]\n\npath=\"res://.godot/imported/course_a.png-abc.ctex\"\n")
+	DotPaths.write_text(dir.path_join(".godot/imported/course_a.png-abc.ctex"), "imported a")
+	DotPaths.write_text(dir.path_join("tex/plain.png.import"), "[remap]\n\npath=\"res://.godot/imported/plain.png-def.ctex\"\n")
+	DotPaths.write_text(dir.path_join(".godot/imported/plain.png-def.ctex"), "imported plain")
+	var res := _publisher().publish(dir, WORK.path_join("out_imported"))
+	_check("publish", res.ok, str(res.error) if not res.ok else "")
+	var groups := _groups_of(WORK.path_join("out_imported"))
+	_check("relocated output joins its asset's group", groups.get("_imported/course_a.png-abc.ctex", []) == ["course_a"], str(groups.get("_imported/course_a.png-abc.ctex")))
+	_check("its marker joins too", groups.get("worlds/course_a.png.import", []) == ["course_a"])
+	_check("an output of an ungrouped asset stays ungrouped", not groups.has("_imported/plain.png-def.ctex"), str(groups.keys()))
 	_end()
 
 
