@@ -48,10 +48,10 @@ static func unrelocate(manifest: DotCloudManifest, dir: String, at: String, path
 
 
 ## The overlay's file name, from what is in it.
-static func path(dir: String, manifests: Dictionary, fingerprint: String) -> String:
+static func path(dir: String, manifests: Dictionary, fingerprint: String, groups: PackedStringArray) -> String:
 	var lines := PackedStringArray([fingerprint])
 	for d: String in manifests:
-		for f in (manifests[d] as DotCloudManifest).files:
+		for f in (manifests[d] as DotCloudManifest).wanted_files(groups):
 			lines.append("%s/%s:%s" % [d, f.path, f.sha256])
 	lines.sort()
 	return dir.path_join("overlay-%s.pck" % "\n".join(lines).sha256_text().substr(0, 16))

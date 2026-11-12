@@ -47,5 +47,6 @@ extends RefCounted
 # 22: grouped files are mounted, not only downloaded: DotCloudMounter.mount's `groups` option and covers' groups,
 #     DotCloudClient.ensure_groups_at (a game's per-map top-up) and DotCloudFile.ALL_GROUPS ("*", every group). Additive.
 # 23: DotCloudClient.job_register / job_register_manifest take `groups`: an outer job counts and downloads them. Additive.
-const LEVEL := 23
+# 24: DotCloudAddonSet.groups: an addon overlay holds this side's files and the chosen groups (default every group). Additive.
+const LEVEL := 24
 const OLDEST := 1
