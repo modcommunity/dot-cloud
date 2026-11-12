@@ -77,6 +77,15 @@ extends DotConfig
 ## Needs host support (on web, [code]Accept-Ranges[/code] exposed through CORS); restarts when refused.
 @export var resume_downloads: bool = true
 
+## On web, where in-progress downloads are written: Emscripten's in-memory [code]/tmp[/code], not
+## [code]user://[/code]. [code]user://[/code] there is an IndexedDB mirror saved by an asynchronous sync
+## that lists the files first and reads them afterwards, so a partial renamed into the objects or
+## deleted in between failed the whole save ("Failed to save IDB file system", 70 times over one
+## Fatal Contact first start), and every save rewrote the growing partial into IndexedDB as well.
+## The cost is that a reload restarts an unfinished file instead of resuming it. Empty: use
+## [method persisted_partials_dir] on web too.
+@export var web_partials_dir: String = "/tmp/dot_cloud_partial"
+
 ## Attempts per file before it is treated as failed, across all mirrors.
 @export_range(1, 20, 1) var max_attempts_per_file: int = 4
 
@@ -248,8 +257,22 @@ func objects_dir() -> String:
 
 ## Where in-progress downloads live, apart from [method objects_dir] so a partial is never mistaken
 ## for a complete object and [method DotCloudStore.has] can be an existence check.
+## On web that is [member web_partials_dir], outside the IndexedDB mirror: see there.
 func partials_dir() -> String:
+	if DotPlatform.is_web() and not web_partials_dir.is_empty():
+		return web_partials_dir
+	return persisted_partials_dir()
+
+
+## The partials directory under [member cache_dir], the one every platform but web uses. On web it
+## only ever holds what an older build left, which [method DotCloudStore.open] removes.
+func persisted_partials_dir() -> String:
 	return cache_dir.path_join("partial")
+
+
+## Whether partials live in the persisted cache, so changing them needs a filesystem sync.
+func partials_persisted() -> bool:
+	return partials_dir() == persisted_partials_dir()
 
 
 func index_path() -> String:

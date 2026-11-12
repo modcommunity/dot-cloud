@@ -52,6 +52,10 @@ func open() -> DotResult:
 		var made := DotPaths.ensure_dir(dir)
 		if not made.ok:
 			return made.wrap("Could not create the content cache.")
+	# Partials an older build left in the persisted cache on web: nothing resumes them from there, and
+	# each is as large as the file it was downloading.
+	if not config.partials_persisted():
+		DotPaths.remove_tree(config.persisted_partials_dir())
 
 	if config.request_persistent_storage and DotPlatform.is_web():
 		DotWeb.request_persistent_storage()
@@ -179,7 +183,8 @@ func discard_partial(sha256: String) -> void:
 	var path := partial_path(sha256)
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(path)
-		DotWeb.sync_filesystem()
+		if config.partials_persisted():
+			DotWeb.sync_filesystem()
 
 
 ## Promotes a verified partial into the object store; the hash is checked here and nowhere else,
@@ -231,11 +236,9 @@ func commit_partial(
 		_record(sha256, size)
 		return DotResult.success(dest)
 
-	var err := DirAccess.rename_absolute(src, dest)
-	if err != OK:
-		return DotResult.failure(
-			DotError.from_engine(err, "moving '%s' into the cache" % src)
-		)
+	var moved := _move_file(src, dest)
+	if not moved.ok:
+		return moved
 
 	# Sync per object, not once per sync: on web an unflushed write is lost with the tab, and a player
 	# closing it mid-download should keep the finished objects.
@@ -249,6 +252,21 @@ func commit_partial(
 		{"hash": sha256.substr(0, 12), "size": DotPaths.format_bytes(size)}
 	)
 
+	return DotResult.success(dest)
+
+
+## Renames [param src] to [param dest], or copies and removes it when they are on different
+## filesystems (web partials are in memory, objects in the IndexedDB mirror) and the rename refuses.
+func _move_file(src: String, dest: String) -> DotResult:
+	if DirAccess.rename_absolute(src, dest) == OK:
+		return DotResult.success(dest)
+	var err := DirAccess.copy_absolute(src, dest)
+	if err != OK:
+		DirAccess.remove_absolute(dest)
+		return DotResult.failure(
+			DotError.from_engine(err, "moving '%s' into the cache" % src)
+		)
+	DirAccess.remove_absolute(src)
 	return DotResult.success(dest)
 
 
@@ -456,7 +474,8 @@ func sweep_partials(max_age_sec: float = 86400.0) -> int:
 		removed += 1
 
 	if removed > 0:
-		DotWeb.sync_filesystem()
+		if config.partials_persisted():
+			DotWeb.sync_filesystem()
 		DotLog.debug(CHANNEL, "swept stale partials", {"count": removed})
 
 	return removed
