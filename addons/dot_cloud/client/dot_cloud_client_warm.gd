@@ -40,7 +40,9 @@ static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> vo
 	var t0 := Time.get_ticks_msec()
 	var classes := DotCloudSliceLoader.named_class_scripts(names, files)
 	var res := await c._prewarm.load_all(c.get_tree(), classes, false)
-	DotLog.info(CHANNEL, "addon classes prewarmed", {"classes": classes.size(), "ms": Time.get_ticks_msec() - t0, "ok": res.ok})
+	DotLog.info(CHANNEL, "addon classes prewarmed", {
+		"classes": classes.size(), "left_to_warm": c._prewarm.remaining.size(), "ms": Time.get_ticks_msec() - t0, "ok": res.ok,
+	})
 	c._prewarming = false
 	c._prewarm_done.emit()
 
@@ -71,6 +73,10 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 				seen[path] = true
 				scripts.append(path)
 
+	# Take over from the class prewarm instead of idling while it finishes (~9 s of a web join): stop it after
+	# its current slice; named_class_scripts below skips what it compiled and queues what it had not reached.
+	if c._prewarming and c._prewarm != null:
+		c._prewarm.stop_requested = true
 	while c._prewarming:
 		await c._prewarm_done
 	var t0 := Time.get_ticks_msec()
