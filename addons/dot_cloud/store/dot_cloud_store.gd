@@ -10,6 +10,7 @@ extends RefCounted
 ## [code]<cache>/index.json[/code] tracks size, last use and referencing content sets, for LRU eviction.
 
 const CHANNEL := "cloud.store"
+const _Inventory := preload("dot_cloud_store_inventory.gd")
 
 ## Index schema version.
 const INDEX_VERSION := 1
@@ -749,136 +750,34 @@ func record_pack(manifest: DotCloudManifest) -> void:
 ## One entry per pack: id, version, kind (game|map|weapon|workshop), game, name, bytes, last_used (unix s), pinned, platform (web|app).
 ## A record whose objects are all gone (browser eviction) is dropped. Bytes count shared objects in every pack that uses them.
 func inventory() -> Array[Dictionary]:
-	var out: Array[Dictionary] = []
-	var gone: Array = []
-	for k in packs.records:
-		var r: Dictionary = packs.records[k]
-		var bytes := 0
-		var present := 0
-		for h in (r["hashes"] as Array):
-			if _index.has(h):
-				bytes += int(_index[h]["size"])
-				present += 1
-		if present == 0 and not (r["hashes"] as Array).is_empty():
-			gone.append(k)
-			continue
-		out.append({
-			"id": r["id"], "version": r["version"], "kind": r["kind"], "game": r["game"], "name": r["name"],
-			"bytes": bytes, "last_used": int(r["last_used"]), "pinned": bool(r["pinned"]),
-			"platform": "web" if DotPlatform.is_web() else "app",
-		})
-	for k in gone:
-		packs.records.erase(k)
-		packs.dirty = true
-	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["last_used"]) > int(b["last_used"]))
-	return out
+	return _Inventory.inventory(self)
 
 
 ## Pins every version of [param id]: eviction skips its objects. Pinning on web also asks the browser for persistent storage.
 func set_pinned(id: String, pinned: bool) -> DotResult:
-	var keys := packs.keys_for_id(id)
-	if keys.is_empty():
-		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
-	for k in keys:
-		packs.records[k]["pinned"] = pinned
-	packs.dirty = true
-	flush_index()
-	if pinned:
-		_request_persist()
-	DotLog.info(CHANNEL, "pin changed", {"id": id, "pinned": pinned})
-	return DotResult.success(keys.size())
+	return _Inventory.set_pinned(self, id, pinned)
 
 
 ## "Keep content downloaded" for a game: pins its packs now and those it downloads later.
 func set_game_pinned(game: String, pinned: bool) -> DotResult:
-	if pinned and game.length() > DotCloudPackBook.MAX_GAME_ID:
-		return DotResult.fail(DotError.CODE_INVALID, "Game id too long.")
-	if pinned and packs.pinned_games.size() >= DotCloudPackBook.MAX_PINNED_GAMES and not packs.pinned_games.has(game):
-		return DotResult.fail(DotError.CODE_INVALID, "Too many pinned games.")
-	var n := 0
-	for k in packs.records:
-		if packs.records[k]["game"] == game:
-			packs.records[k]["pinned"] = pinned
-			n += 1
-	var at := packs.pinned_games.find(game)
-	if pinned and at < 0:
-		packs.pinned_games.append(game)
-	elif not pinned and at >= 0:
-		packs.pinned_games.remove_at(at)
-	packs.dirty = true
-	flush_index()
-	if pinned:
-		_request_persist()
-	return DotResult.success(n)
+	return _Inventory.set_game_pinned(self, game, pinned)
 
 
 ## Deletes a pack's objects, except those another pack still needs. Refuses a pack mounted in this process (its files cannot be unmounted): [code]CODE_STATE[/code].
 func delete(id: String, version: String = "", force: bool = false) -> DotResult:
-	var keys := packs.keys_for_id(id, version)
-	if keys.is_empty():
-		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
-	for k in keys:
-		if not force and bool(packs.records[k].get("pinned", false)):
-			return DotResult.fail(DotError.CODE_STATE, "That content is pinned; unpin it or force the delete.", k)
-		if in_use_fn.is_valid() and bool(in_use_fn.call(k)):
-			return DotResult.fail(DotError.CODE_STATE, "That content is in use; restart to delete it.", k)
-
-	var shared := packs.hashes_used_outside(keys)
-	var freed := 0
-	for k in keys:
-		for h in (packs.records[k]["hashes"] as Array):
-			if shared.has(h) or not _index.has(h):
-				continue
-			var size := int(_index[h]["size"])
-			if DirAccess.remove_absolute(path_for(h)) != OK and FileAccess.file_exists(path_for(h)):
-				DotLog.warn(CHANNEL, "could not delete object", {"hash": str(h).substr(0, 12)})
-				continue
-			_forget(h)
-			freed += size
-		release_refs(k)
-		packs.records.erase(k)
-	packs.dirty = true
-	DotWeb.sync_filesystem()
-	flush_index()
-	DotLog.info(CHANNEL, "deleted content", {"id": id, "freed": DotPaths.format_bytes(freed)})
-	return DotResult.success(freed)
+	return _Inventory.delete(self, id, version, force)
 
 
 ## Deletes every pack that is not pinned and not in use; returns the bytes freed. [method clear_all] is the one that takes pinned packs too.
 func clear_unpinned() -> DotResult:
-	var freed := 0
-	var ids := {}
-	for k in packs.records.keys():
-		var r: Dictionary = packs.records[k]
-		if not bool(r["pinned"]) and not (in_use_fn.is_valid() and bool(in_use_fn.call(k))):
-			ids[k] = r
-	for k in ids:
-		var done := delete(ids[k]["id"], ids[k]["version"])
-		if done.ok:
-			freed += int(done.value)
-	return DotResult.success(freed)
+	return _Inventory.clear_unpinned(self)
 
 
 ## Free space: [code]{free, quota, usage, quota_cause}[/code], numbers -1 when unknown.
 ## [code]quota_cause[/code] is "", "unreadable", "near-full" (under a twentieth or 100 MiB left) or
 ## "partitioned" (embedded in another site). A hint for wording an error only. Await it.
 func quota_report() -> Dictionary:
-	var free := await free_bytes()
-	var quota := -1
-	var usage := -1
-	if DotPlatform.is_web():
-		var est := await DotWeb.estimate_storage()
-		if est.ok:
-			quota = int((est.value as Dictionary).get("quota", -1))
-			usage = int((est.value as Dictionary).get("usage", -1))
-	var cause := ""
-	if free < 0:
-		cause = "unreadable"
-	elif quota > 0 and (free < quota / 20 or free < 100 * 1024 * 1024):
-		cause = "partitioned" if _is_embedded() else "near-full"
-	elif quota <= 0 and free < 100 * 1024 * 1024:
-		cause = "partitioned" if _is_embedded() else "near-full"
-	return {"free": free, "quota": quota, "usage": usage, "quota_cause": cause}
+	return await _Inventory.quota_report(self)
 
 
 func _is_embedded() -> bool:
