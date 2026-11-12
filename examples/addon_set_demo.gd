@@ -24,7 +24,7 @@ const WORK := "user://dot_cloud_addon_set_demo"
 const LOCK := "res://addons.lock"
 
 ## Every check, including the one that compares against it. See docs/testing.md.
-const CHECKS := 57
+const CHECKS := 63
 
 var _failures := 0
 var _checks := 0
@@ -229,6 +229,8 @@ func _published_client() -> DotCloudClient:
 func _builds(cloud: DotCloudClient) -> void:
 	_section("the overlay is built, and nothing is mounted")
 	var set := DotCloudAddonSet.new(cloud)
+	# Parts of a few KiB, so every start below boots an overlay that is several files (a browser keeps none over 127 MiB).
+	set.part_bytes = 2048
 	var decided := set.plan_for([_entry("dot_probe", "modcommunity/dot-probe", "0.2.0")])
 	var built: DotResult = await set.build(decided["wanted"], {"server": "127.0.0.1:1"})
 	_check(built.ok, "build() fetches the pack and writes the overlay", str(built.error) if not built.ok else "")
@@ -237,6 +239,14 @@ func _builds(cloud: DotCloudClient) -> void:
 	_check(str(plan.get("state", "")) == DotCloudAddonSet.STATE_READY, "the plan is ready for the next start")
 	_check(FileAccess.file_exists(str(plan.get("pack", ""))), "the overlay is on the disk", str(plan.get("pack", "")))
 	_check(str(plan.get("build", "")) == DotCloudAddonSet.build_fingerprint(), "and names the build it was made for")
+	var packs := DotCloudAddonSet.plan_packs(plan)
+	_check(packs.size() > 1 and packs[0] == str(plan.get("pack", "")), "a large overlay is several files, part 0 first", str(packs))
+	var parts_ok := true
+	for part in packs:
+		parts_ok = parts_ok and FileAccess.file_exists(part)
+	_check(parts_ok, "each part is on the disk", str(packs))
+	_check(DotCloudAddonSet.plan_files(plan) == PackedStringArray([DotCloudAddonSet.PLAN]) + packs, "a restart keeps the plan and every part")
+	_check(not FileAccess.file_exists(packs[0] + ".part"), "no part is left under its unfinished name")
 	_check(str((plan.get("probes", {}) as Dictionary).get("dot_probe", "")) == "res://addons/dot_probe/dot_probe_api.gd",
 		"the probe is the addon's API file", str(plan.get("probes", {})))
 	_check(str(plan.get("uids", [])).contains("uid://b7prob3th1ng"), "the pack's uids are listed for the boot to register")
@@ -254,8 +264,9 @@ func _builds(cloud: DotCloudClient) -> void:
 		str(wrong.error) if not wrong.ok else "it built")
 
 	var again: DotResult = await set.build(decided["wanted"], {})
-	_check(again.ok and str((again.value as Dictionary).get("pack", "")) == str(plan.get("pack", "")),
-		"the same set builds the same file, which is reused rather than rewritten")
+	_check(again.ok and str((again.value as Dictionary).get("pack", "")) == str(plan.get("pack", ""))
+		and DotCloudAddonSet.plan_packs(again.value) == DotCloudAddonSet.plan_packs(plan),
+		"the same set builds the same files, which are reused rather than rewritten")
 	_done()
 
 
@@ -285,6 +296,8 @@ func _boots() -> void:
 	_section("a start on the overlay")
 	var started := _start()
 	_check(str(started.get("mounted", "")) != "", "the boot scene mounted it", str(started.get("log", "")).right(400))
+	_check(str(started.get("log", "")).contains("(%d files," % DotCloudAddonSet.plan_packs(DotCloudAddonSet.read_plan()).size()),
+		"every part of it", str(started.get("log", "")).right(400))
 	_check(bool(started.get("class", false)), "a class the build never had is a global")
 	_check(str(started.get("hello", "")) == "v2 from the pack", "and runs", str(started.get("hello", "")))
 	_check(str(started.get("typed", "")) == "v2 from the pack", "a script naming it as a TYPE compiles after the boot", str(started.get("typed", "")))
@@ -364,6 +377,7 @@ func _nested(cloud: DotCloudClient) -> void:
 		return
 
 	var plan: Dictionary = built.value
+	_check(DotCloudAddonSet.plan_packs(plan).size() == 1, "a small overlay is one file", str(plan.get("packs", [])))
 	_check(str((plan["probes"] as Dictionary).get("dot_nested", "")) == "res://addons/dot_nested/dot_nested_api.gd",
 		"the probe is the addon's API file at its own depth", str(plan["probes"]))
 	_check(ProjectSettings.load_resource_pack(str(plan["pack"]), true), "the overlay mounts in this process, for the checks below")

@@ -80,22 +80,30 @@ func _apply() -> void:
 	else:
 		return
 
-	var pack := str(plan.get("pack", ""))
+	# A large overlay is several files (`packs`, part 0 first, each small enough for a browser to keep);
+	# every one has to be there, or none is mounted.
+	var packs: Variant = plan.get("packs", [plan.get("pack", "")])
 
-	if not pack.begins_with(DIR + "/") or not FileAccess.file_exists(pack):
+	if not (packs is Array) or (packs as Array).is_empty():
 		return
+
+	for part: Variant in packs:
+		if not str(part).begins_with(DIR + "/") or not FileAccess.file_exists(str(part)):
+			return
 
 	_keep_shell_classes(build)
 
 	plan["state"] = "booting"
 	_save(plan)
 
-	if not ProjectSettings.load_resource_pack(pack, true):
-		plan["state"] = "failed"
-		_save(plan)
-		_say("the engine refused the addon overlay; starting without it")
-		return
+	for part: Variant in packs:
+		if not ProjectSettings.load_resource_pack(str(part), true):
+			plan["state"] = "failed"
+			_save(plan)
+			_say("the engine refused the addon overlay part %s; the next start comes up without it" % str(part).get_file())
+			return
 
+	var pack := str((packs as Array)[0])
 	ProjectSettings.set_setting(SETTING, pack)
 
 	var uids: Variant = plan.get("uids", [])
@@ -106,8 +114,8 @@ func _apply() -> void:
 			if pair is Array and (pair as Array).size() == 2 and _register_uid(str(pair[0]), str(pair[1])):
 				registered += 1
 
-	_say("mounted the addon overlay %s (%d addons, %d uids)" % [
-		pack.get_file(), (plan.get("addons", {}) as Dictionary).size(), registered
+	_say("mounted the addon overlay %s (%d files, %d addons, %d uids)" % [
+		pack.get_file(), (packs as Array).size(), (plan.get("addons", {}) as Dictionary).size(), registered
 	])
 
 
