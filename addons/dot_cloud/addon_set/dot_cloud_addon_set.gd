@@ -72,6 +72,11 @@ var cloud: DotCloudClient = null
 ## The most one overlay file holds; a larger overlay is written as several (the plan's `packs`).
 var part_bytes: int = _Overlay.PART_BYTES
 
+## The download groups ([code]groups.json[/code], API 22) the overlay takes beside each pack's
+## ungrouped files; `*` is every group. The overlay holds what was fetched, side-filtered
+## too, so a server-only file or an unwanted group is neither downloaded nor laid over.
+var groups: PackedStringArray = PackedStringArray([DotCloudFile.ALL_GROUPS])
+
 
 func _init(p_cloud: DotCloudClient = null) -> void:
 	cloud = p_cloud
@@ -546,7 +551,7 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 				"it has no plugin.cfg at its root or at addons/%s/" % dir
 			)
 
-		var downloaded := await cloud.download_manifest(manifest)
+		var downloaded := await cloud.download_manifest(manifest, groups)
 
 		if not downloaded.ok:
 			return downloaded.wrap("Could not download %s." % manifest.key())
@@ -569,6 +574,7 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 		"pack": str(assembled.value["pack"]),
 		"packs": assembled.value["packs"],
 		"addons": wanted,
+		"groups": groups,
 		"uids": assembled.value["uids"],
 		"probes": assembled.value["probes"],
 		"state": STATE_READY,
@@ -599,7 +605,7 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	# Named by content, not `id@version`: a republished version must not reuse a stale file.
 	# Reuse is required: the file may be the overlay this process has mounted, and rewriting
 	# a mounted pack corrupts what it reads next.
-	var pack_path := _Overlay.path(DIR, manifests, fingerprint)
+	var pack_path := _Overlay.path(DIR, manifests, fingerprint, groups)
 	var existing := _Overlay.existing_parts(pack_path)
 	var reuse := not existing.is_empty()
 	var scratch := DIR.path_join("staging")
@@ -621,7 +627,7 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 		var at := _Overlay.base(manifest, dir)
 		replaced.append(root)
 
-		for f in manifest.files:
+		for f in manifest.wanted_files(groups):
 			if not cloud.store.has(f.sha256):
 				return DotResult.fail(DotError.CODE_STATE, "An addon file is not downloaded.", f.path)
 

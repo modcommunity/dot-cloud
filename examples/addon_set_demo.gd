@@ -24,7 +24,7 @@ const WORK := "user://dot_cloud_addon_set_demo"
 const LOCK := "res://addons.lock"
 
 ## Every check, including the one that compares against it. See docs/testing.md.
-const CHECKS := 63
+const CHECKS := 71
 
 var _failures := 0
 var _checks := 0
@@ -54,6 +54,7 @@ func _run() -> void:
 		await _builds(cloud)
 		_boots()
 		await _nested(cloud)
+		await _sided(cloud)
 
 	_finish()
 
@@ -402,6 +403,57 @@ func _nested(cloud: DotCloudClient) -> void:
 	_check(not FileAccess.file_exists("res://addons/dot_nested/tools/dot_nested_tool.gd")
 		and not FileAccess.file_exists("res://addons/dot_nested/addons/dot_nested/plugin.cfg"),
 		"nothing outside the addon lands under res://addons/dot_nested/")
+	_done()
+
+
+# 6
+
+func _sided(cloud: DotCloudClient) -> void:
+	_section("an addon with sides and groups overlays only what this process fetched")
+	var src := WORK.path_join("sided_source")
+	_write(src.path_join("plugin.cfg"), "[plugin]\n\nname=\"Dot Sided\"\nversion=\"0.1.0\"\nscript=\"\"\n")
+	_write(src.path_join("dot_sided_api.gd"), "extends RefCounted\n\nconst LEVEL := 1\n")
+	_write(src.path_join("server/rules.json"), "{\"server only\": true}\n")
+	_write(src.path_join("maps/big.bin"), "a large deferred map")
+	_write(src.path_join("sides.json"), "{\"server\": [\"server/\"]}\n")
+	_write(src.path_join("groups.json"), "{\"big\": [\"maps/*\"]}\n")
+
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "modcommunity/dot-sided"
+	pub.version = "0.1.0"
+	pub.signing_key_pem = str(_keys["private"])
+	pub.rewrite_resource_paths = false
+	var published := pub.publish(src, WORK.path_join("origin/modcommunity/dot-sided/0.1.0"))
+	_check(published.ok, "an addon with sides.json and groups.json publishes", str(published.error) if not published.ok else "")
+
+	var side_before := cloud.config.side
+	cloud.config.side = "client"
+	var wanted := {"dot_sided": _entry("dot_sided", "modcommunity/dot-sided", "0.1.0")}
+	var set := DotCloudAddonSet.new(cloud)
+	set.groups = PackedStringArray()
+	var lean: DotResult = await set.build(wanted, {})
+	_check(lean.ok, "a client builds it with no groups", str(lean.error) if not lean.ok else "")
+
+	var sha := {}
+	var resolved: DotResult = await cloud.resolve_manifest(&"modcommunity/dot-sided", "0.1.0")
+	if resolved.ok:
+		for f in (resolved.value as DotCloudManifest).files:
+			sha[f.path] = f.sha256
+	_check(sha.has("server/rules.json") and not cloud.store.has(str(sha["server/rules.json"])), "the server-only file is never fetched")
+	_check(sha.has("maps/big.bin") and not cloud.store.has(str(sha["maps/big.bin"])), "nor a group it did not ask for")
+	_check(lean.ok and (lean.value as Dictionary).get("groups", ["?"]).is_empty(), "the plan says which groups it holds")
+
+	set.groups = PackedStringArray([DotCloudFile.ALL_GROUPS])
+	var full: DotResult = await set.build(wanted, {})
+	_check(full.ok and cloud.store.has(str(sha.get("maps/big.bin", ""))), "with every group it fetches the map", str(full.error) if not full.ok else "")
+	_check(full.ok and lean.ok and str((full.value as Dictionary)["pack"]) != str((lean.value as Dictionary)["pack"]),
+		"and the overlay is a different file: its name comes from what is in it")
+	cloud.config.side = side_before
+
+	var mounted := full.ok and ProjectSettings.load_resource_pack(str((full.value as Dictionary)["pack"]), true)
+	_check(mounted and FileAccess.file_exists("res://addons/dot_sided/maps/big.bin")
+		and not FileAccess.file_exists("res://addons/dot_sided/server/rules.json"),
+		"mounted, the overlay holds the group and not the other side's file")
 	_done()
 
 
