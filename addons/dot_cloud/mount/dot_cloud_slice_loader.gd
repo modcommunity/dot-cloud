@@ -16,6 +16,10 @@ var deadline_msec: int = 0
 ## Paths [method load_all] left unloaded because [member deadline_msec] ran out.
 var remaining: PackedStringArray = PackedStringArray()
 
+## Set while [method load_all] runs to stop it before its next path; the rest goes to [member remaining].
+## A caller that needs the main thread now takes over rather than waiting out a background warm.
+var stop_requested := false
+
 ## When above 0, a frame loads at most this many resources before it yields, whatever the time budget says.
 var max_per_frame: int = 0
 
@@ -59,7 +63,7 @@ func load_all(tree: SceneTree, paths: PackedStringArray, threaded: bool = DotPla
 
 	for i in total:
 		var path := paths[i]
-		if deadline_msec > 0 and Time.get_ticks_msec() - started >= deadline_msec:
+		if stop_requested or (deadline_msec > 0 and Time.get_ticks_msec() - started >= deadline_msec):
 			remaining = paths.slice(i)
 			break
 		var t_load := Time.get_ticks_msec()

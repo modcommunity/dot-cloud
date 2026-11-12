@@ -28,7 +28,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 44
+const CHECKS := 46
 
 
 func _ready() -> void:
@@ -158,6 +158,31 @@ script = ExtResource("1")
 	var scripts := warmed.loaded.filter(func(r: Resource) -> bool: return r is Script)
 	_check(scripts.any(func(s: Script) -> bool: return s.resource_path.begins_with("res://dot_cloud/delivered_scene/")),
 		"warm_content compiles the pack's script and holds it", str(warm_keys))
+	var stopped := DotCloudSliceLoader.new()
+	stopped.stop_requested = true
+	var paths := PackedStringArray([scene_path, scene_path])
+	await stopped.load_all(get_tree(), paths, false)
+	_check(stopped.loaded.is_empty() and stopped.remaining == paths,
+		"a stopped slice loader loads nothing and leaves every path in remaining", str(stopped.remaining))
+
+	# A class prewarm still running: warm_content stops it after its slice and takes over rather than wait it out.
+	var pre := DotCloudSliceLoader.new()
+	pre.budget_msec = 0
+	cloud._prewarm = pre
+	cloud._prewarming = true
+	var many := PackedStringArray()
+	for i in 200:
+		many.append(scene_path)
+	var prewarm := func() -> void:
+		await pre.load_all(get_tree(), many, false)
+		cloud._prewarming = false
+		cloud._prewarm_done.emit()
+	prewarm.call()
+
+	await cloud.warm_content(get_tree(), warm_keys, true, Callable())
+	_check(not cloud._prewarming and pre.remaining.size() > 0 and pre.loaded.size() < many.size(),
+		"warm_content stops a running class prewarm instead of waiting for it",
+		"prewarm loaded %d, left %d" % [pre.loaded.size(), pre.remaining.size()])
 
 	var packed: PackedScene = load(scene_path)
 	_check(packed != null, "and it loads")
