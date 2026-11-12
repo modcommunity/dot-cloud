@@ -519,14 +519,13 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 
 		var manifest: DotCloudManifest = resolved.value
 
-		# [b]An addon pack is the addon's directory, and it says so.[/b] Every addon has a
-		# plugin.cfg at its root; a pack without one was published from somewhere else and
-		# laid over `res://addons/<dir>/` would put its files at the wrong depth.
-		if not _has_file(manifest, "plugin.cfg"):
+		# [b]An addon pack holds the addon's directory, and its plugin.cfg says where.[/b] Without
+		# one the files would land over `res://addons/<dir>/` at the wrong depth.
+		if _Overlay.base(manifest, dir) == _Overlay.NOT_AN_ADDON:
 			return DotResult.fail(
 				DotError.CODE_INVALID,
 				"%s is not an addon pack." % manifest.key(),
-				"it has no plugin.cfg at its root"
+				"it has no plugin.cfg at its root or at addons/%s/" % dir
 			)
 
 		var downloaded := await cloud.download_manifest(manifest)
@@ -602,29 +601,28 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	for dir: String in manifests:
 		var manifest: DotCloudManifest = manifests[dir]
 		var root := "res://addons/%s" % dir
+		var at := _Overlay.base(manifest, dir)
 		replaced.append(root)
 
 		for f in manifest.files:
 			if not cloud.store.has(f.sha256):
 				return DotResult.fail(DotError.CODE_STATE, "An addon file is not downloaded.", f.path)
 
-			var target := root.path_join(f.path)
+			var target := _Overlay.target(manifest, dir, at, f.path)
 			var source := cloud.store.path_for(f.sha256)
 
 			if not reuse:
-				err = packer.add_file(target, source)
+				source = _Overlay.unrelocate(manifest, dir, at, f.path, source, scratch.path_join("t%d" % remap_index))
+				err = _Overlay.add(packer, target, source, scratch.path_join("r%d.remap" % remap_index))
 				if err != OK:
 					return DotResult.failure(DotError.from_engine(err, "adding %s" % target))
+			remap_index += 1
 
 			var ext := f.path.get_extension().to_lower()
-			if ext in REMAPPED and not reuse:
-				err = _Overlay.add_remap(packer, scratch.path_join("r%d.remap" % remap_index), target)
-				remap_index += 1
-				if err != OK:
-					return DotResult.failure(DotError.from_engine(err, "adding %s.remap" % target))
-			if ext == "gd":
+			# Only the addon's own scripts are classes; a project pack's tools are not.
+			if ext == "gd" and target.begins_with(root + "/"):
 				scripts[target] = FileAccess.get_file_as_string(source)
-				_Overlay.note_probe(probes, dir, manifest, f.path, target)
+				_Overlay.note_probe(probes, dir, manifest, at, target)
 			elif ext == "uid":
 				var uid := FileAccess.get_file_as_string(source).strip_edges()
 				if uid.begins_with("uid://"):
@@ -699,9 +697,10 @@ static func _prune(keep: String) -> void:
 ## a new addon and replaces nothing.
 func _is_that_addon(dir: String, manifest: DotCloudManifest) -> DotResult:
 	var cfg_sha := ""
+	var cfg_path := _Overlay.base(manifest, dir) + "plugin.cfg"
 
 	for f in manifest.files:
-		if f.path == "plugin.cfg":
+		if f.path == cfg_path:
 			cfg_sha = f.sha256
 
 	var cfg := ConfigFile.new()
