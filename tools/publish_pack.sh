@@ -93,6 +93,15 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ -d "$SRC/addons" ]; then
         exit 2
     fi
 fi
+# A VRAM-compressed import that holds only the desktop variant (s3tc_bptc, no etc2_astc) is dead weight on web and mobile
+# clients, which cannot use it; it is also the biggest thing a pack can carry (18 textures were 25 of 38 MB). Warn, never fail.
+if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
+    FIND_X=(-name .godot -prune); for ((i=0; i<${#ARGS[@]}; i++)); do [ "${ARGS[i]}" = --exclude-dir ] && FIND_X+=(-o -path "$SRC/${ARGS[i+1]}" -prune); done
+    DESK="$(find "$SRC" \( "${FIND_X[@]}" \) -o -name '*.import' -type f -print0 2>/dev/null | xargs -0 -r grep -l '^imported_formats=.*s3tc_bptc' 2>/dev/null | xargs -r grep -L '^imported_formats=.*etc2_astc' 2>/dev/null || true)"
+    if [ -n "$DESK" ]; then
+        echo "publish_pack: warning: $(printf '%s\n' "$DESK" | wc -l) .import file(s) carry only the desktop-only s3tc_bptc VRAM variant (no etc2_astc); web and mobile clients cannot use it. Import them lossy (compress/mode=1) or with vram_texture=false. First: $(printf '%s\n' "$DESK" | head -1)" >&2
+    fi
+fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 if [ -n "${DOT_CLI_TOKEN:-}" ]; then
     ( umask 077; printf %s "$DOT_CLI_TOKEN" > "$TMP/token" ); TOKEN_FILE="$TMP/token"

@@ -112,5 +112,13 @@ for i in 1 2 3 4 5 6; do mkdir -p "$W/h/addons/own$i"; echo z > "$W/h/addons/own
 rm -rf ho; hp
 chk "more than 5 packed addons is refused" "[ $? -ne 0 ] && grep -q Refusing out"
 rm -rf "$W/h/addons"
+# a desktop-only VRAM import (s3tc_bptc without etc2_astc) draws a warning, a both-format one does not
+mkdir -p "$W/h/vr"; echo x > "$W/h/vr/d.png"; printf '[remap]\nimported_formats=["s3tc_bptc"]\n' > "$W/h/vr/d.png.import"
+rm -rf ho; hp
+chk "desktop-only VRAM import warns" "[ $? -eq 0 ] && grep -q 'desktop-only s3tc_bptc' out && grep -q 'd.png.import' out"
+printf '[remap]\nimported_formats=["s3tc_bptc","etc2_astc"]\n' > "$W/h/vr/d.png.import"
+rm -rf ho; hp
+chk "both-format import is silent" "[ $? -eq 0 ] && ! grep -q 'desktop-only' out"
+rm -rf "$W/h/vr"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
