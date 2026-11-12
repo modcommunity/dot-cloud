@@ -13,7 +13,8 @@ extends Node
 ## The pack is `modcommunity/dot-probe@0.2.0`, published here with a key made for the run:
 ## a class this build has never heard of, a scene that names its script by absolute path,
 ## and the API file a probe is taken from. The build's own record says `dot-probe v0.1.0`
-## (`res://addons.lock`, written for the run and removed after).
+## (`res://addons.lock`, written for the run and removed after). Last, `modcommunity/dot-nested`: a
+## game addon released inside its project (`addons/dot_nested/plugin.cfg`), as the site publishes it.
 ##
 ## [codeblock]
 ## godot --headless --path . res://examples/addon_set_demo.tscn
@@ -23,12 +24,13 @@ const WORK := "user://dot_cloud_addon_set_demo"
 const LOCK := "res://addons.lock"
 
 ## Every check, including the one that compares against it. See docs/testing.md.
-const CHECKS := 47
+const CHECKS := 57
 
 var _failures := 0
 var _checks := 0
 var _sections := 0
 var _completed := 0
+var _keys := {}
 
 
 func _ready() -> void:
@@ -51,6 +53,7 @@ func _run() -> void:
 	if cloud != null:
 		await _builds(cloud)
 		_boots()
+		await _nested(cloud)
 
 	_finish()
 
@@ -193,6 +196,7 @@ func _published_client() -> DotCloudClient:
 		return null
 
 	var pair: Dictionary = keys.value
+	_keys = pair
 	var pub := DotCloudPublisher.new()
 	pub.content_id = "modcommunity/dot-probe"
 	pub.version = "0.2.0"
@@ -318,6 +322,72 @@ func _boots() -> void:
 	DotCloudAddonSet.forget()
 	var bare := _start()
 	_check(str(bare.get("mounted", "x")) == "" and not bool(bare.get("class", true)), "a start with no plan is the build as it shipped")
+	_done()
+
+
+# 5
+
+func _nested(cloud: DotCloudClient) -> void:
+	_section("an addon released inside its project")
+	const P := "res://dot_cloud/modcommunity/dot-nested/0.1.0/"
+	var src := WORK.path_join("nested_source")
+	var a := src.path_join("addons/dot_nested")
+	_write(src.path_join("project.godot"), "config_version=5\n")
+	_write(a.path_join("plugin.cfg"), "[plugin]\n\nname=\"Dot Nested\"\nversion=\"0.1.0\"\nscript=\"\"\n")
+	_write(a.path_join("dot_nested_api.gd"), "extends RefCounted\n\nconst LEVEL := 1\n")
+	_write(a.path_join("dot_nested_thing.gd"), "class_name DotNestedThing\nextends Node\n\nfunc _init() -> void:\n\tset_meta(\"v\", \"nested\")\n")
+	# What the site writes: the pack's own references moved onto its mount prefix.
+	_write(a.path_join("thing.tscn"), "[gd_scene format=3]\n\n[ext_resource type=\"Script\" path=\"%saddons/dot_nested/dot_nested_thing.gd\" id=\"1\"]\n\n[node name=\"T\" type=\"Node\"]\nscript = ExtResource(\"1\")\n" % P)
+	_write(a.path_join("beep.wav.import"), "[remap]\n\nimporter=\"wav\"\ntype=\"AudioStreamWAV\"\npath=\"%s_imported/beep.wav-0.sample\"\n\n[deps]\n\nsource_file=\"%saddons/dot_nested/beep.wav\"\n" % [P, P])
+	_write(src.path_join("_imported/beep.wav-0.sample"), "imported")
+	_write(src.path_join("tools/dot_nested_tool.gd"), "class_name DotNestedTool\nextends RefCounted\n")
+
+	var pub := DotCloudPublisher.new()
+	pub.content_id = "modcommunity/dot-nested"
+	pub.version = "0.1.0"
+	pub.signing_key_pem = str(_keys["private"])
+	pub.rewrite_resource_paths = false
+	pub.exclude_suffixes = PackedStringArray([".tmp"])
+	pub.exclude_roots = PackedStringArray()
+	var published := pub.publish(src, WORK.path_join("origin/modcommunity/dot-nested/0.1.0"))
+	_check(published.ok, "a project holding the addon publishes", str(published.error) if not published.ok else "")
+
+	var set := DotCloudAddonSet.new(cloud)
+	var aimed: DotResult = await set.build({"dot_other": {"dir": "dot_other", "repo": "dot-nested", "id": "modcommunity/dot-nested", "version": "0.1.0"}}, {})
+	_check(not aimed.ok, "aimed at a directory it does not hold, it is not an addon pack",
+		str(aimed.error) if not aimed.ok else "it built")
+
+	var built: DotResult = await set.build({"dot_nested": _entry("dot_nested", "modcommunity/dot-nested", "0.1.0")}, {})
+	_check(built.ok, "build() takes the addon from addons/dot_nested/", str(built.error) if not built.ok else "")
+	if not built.ok:
+		_done()
+		return
+
+	var plan: Dictionary = built.value
+	_check(str((plan["probes"] as Dictionary).get("dot_nested", "")) == "res://addons/dot_nested/dot_nested_api.gd",
+		"the probe is the addon's API file at its own depth", str(plan["probes"]))
+	_check(ProjectSettings.load_resource_pack(str(plan["pack"]), true), "the overlay mounts in this process, for the checks below")
+
+	var scene := FileAccess.get_file_as_string("res://addons/dot_nested/thing.tscn")
+	_check(scene.contains("path=\"res://addons/dot_nested/dot_nested_thing.gd\"") and not scene.contains(P),
+		"the scene's reference to its script is moved back from the mount prefix", scene)
+	var node: Node = (load("res://addons/dot_nested/thing.tscn") as PackedScene).instantiate() if ResourceLoader.exists("res://addons/dot_nested/thing.tscn") else null
+	_check(node != null and str(node.get_meta("v", "")) == "nested", "and the scene loads its script from the overlay")
+	if node != null:
+		node.free()
+
+	var marker := ConfigFile.new()
+	marker.load("res://addons/dot_nested/beep.wav.import")
+	_check(str(marker.get_value("deps", "source_file", "")) == "res://addons/dot_nested/beep.wav"
+		and FileAccess.file_exists(str(marker.get_value("remap", "path", ""))),
+		"an import marker names its source where the overlay put it, and its output is where it says", str(marker.get_value("remap", "path", "")))
+
+	var classes := FileAccess.get_file_as_string(DotCloudScriptClass.CACHE_PATH)
+	_check(classes.contains("DotNestedThing") and not classes.contains("DotNestedTool"),
+		"the addon's classes are listed, the project's tools are not")
+	_check(not FileAccess.file_exists("res://addons/dot_nested/tools/dot_nested_tool.gd")
+		and not FileAccess.file_exists("res://addons/dot_nested/addons/dot_nested/plugin.cfg"),
+		"nothing outside the addon lands under res://addons/dot_nested/")
 	_done()
 
 
