@@ -3,6 +3,10 @@ extends RefCounted
 ## Pieces of [method DotCloudAddonSet._assemble], in a file of their own so the addon set stays inside the
 ## size budget. Nothing here is used on its own.
 
+## The most one overlay pack file holds. A browser keeps `user://` in IndexedDB one file per value, and Chrome
+## refuses a value over 133169152 bytes (127 MiB): a larger overlay is never saved and the reload never comes.
+const PART_BYTES := 96 * 1024 * 1024
+
 ## [method base] of a pack that holds no addon.
 const NOT_AN_ADDON := "\n"
 
@@ -54,7 +58,7 @@ static func path(dir: String, manifests: Dictionary, fingerprint: String) -> Str
 
 
 ## Adds [param source] at [param target], and its self-pointing `.remap` when it is a resource.
-static func add(packer: PCKPacker, target: String, source: String, remap_file: String) -> int:
+static func add(packer: Parts, target: String, source: String, remap_file: String) -> int:
 	var err := packer.add_file(target, source)
 	if err == OK and target.get_extension().to_lower() in DotCloudAddonSet.REMAPPED:
 		err = add_remap(packer, remap_file, target)
@@ -62,7 +66,7 @@ static func add(packer: PCKPacker, target: String, source: String, remap_file: S
 
 
 ## Writes a self-pointing `.remap` for [param target] to [param remap_file] and adds it to the pack.
-static func add_remap(packer: PCKPacker, remap_file: String, target: String) -> int:
+static func add_remap(packer: Parts, remap_file: String, target: String) -> int:
 	var w := FileAccess.open(remap_file, FileAccess.WRITE)
 	w.store_string("[remap]\n\npath=\"%s\"\n" % target)
 	w.close()
@@ -77,3 +81,72 @@ static func note_probe(probes: Dictionary, dir: String, manifest: DotCloudManife
 		probes[dir] = target
 	elif not DotCloudAddonSet._has_file(manifest, at + api) and (not probes.has(dir) or target < str(probes[dir])):
 		probes[dir] = target
+
+
+## Part [param index] of the overlay named [param first]; part 0 is [param first] itself.
+static func part_path(first: String, index: int) -> String:
+	return Parts.path_of(first, index)
+
+
+## The parts of an overlay already on disk, or none when part 0 is missing. Part 0 is renamed into place last
+## ([method Parts.finish]), so finding it means every other part was written.
+static func existing_parts(first: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	while FileAccess.file_exists(part_path(first, out.size())):
+		out.append(part_path(first, out.size()))
+	return out
+
+
+## Whether [param path] is a part of the overlay named [param first].
+static func is_part_of(path: String, first: String) -> bool:
+	return path == first or (path.begins_with(first.trim_suffix(".pck") + ".") and path.ends_with(".pck"))
+
+
+## One overlay written as several pack files, each at most [member limit] bytes of content (a single larger
+## file gets a part of its own). Every part is written under a `.part` name and renamed when all are flushed.
+class Parts:
+	var first := ""
+	var limit := PART_BYTES
+	var paths := PackedStringArray()
+	var _packer: PCKPacker = null
+	var _used := 0
+
+	## An inner class cannot call the outer script's static functions, so the naming lives here.
+	static func path_of(p_first: String, index: int) -> String:
+		return p_first if index == 0 else "%s.%d.pck" % [p_first.trim_suffix(".pck"), index]
+
+	func _init(p_first: String, p_limit: int) -> void:
+		first = p_first
+		limit = maxi(p_limit, 1)
+
+	func add_file(target: String, source: String) -> int:
+		var f := FileAccess.open(source, FileAccess.READ)
+		var size := f.get_length() if f != null else 0
+		if f != null:
+			f.close()
+		if _packer == null or (_used > 0 and _used + size > limit):
+			var err := _next()
+			if err != OK:
+				return err
+		_used += size
+		return _packer.add_file(target, source)
+
+	func _next() -> int:
+		if _packer != null:
+			var err := _packer.flush(false)
+			if err != OK:
+				return err
+		_packer = PCKPacker.new()
+		_used = 0
+		paths.append(path_of(first, paths.size()))
+		return _packer.pck_start(paths[paths.size() - 1] + ".part")
+
+	## Flushes the last part and renames every part into place, part 0 last.
+	func finish() -> int:
+		var err := _next() if _packer == null else OK
+		if err == OK:
+			err = _packer.flush(false)
+		for i in range(paths.size() - 1, -1, -1):
+			if err == OK:
+				err = DirAccess.rename_absolute(paths[i] + ".part", paths[i])
+		return err

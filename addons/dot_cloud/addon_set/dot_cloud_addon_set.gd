@@ -69,6 +69,9 @@ var namespaces: PackedStringArray = PackedStringArray(["modcommunity/"])
 ## The client that fetches and verifies the packs.
 var cloud: DotCloudClient = null
 
+## The most one overlay file holds; a larger overlay is written as several (the plan's `packs`).
+var part_bytes: int = _Overlay.PART_BYTES
+
 
 func _init(p_cloud: DotCloudClient = null) -> void:
 	cloud = p_cloud
@@ -264,6 +267,20 @@ static func failed_before(wanted: Dictionary) -> bool:
 		and _same_set(plan.get("addons", {}), wanted)
 
 
+## The overlay files [param plan] names, part 0 first; `packs` is absent from a plan written before overlays had parts.
+static func plan_packs(plan: Dictionary) -> PackedStringArray:
+	var packs: Variant = plan.get("packs", [])
+	var out := PackedStringArray(packs) if packs is Array or packs is PackedStringArray else PackedStringArray()
+	return out if not out.is_empty() else PackedStringArray([str(plan.get("pack", ""))])
+
+
+## What a restart has to find kept: the plan and every overlay file it names.
+static func plan_files(plan: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray([PLAN])
+	out.append_array(plan_packs(plan))
+	return out
+
+
 ## Forgets the overlay: the next start comes up on this build's own addons. The pack file
 ## stays until [method _prune] or a clear removes it, because this process may have it
 ## mounted.
@@ -311,11 +328,12 @@ static func persisted(paths: PackedStringArray, timeout_s: float = 30.0) -> DotR
 			return DotResult.fail(DotError.CODE_IO, "There is no file to keep.", path)
 
 		var key := ProjectSettings.globalize_path(path)
-		var bytes := FileAccess.get_file_as_bytes(path)
-		want[key] = {
-			"size": bytes.size(),
-			"sha": DotHash.sha256_bytes(bytes) if bytes.size() <= PERSIST_COMPARE_BYTES else "",
-		}
+		var f := FileAccess.open(path, FileAccess.READ)
+		var size := f.get_length()
+		f.close()
+		# A large file by its length only: an overlay part is hundreds of MiB, too much to hold twice.
+		var small := size <= PERSIST_COMPARE_BYTES
+		want[key] = {"size": size, "sha": DotHash.sha256_bytes(FileAccess.get_file_as_bytes(path)) if small else ""}
 		# `/userfs/godot/app_userdata/<name>/...` is kept in the database `/userfs`.
 		var parts := key.split("/", false)
 		db_name = "/" + parts[0] if parts.size() > 0 else ""
@@ -549,6 +567,7 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 		"format": FORMAT,
 		"build": fingerprint,
 		"pack": str(assembled.value["pack"]),
+		"packs": assembled.value["packs"],
 		"addons": wanted,
 		"uids": assembled.value["uids"],
 		"probes": assembled.value["probes"],
@@ -581,16 +600,14 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	# Reuse is required: the file may be the overlay this process has mounted, and rewriting
 	# a mounted pack corrupts what it reads next.
 	var pack_path := _Overlay.path(DIR, manifests, fingerprint)
-	var reuse := FileAccess.file_exists(pack_path)
+	var existing := _Overlay.existing_parts(pack_path)
+	var reuse := not existing.is_empty()
 	var scratch := DIR.path_join("staging")
 	DotPaths.remove_tree(scratch)
 	DotPaths.ensure_dir(scratch)
 
-	var packer := PCKPacker.new()
-	var err := OK if reuse else packer.pck_start(pack_path)
-
-	if err != OK:
-		return DotResult.failure(DotError.from_engine(err, "creating the addon overlay"))
+	var packer := _Overlay.Parts.new(pack_path, part_bytes)
+	var err := OK
 
 	var scripts := {}
 	var uids: Array = []
@@ -630,7 +647,7 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 
 	if reuse:
 		DotPaths.remove_tree(scratch)
-		return DotResult.success({"pack": pack_path, "uids": uids, "probes": probes, "classes": 0, "reused": true})
+		return DotResult.success({"pack": pack_path, "packs": existing, "uids": uids, "probes": probes, "classes": 0, "reused": true})
 
 	var added := _write_class_cache(scripts, replaced, scratch)
 	var cache_file := scratch.path_join("global_script_class_cache.cfg")
@@ -639,14 +656,14 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 	if err != OK:
 		return DotResult.failure(DotError.from_engine(err, "adding the class list"))
 
-	err = packer.flush(false)
+	err = packer.finish()
 	if err != OK:
 		return DotResult.failure(DotError.from_engine(err, "writing the addon overlay"))
 
 	DotPaths.remove_tree(scratch)
 	DotWeb.sync_filesystem()
 
-	return DotResult.success({"pack": pack_path, "uids": uids, "probes": probes, "classes": added.size()})
+	return DotResult.success({"pack": pack_path, "packs": packer.paths, "uids": uids, "probes": probes, "classes": added.size()})
 
 
 ## Writes the merged class list into [param scratch]; returns the entries this set added.
@@ -670,8 +687,8 @@ static func _write_class_cache(scripts: Dictionary, replaced: PackedStringArray,
 	return added
 
 
-## Deletes every overlay but [param keep] and the one mounted in this process. An old
-## overlay is never mounted again -- the plan names one file -- so the rest is disk.
+## Deletes every overlay but [param keep] and the one mounted in this process, with their parts. An old
+## overlay is never mounted again -- the plan names one -- so the rest is disk.
 static func _prune(keep: String) -> void:
 	var mounted := str(ProjectSettings.get_setting("dot_cloud/addon_overlay", ""))
 	var dir := DirAccess.open(DIR)
@@ -682,7 +699,8 @@ static func _prune(keep: String) -> void:
 	for name in dir.get_files():
 		var path := DIR.path_join(name)
 
-		if name.begins_with("overlay-") and name.ends_with(".pck") and path != keep and path != mounted:
+		if name.begins_with("overlay-") and (name.ends_with(".pck") or name.ends_with(".part")) \
+				and not _Overlay.is_part_of(path, keep) and not _Overlay.is_part_of(path, mounted):
 			DirAccess.remove_absolute(path)
 
 
