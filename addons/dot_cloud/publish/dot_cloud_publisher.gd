@@ -205,16 +205,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	if not made.ok:
 		return made
 
-	var manifest := DotCloudManifest.new()
-	manifest.content_id = content_id
-	manifest.version = version
-	manifest.display_name = display_name
-	manifest.mount_root = mount_root
-	manifest.entry_scene = entry_scene
-	manifest.min_engine_version = min_engine_version
-	manifest.dependencies = dependencies.duplicate(true)
-	manifest.mirrors = mirrors
-	manifest.metadata = metadata
+	var manifest := _new_manifest()
 
 	# The id and version rules are the manifest's alone; a restated copy once refused ids it accepts.
 	var shape := manifest.validate_shape()
@@ -239,15 +230,8 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 	# names `res://assets/crate.glb` is rebased onto the mount, where its marker is.
 	var dropped := {}
 	if not ship_import_sources:
-		for src: String in imported["sources"]:
-			if relatives.has(src) and not extra_files.has(src):
-				dropped[src] = true
-		if not dropped.is_empty():
-			var kept := PackedStringArray()
-			for rel in relatives:
-				if not dropped.has(rel):
-					kept.append(rel)
-			relatives = kept
+		dropped = _import_sources_to_drop(relatives, imported["sources"])
+		relatives = _without(relatives, dropped)
 
 	if script_tokens_dir != "":
 		var tokened := _swap_in_script_tokens(out_dir, relatives, extra, dropped)
@@ -295,13 +279,7 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 
 	# Maps where a reference says a file is to where this pack put it (they differ once an imported
 	# output is relocated out of `.godot/`), so a rewrite can tell its own content from the host's.
-	var inside := {}
-	for rel in relatives:
-		inside[rel] = rel
-	for src: String in dropped:
-		inside[src] = src
-	for project_rel: String in remap:
-		inside[project_rel] = remap[project_rel]
+	var inside := _inside_map(relatives, dropped, remap)
 
 	var crossed := _check_side_references(relatives, extra, source_dir, inside, sides)
 	if not crossed.ok:
@@ -362,6 +340,51 @@ func publish(source_dir: String, out_dir: String) -> DotResult:
 		"bytes": total_bytes,
 		"signed": manifest.signature != "",
 	})
+
+
+## A manifest carrying this publisher's identity and settings, no files yet.
+func _new_manifest() -> DotCloudManifest:
+	var manifest := DotCloudManifest.new()
+	manifest.content_id = content_id
+	manifest.version = version
+	manifest.display_name = display_name
+	manifest.mount_root = mount_root
+	manifest.entry_scene = entry_scene
+	manifest.min_engine_version = min_engine_version
+	manifest.dependencies = dependencies.duplicate(true)
+	manifest.mirrors = mirrors
+	manifest.metadata = metadata
+	return manifest
+
+
+## The sources an imported output stands in for, as a set; a file named in [member extra_files] stays.
+func _import_sources_to_drop(relatives: PackedStringArray, sources: Dictionary) -> Dictionary:
+	var dropped := {}
+	for src: String in sources:
+		if relatives.has(src) and not extra_files.has(src):
+			dropped[src] = true
+	return dropped
+
+
+static func _without(relatives: PackedStringArray, dropped: Dictionary) -> PackedStringArray:
+	if dropped.is_empty():
+		return relatives
+	var kept := PackedStringArray()
+	for rel in relatives:
+		if not dropped.has(rel):
+			kept.append(rel)
+	return kept
+
+
+static func _inside_map(relatives: PackedStringArray, dropped: Dictionary, remap: Dictionary) -> Dictionary:
+	var inside := {}
+	for rel in relatives:
+		inside[rel] = rel
+	for src: String in dropped:
+		inside[src] = src
+	for project_rel: String in remap:
+		inside[project_rel] = remap[project_rel]
+	return inside
 
 
 ## Hashes, rewrites and stores every file; returns {written, deduped, bytes, rewritten, seen}.

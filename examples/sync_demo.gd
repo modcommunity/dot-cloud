@@ -19,6 +19,7 @@ extends Control
 ## [/codeblock]
 
 const WORK := "user://dot_cloud_demo"
+const _Checks := preload("res://examples/selftest/sync_checks.gd")
 
 @onready var _output: RichTextLabel = $Output
 
@@ -111,58 +112,8 @@ func _run() -> void:
 		"" if sig_ok.ok else sig_ok.error.message
 	)
 
-	# A tampered manifest must fail. Without this check a signature routine that
-	# always returns true would pass every other test in this file.
-	var tampered := manifest.raw_bytes.duplicate()
-	tampered[tampered.size() - 2] = 0x20
-	var tamper_check := DotCloudSignature.verify(
-		tampered, manifest.signature, str(key_pair["public"])
-	)
-	_check("tamper refused", not tamper_check.ok)
-
-	# A key too weak to mean anything must be refused before any crypto runs.
-	# 1024-bit RSA still verifies happily under mbedTLS, and a valid signature
-	# from a broken key is indistinguishable from a good one everywhere
-	# downstream of here — which is the whole reason MIN_KEY_BITS exists.
-	# Generated through Crypto directly, because DotCloudSignature.generate_keypair
-	# refuses to produce one this small — which is the point: the weak key in the
-	# real scenario was never made here. It came from an old setup, or from a
-	# trusted_keys entry in a layered config file.
-	var weak_key := Crypto.new().generate_rsa(1024)
-	if weak_key == null:
-		return _fail(
-			"generating a 1024-bit key",
-			DotResult.fail(DotError.CODE_INTERNAL, "generate_rsa(1024) failed")
-		)
-
-	var weak_sig := DotCloudSignature.sign(
-		manifest.raw_bytes, weak_key.save_to_string(false)
-	)
-	if not weak_sig.ok:
-		return _fail("signing with the weak key", weak_sig)
-
-	# This signature is genuinely valid: 128 bytes, and mbedTLS verifies it
-	# against its own key without complaint. It must be refused as FORBIDDEN —
-	# too weak to consider — and not as INTEGRITY, which would mean the key was
-	# considered and only the bytes disagreed.
-	var weak_check := DotCloudSignature.verify(
-		manifest.raw_bytes,
-		str(weak_sig.value),
-		weak_key.save_to_string(true)
-	)
-	_check(
-		"weak key refused",
-		not weak_check.ok and weak_check.error.code == DotError.CODE_FORBIDDEN,
-		"" if not weak_check.ok else "ACCEPTED"
-	)
-
-	# A zero-byte manifest is what a truncated response looks like. This has to
-	# come back as a failed DotResult, not as an engine error out of
-	# HashingContext.update() with a DotResult that claims success.
-	var empty_check := DotCloudSignature.verify(
-		PackedByteArray(), manifest.signature, str(key_pair["public"])
-	)
-	_check("empty body refused", not empty_check.ok)
+	if not _Checks.signature_refusals(self, manifest, key_pair):
+		return
 
 	# 5. client
 	var config := DotCloudConfig.new()
