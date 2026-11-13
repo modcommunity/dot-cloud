@@ -1,7 +1,10 @@
 # Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.sh.
 #   .\tools\publish_pack.ps1 [publish] -Source DIR -Id NAME [-Version V | -Bump patch|minor|major] [-Lock content.lock.json]
 #       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
-#       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport]
+#       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport] [-HostAddons LOCK,...] [-HostLevel name=N,...]
+#   publish derives requires.json like publish_pack.sh (dot-core's dot_requires.gd) and caps each level at the -HostAddons lock's
+#   (addon repo at the locked ref, LEVEL in <addon>_api.gd) or -HostLevel name=N; a committed requires.json above the host is refused.
+#   Not ported yet: leaving the host's addons out of the pack (use publish_pack.sh for a game that links family addons).
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 #   .\tools\publish_pack.ps1 member -Id NAME -MemberOf ASSET [-Site URL] [-TokenFile FILE]   (move a pack's versions into a collection page)
 #   publish -MemberOf ASSET: publish as a member of that collection asset (keeps -Id, no Workshop page of its own)
@@ -12,6 +15,7 @@ param([Parameter(Position = 0)][ValidateSet('publish', 'versions', 'member')][st
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
       [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional, [int]$Asset = 0, [int]$MemberOf = 0,
       [string]$Name, [string[]]$Meta = @(), [string[]]$ExcludeDir = @(), [string]$Site, [string]$TokenFile, [string]$Out,
+      [string[]]$HostAddons = @(), [string[]]$HostLevel = @(),
       [string]$Godot, [switch]$DryRun, [switch]$NoImport)
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $PSScriptRoot
@@ -19,6 +23,28 @@ if (-not $Godot) { $Godot = if ($env:GODOT) { $env:GODOT } else { 'godot' } }
 if (-not $Site) { $Site = $env:DOT_SITE }
 if (-not $TokenFile) { $TokenFile = if ($env:DOT_CLI_TOKEN_FILE) { $env:DOT_CLI_TOKEN_FILE } else { Join-Path $HOME '.config\dot\cli-token' } }
 function Full($p) { if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path (Get-Location).Path $p } }
+
+# HostLevelOf LOCK PROJECT ADDON: the API level the lock pins for ADDON ($null when the lock does not carry it). Same rule as publish_pack.sh.
+function HostLevelOf($lock, $proj, $a) {
+    $root = $null; $repo = $null; $ref = $null
+    if (Test-Path (Join-Path $proj "addons/$a")) {
+        $t = (Resolve-Path (Join-Path $proj "addons/$a")).Path
+        $root = Split-Path -Parent (Split-Path -Parent $t); $repo = Split-Path -Leaf $root
+    }
+    foreach ($ln in Get-Content $lock) {
+        if ($ln -match '^\s*(#|$)') { continue }
+        $f = $ln -split "`t"
+        if ($f.Count -lt 2) { continue }
+        if (($f[0] -replace '-', '_') -eq $a -or ($repo -and $f[0] -eq $repo)) { $ref = $f[1].Trim(); $repo = $f[0]; break }
+    }
+    if (-not $ref) { return $null }
+    foreach ($h in $HostLevel) { if ($h.Split('=')[0] -eq $a) { return $null } }
+    git -C $root rev-parse -q --verify "$ref^{commit}" *> $null
+    if ($LASTEXITCODE -ne 0) { $root = Join-Path (Split-Path -Parent $lock) "../$repo"; git -C $root rev-parse -q --verify "$ref^{commit}" *> $null }
+    if ($LASTEXITCODE -ne 0) { throw "publish_pack: cannot find $repo at $ref (the host lock's) to read its level; fetch its tags or pass -HostLevel $a=N" }
+    $m = (git -C $root show "${ref}:addons/$a/${a}_api.gd" 2>$null) | Select-String -Pattern '^const LEVEL *:= *(\d+)' | Select-Object -First 1
+    if ($m) { return [int]$m.Matches[0].Groups[1].Value } else { return 1 }
+}
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("publish_pack_" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $tmp | Out-Null
@@ -56,6 +82,41 @@ try {
             & $Godot --headless --path $p --import *> $null
             if ($LASTEXITCODE -ne 0) { Write-Error "publish_pack: import of $p failed"; exit 1 }
         }
+    }
+    # requires.json: derived like publish_pack.sh, capped at the host lock's levels; a committed one above them is refused.
+    $pp = (Resolve-Path (Full $Source)).Path
+    while ($pp -and -not (Test-Path (Join-Path $pp 'project.godot'))) { $pp = Split-Path -Parent $pp }
+    if ($pp -and (Test-Path (Join-Path $pp 'addons/dot_core/tools/dot_requires.gd'))) {
+        $req = Join-Path (Full $Source) 'requires.json'; $mode = 'check'
+        if (-not (Test-Path $req)) {
+            $req = Join-Path $tmp 'requires.json'; $mode = 'cap'
+            & $Godot --headless --path $pp --script res://addons/dot_core/tools/dot_requires.gd -- --out $req *> $null
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $req) -or (Get-Item $req).Length -eq 0) { Write-Error "publish_pack: could not derive requires.json for $pp"; exit 1 }
+            $a += '--extra-file', "requires.json=$req"
+        }
+        $caps = @{}
+        foreach ($h in $HostLevel) { $kv = $h.Split('=', 2); $caps[$kv[0]] = [int]$kv[1] }
+        $doc = Get-Content -Raw $req | ConvertFrom-Json
+        foreach ($h in $HostAddons) {
+            if (Test-Path $h -PathType Container) { $h = Join-Path $h 'addons.lock' }
+            if (-not (Test-Path $h -PathType Leaf) -or -not ((Get-Content -Raw $h) -match "`t")) { continue }
+            foreach ($n in $doc.addons.PSObject.Properties.Name) {
+                $lv = HostLevelOf $h $pp $n
+                if ($null -ne $lv) { $caps[$n] = $lv }
+            }
+        }
+        $bad = $false
+        foreach ($n in @($doc.addons.PSObject.Properties.Name | Sort-Object)) {
+            if ($caps.ContainsKey($n) -and [int]$doc.addons.$n -gt $caps[$n]) {
+                if ($mode -eq 'check') { $bad = $true; [Console]::Error.WriteLine("publish_pack: requires.json asks $n level $($doc.addons.$n); the host carries $($caps[$n])") }
+                else { [Console]::Error.WriteLine("publish_pack: requires.json: $n $($doc.addons.$n) capped at the host's $($caps[$n])"); $doc.addons.$n = $caps[$n] }
+            }
+        }
+        if ($bad) { Write-Error "publish_pack: the committed requires.json is above the host's levels; the host would refuse the pack. Refusing."; exit 1 }
+        if ($mode -eq 'cap') { [IO.File]::WriteAllText($req, ($doc | ConvertTo-Json -Depth 5) + "`n") }
+        Write-Host ("publish_pack: requires.json ({0}): {1}" -f $(if ($mode -eq 'cap') { 'derived' } else { 'committed' }), (($doc.addons.PSObject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name) $($_.Value)" }) -join ', '))
+    } elseif ($pp) {
+        Write-Host "publish_pack: note: $pp has no addons/dot_core/tools/dot_requires.gd; the pack ships without requires.json"
     }
     if (-not $Out) { $Out = Join-Path $tmp 'out' }
     $a += '--source', (Full $Source), '--out', (Full $Out)
