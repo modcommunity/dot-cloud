@@ -60,6 +60,17 @@ pub --version 3.0.3 --asset 8
 chk "asset naming another pack is refused" "[ \$? -ne 0 ] && grep -q 'publishes as' out"
 pub --version 3.0.4 --asset abc
 chk "bad --asset is refused" "[ \$? -ne 0 ] && grep -q 'positive asset id' out"
+# (b3) --member-of sends memberOf and keeps --id; with --asset it is refused; `member` relinks published versions
+pub --version 3.1.0 --member-of 116
+chk "--member-of sends memberOf and publishes as --id" "[ \$? -eq 0 ] && grep -q 'CLAIM memberOf=116' log && grep -q '\"version\": \"3.1.0\"' content.lock.json"
+pub --version 3.1.1 --member-of 116 --asset 7
+chk "--member-of with --asset is refused" "[ \$? -ne 0 ] && grep -q 'no --asset' out"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo --member-of 116 > "$W/out" 2>&1
+chk "member relinks the pack's versions" "[ \$? -eq 0 ] && grep -q 'MEMBER demo asset=116' log && grep -q 'members of asset 116' out"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id nosuch --member-of 116 > "$W/out" 2>&1
+chk "member of an unpublished pack fails" "[ \$? -ne 0 ]"
+DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo > "$W/out" 2>&1
+chk "member without --member-of is a usage error" "[ \$? -ne 0 ] && grep -q 'needs --member-of' out"
 # (c) a HELD release has no lock line until approved; relock writes it
 rm -f held.lock.json
 DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1

@@ -68,9 +68,20 @@ class H(BaseHTTPRequestHandler):
                 if "assetId" in b:  # a real site names the pack after the asset; asset 8 is called "other"
                     log("CLAIM asset=%s" % b["assetId"])
                     cid = "tester/" + ("other" if b["assetId"] == 8 else b["repoName"])
+                if "memberOf" in b:  # a member keeps its own id; the site refuses memberOf with assetId
+                    log("CLAIM memberOf=%s" % b["memberOf"])
+                    if "assetId" in b:
+                        return self._err(400, "invalid", "memberOf with assetId")
                 i = S["next_id"]; S["next_id"] += 1
                 S["claims"][i] = {"contentId": cid, "version": b["version"], "files": []}
                 return self._send(200, {"ok": True, "data": {"id": i, "contentId": cid}})
+            if a == "member":
+                log("MEMBER %s asset=%s" % (b["repoName"], b["assetId"]))
+                n = sum(1 for v in S["versions"] if v["contentId"].endswith("/" + b["repoName"]))
+                if n == 0:
+                    return self._err(404, "not_found", "no versions")
+                return self._send(200, {"ok": True, "data": {"contentId": "tester/" + b["repoName"], "assetId": b["assetId"], "linked": n,
+                                                            "previousAssets": [], "compat": {"seeded": False, "unresolved": []}, "collection": None}})
             if a == "versions":
                 vs = [v for v in S["versions"] if not b.get("repoName") or v["contentId"].endswith("/" + b["repoName"])]
                 vs += [{"id": i, "contentId": c["contentId"], "version": c["version"], "status": "CLAIMED", "fileCount": 0, "byteSize": 0}
