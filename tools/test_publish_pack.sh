@@ -167,6 +167,7 @@ fi
 PS1="$HERE/publish_pack.ps1"
 chk "ps1 derives requires.json with dot_requires.gd and ships it as an extra file" "grep -q 'dot_requires.gd' '$PS1' && grep -q \"requires.json=\" '$PS1'"
 chk "ps1 takes -HostAddons and -HostLevel" "grep -q '\[string\[\]\]\$HostAddons' '$PS1' && grep -q '\[string\[\]\]\$HostLevel' '$PS1'"
+chk "ps1 leaves out host-owned addons anchored at addons/ like the bash script" "grep -q 'function HostNames' '$PS1' && grep -q 'addons/\$n' '$PS1' && grep -q 'host-owned addon' '$PS1'"
 chk "ps1 caps and refuses like the bash script" "grep -q \"capped at the host's\" '$PS1' && grep -q \"above the host's levels\" '$PS1' && grep -q \"capped at the host.s\" '$HERE/publish_pack.sh'"
 # (g) a worktree's dangling relative addon link is relinked into the family directory
 mkdir -p "$W/fam/zz-lv/addons/zz_lv" "$W/wt/deep/gm/addons"; printf 'const LEVEL := 3\n' > "$W/fam/zz-lv/addons/zz_lv/zz_lv_api.gd"
