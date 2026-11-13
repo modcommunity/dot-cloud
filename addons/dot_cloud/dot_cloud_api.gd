@@ -51,5 +51,7 @@ extends RefCounted
 # 25: groups.json rules also match an imported output relocated to _imported/ by the asset it stands for (as sides.json does). Additive.
 # 26: DotCloudConfig.web_partials_dir / persisted_partials_dir / partials_persisted: on web, partials live in the
 #     in-memory /tmp, outside the IndexedDB mirror whose sync they broke; commit moves across filesystems. Additive.
-const LEVEL := 26
+# 27: DotCloudSourceHttp retries a base after 429/5xx (throttle_retries, server_error_retries, backoff_base_sec,
+#     backoff_max_sec; Retry-After honoured), download_with_backoff, backoff_delay, retry_limit, throttle_remaining_sec. Additive.
+const LEVEL := 27
 const OLDEST := 1

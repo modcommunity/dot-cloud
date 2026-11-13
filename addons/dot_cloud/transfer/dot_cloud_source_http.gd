@@ -51,6 +51,18 @@ var http: DotHttp = null
 var _active_requests := 0
 signal _slot_freed
 
+## Retries of one base after a 429 before the next base is tried.
+@export_range(0, 8, 1) var throttle_retries: int = 4
+## Retries of one base after a 5xx before the next base is tried.
+@export_range(0, 4, 1) var server_error_retries: int = 1
+## First wait (s) when a 429 or 5xx carries no Retry-After; doubles on each retry.
+@export_range(0.05, 10.0, 0.05) var backoff_base_sec: float = 0.5
+## Longest single wait (s), whatever Retry-After asks for.
+@export_range(0.5, 120.0, 0.5) var backoff_max_sec: float = 20.0
+
+## base -> ticks_msec before which nothing is sent to it: a 429 pauses every request to that host, not just its own.
+var _throttled_until: Dictionary = {}
+
 ## Base URL that last worked, tried first next time.
 ##
 ## Sticky rather than round-robin: mixing a fast mirror and a slow one at random
@@ -84,6 +96,75 @@ func download(url: String, dest: String, from: int, extra_headers: Dictionary = 
 		res = await http.download_to_file(url, dest, from, extra_headers)
 	_active_requests -= 1
 	_slot_freed.emit()
+	return res
+
+
+## [method download] that waits out a 429 or 5xx (Retry-After first, else exponential backoff with
+## jitter) and asks the same base again, up to [member throttle_retries] / [member server_error_retries].
+func download_with_backoff(
+	base: String, url: String, dest: String, from: int, extra_headers: Dictionary = {}
+) -> DotResult:
+	var res: DotResult = null
+	for attempt in maxi(throttle_retries, server_error_retries) + 1:
+		await _wait_out_throttle(base)
+		res = await download(url, dest, from, extra_headers)
+		if res.ok or attempt >= retry_limit(res.error):
+			return res
+		var wait := backoff_delay(attempt + 1, res.error)
+		if res.code() == DotError.CODE_RATE_LIMITED:
+			_throttled_until[base] = maxi(
+				int(_throttled_until.get(base, 0)), Time.get_ticks_msec() + int(wait * 1000.0)
+			)
+		else:
+			await _sleep(wait)
+		DotLog.debug(CHANNEL, "server asked to back off", {
+			"base": base, "url": url, "status": res.error.http_status, "wait_sec": wait, "attempt": attempt + 1,
+		})
+	return res
+
+
+## How many times a failure with [param err] is retried on the same base: 429 and 5xx only.
+func retry_limit(err: DotError) -> int:
+	if err == null:
+		return 0
+	if err.code == DotError.CODE_RATE_LIMITED:
+		return throttle_retries
+	if err.http_status >= 500:
+		return server_error_retries
+	return 0
+
+
+## Seconds to wait before retry [param attempt] (1-based): the server's Retry-After when it sent
+## one, else [member backoff_base_sec] doubled per attempt with +-20% jitter; capped at [member backoff_max_sec].
+func backoff_delay(attempt: int, err: DotError) -> float:
+	if err != null and err.retry_after > 0.0:
+		return minf(err.retry_after, backoff_max_sec)
+	var d := backoff_base_sec * pow(2.0, float(maxi(attempt, 1) - 1))
+	return minf(d * randf_range(0.8, 1.2), backoff_max_sec)
+
+
+## Seconds before [param base] may be asked again after a 429; zero when it is not throttled.
+func throttle_remaining_sec(base: String) -> float:
+	return maxf(0.0, float(int(_throttled_until.get(base, 0)) - Time.get_ticks_msec()) / 1000.0)
+
+
+func _wait_out_throttle(base: String) -> void:
+	var left := throttle_remaining_sec(base)
+	if left > 0.0:
+		await _sleep(left)
+
+
+static func _sleep(sec: float) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null and sec > 0.0:
+		await tree.create_timer(sec).timeout
+
+
+## The error worth reporting from two failed bases: a retryable one (429, 5xx, network) beats a later
+## base's 404, so the downloader retries instead of giving up on a file the first base would serve.
+static func _keep_error(last: DotResult, res: DotResult) -> DotResult:
+	if last != null and last.is_retryable() and not res.is_retryable():
+		return last
 	return res
 
 
@@ -166,8 +247,8 @@ func fetch(
 				store.discard_partial(file.sha256)
 				resume_from = 0
 
-		var res := await download(
-			url, store.partial_path(file.sha256), resume_from, headers
+		var res := await download_with_backoff(
+			base, url, store.partial_path(file.sha256), resume_from, headers
 		)
 
 		if not res.ok and resume_from > 0:
@@ -179,13 +260,15 @@ func fetch(
 				{"file": file.path, "why": res.code()}
 			)
 			store.discard_partial(file.sha256)
-			res = await download(
-				url, store.partial_path(file.sha256), 0, headers
+			res = await download_with_backoff(
+				base, url, store.partial_path(file.sha256), 0, headers
 			)
 
 		if not res.ok:
-			last = res
-			_note_base_failure(base)
+			last = _keep_error(last, res)
+			# A throttled base is healthy, only busy: demoting it hands its files to bases that may not have them.
+			if res.code() != DotError.CODE_RATE_LIMITED:
+				_note_base_failure(base)
 			DotLog.debug(
 				CHANNEL,
 				"mirror failed",
@@ -216,8 +299,8 @@ func fetch(
 			)
 			store.discard_partial(file.sha256)
 
-			var restarted := await download(
-				url, store.partial_path(file.sha256), 0, headers
+			var restarted := await download_with_backoff(
+				base, url, store.partial_path(file.sha256), 0, headers
 			)
 
 			# A restart that cannot even download leaves the integrity error in
@@ -226,7 +309,7 @@ func fetch(
 				committed = await store.commit_partial(file.sha256, scheduler)
 
 		if not committed.ok:
-			last = committed
+			last = _keep_error(last, committed)
 			# The mirror's fault as much as a 500 is; another base may serve the right bytes.
 			_note_base_failure(base)
 			# [b]With the reason.[/b] "failed verification" alone cannot tell a mirror
@@ -252,8 +335,10 @@ func fetch(
 		return committed
 
 	# One breaker failure per FILE that no base could serve, not per base: a dead community
-	# mirror ahead of a healthy origin must never put the whole source in cooldown.
-	note_failure()
+	# mirror ahead of a healthy origin must never put the whole source in cooldown. A throttled
+	# host is not failing, and cooldown would turn its 429s into "no source available".
+	if last == null or last.code() != DotError.CODE_RATE_LIMITED:
+		note_failure()
 	return (last if last != null else DotResult.fail(
 		DotError.CODE_NETWORK, "Every content mirror failed."
 	)).wrap("Could not fetch '%s'." % file.path)
@@ -277,20 +362,21 @@ func fetch_bundle(
 		return supported
 	var sha := str(decl["sha256"]).to_lower()
 	var part := store.partial_path(sha)
-	var last: DotResult = DotResult.fail(DotError.CODE_NETWORK, "Every content mirror failed.")
+	var last: DotResult = null
 
 	for base in _resolve_bases(manifest):
 		var url := "%s/%s" % [base.trim_suffix("/"), str(decl["url_path"]).trim_prefix("/")]
 		store.discard_partial(sha)
-		var res := await download(url, part, 0, headers)
+		var res := await download_with_backoff(base, url, part, 0, headers)
 		if not res.ok:
-			last = res
-			_note_base_failure(base)
+			last = _keep_error(last, res)
+			if res.code() != DotError.CODE_RATE_LIMITED:
+				_note_base_failure(base)
 			continue
 		var checked: DotResult = await scheduler.run(DotHashJob.new(part, sha)) \
 			if scheduler != null else DotResult.success(true)
 		if not checked.ok:
-			last = checked
+			last = _keep_error(last, checked)
 			_note_base_failure(base)
 			store.discard_partial(sha)
 			continue
@@ -301,8 +387,11 @@ func fetch_bundle(
 		if out.ok:
 			note_success()
 		return out
-	note_failure()
-	return last.wrap("Could not fetch the content bundle.")
+	if last == null or last.code() != DotError.CODE_RATE_LIMITED:
+		note_failure()
+	return (last if last != null else DotResult.fail(
+		DotError.CODE_NETWORK, "Every content mirror failed."
+	)).wrap("Could not fetch the content bundle.")
 
 
 ## Work-slice length (ms) for the next stretch of bundle unpacking, given how long the last

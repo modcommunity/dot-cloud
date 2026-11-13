@@ -42,6 +42,15 @@ var support_ranges: bool = true
 ## Request paths answered with 500 rather than content.
 var fail_paths: PackedStringArray = PackedStringArray()
 
+## Request path -> how many more times to answer it 429 before serving it.
+var throttle_paths: Dictionary = {}
+
+## Retry-After seconds sent with each 429; negative sends none.
+var throttle_retry_after: int = -1
+
+## Request path -> how many more times to answer it 503 before serving it.
+var unavailable_paths: Dictionary = {}
+
 ## Request paths answered with the right length of the wrong bytes.
 ##
 ## The interesting failure, because it is the one that gets past the transfer
@@ -196,6 +205,19 @@ func _respond(peer: StreamPeerTCP, request: String) -> void:
 			var spec := lower.split("=")
 			if spec.size() == 2:
 				range_from = int(spec[1].split("-")[0])
+
+	if int(throttle_paths.get(path, 0)) > 0:
+		throttle_paths[path] = int(throttle_paths[path]) - 1
+		log.append("%s %s -> 429" % [method, path])
+		var hdr := {"Retry-After": throttle_retry_after} if throttle_retry_after >= 0 else {}
+		_send(peer, 429, "Too Many Requests", "rate limited".to_utf8_buffer(), hdr)
+		return
+
+	if int(unavailable_paths.get(path, 0)) > 0:
+		unavailable_paths[path] = int(unavailable_paths[path]) - 1
+		log.append("%s %s -> 503" % [method, path])
+		_send(peer, 503, "Service Unavailable", PackedByteArray(), {})
+		return
 
 	if fail_paths.has(path):
 		log.append("%s %s -> 500" % [method, path])
