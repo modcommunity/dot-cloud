@@ -29,6 +29,8 @@ case "${1:-}" in
     *) echo "publish_pack: unknown verb '$1' (publish, versions, relock or member; flags start with --)" >&2; exit 2 ;;
 esac
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
+# Godot is not on PATH under `sudo -u gamedev heavy` (sudo's secure PATH): fall back to the user's ~/.local/bin/godot.
+command -v "$GODOT" >/dev/null 2>&1 || ! [ -x "$HOME/.local/bin/godot" ] || GODOT="$HOME/.local/bin/godot"
 SRC=""; HOST=(); HOSTLV=(); PACKADD=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
 abs() { case $1 in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 while [ $# -gt 0 ]; do
@@ -85,6 +87,28 @@ host_level() {
     line="$(git -C "$root" show "$ref:addons/$a/${a}_api.gd" 2>/dev/null | sed -n 's/^const LEVEL *:= *\([0-9][0-9]*\).*/\1/p' | head -1)"
     printf '%s\n' "${line:-1}"
 }
+# Game addon links are relative (addons/dot_x -> ../../dot-x/addons/dot_x), which resolve beside a ~/godot checkout but dangle in a
+# worktree under ~/wt. Point a dangling one at the same repository in the family directory: $DOT_FAMILY_DIR, else the directory holding
+# the project's main checkout (git common dir), else /home/gamedev/godot. A link that resolves is never touched.
+relink_broken_addons() {
+    local proj=$1 l t repo fam c
+    for l in "$proj"/addons/*; do
+        [ -L "$l" ] && [ ! -e "$l" ] || continue
+        t="$(readlink "$l")"; repo="$(printf %s "$t" | sed -n 's|.*/\([^/]*\)/addons/[^/]*$|\1|p')"
+        [ -n "$repo" ] || { echo "publish_pack: $l -> $t is dangling and names no repository" >&2; continue; }
+        fam=""
+        c="$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+        for d in "${DOT_FAMILY_DIR:-}" "${c:+$(dirname "$(dirname "$c")")}" /home/gamedev/godot; do
+            [ -n "$d" ] && [ -e "$d/$repo/addons/$(basename "$l")" ] && { fam="$d"; break; }
+        done
+        if [ -n "$fam" ]; then ln -sfn "$fam/$repo/addons/$(basename "$l")" "$l"; echo "publish_pack: relinked $l -> $fam/$repo/addons/$(basename "$l")" >&2
+        else echo "publish_pack: $l is dangling ($t) and $repo is not in the family directory" >&2; fi
+    done
+}
+if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
+    P="$SRC"; while [ "$P" != / ] && [ ! -f "$P/project.godot" ]; do P="$(dirname "$P")"; done
+    [ -f "$P/project.godot" ] && relink_broken_addons "$P"
+fi
 if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ -d "$SRC/addons" ]; then
     if [ ${#HOST[@]} -eq 0 ]; then
         echo "publish_pack: no --host-addons: packing every addon under $SRC/addons (a host that already owns one will refuse the pack; see docs/cdn-publish.md)" >&2

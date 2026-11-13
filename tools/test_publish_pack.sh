@@ -163,5 +163,15 @@ if [ -f "$DC/tools/dot_requires.gd" ]; then
 else
     echo "skip: requires.json checks need dot-core (addons/dot_core link or ../dot-core)"
 fi
+# (f) publish_pack.ps1 parity (no PowerShell here: a static check that it carries the same requires.json steps as the bash script)
+PS1="$HERE/publish_pack.ps1"
+chk "ps1 derives requires.json with dot_requires.gd and ships it as an extra file" "grep -q 'dot_requires.gd' '$PS1' && grep -q \"requires.json=\" '$PS1'"
+chk "ps1 takes -HostAddons and -HostLevel" "grep -q '\[string\[\]\]\$HostAddons' '$PS1' && grep -q '\[string\[\]\]\$HostLevel' '$PS1'"
+chk "ps1 caps and refuses like the bash script" "grep -q \"capped at the host's\" '$PS1' && grep -q \"above the host's levels\" '$PS1' && grep -q \"capped at the host.s\" '$HERE/publish_pack.sh'"
+# (g) a worktree's dangling relative addon link is relinked into the family directory
+mkdir -p "$W/fam/zz-lv/addons/zz_lv" "$W/wt/deep/gm/addons"; printf 'const LEVEL := 3\n' > "$W/fam/zz-lv/addons/zz_lv/zz_lv_api.gd"
+ln -s ../../zz-lv/addons/zz_lv "$W/wt/deep/gm/addons/zz_lv"; printf 'config_version=5\n' > "$W/wt/deep/gm/project.godot"; echo x > "$W/wt/deep/gm/a.txt"
+DOT_FAMILY_DIR="$W/fam" "$HERE/publish_pack.sh" --source "$W/wt/deep/gm" --id gm --version 1.0.0 --dry-run --no-import --pack-addon zz_lv > "$W/out" 2>&1
+chk "dangling addon link is relinked to the family dir" "grep -q 'relinked .*zz_lv' out && [ -e '$W/wt/deep/gm/addons/zz_lv/zz_lv_api.gd' ]"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
