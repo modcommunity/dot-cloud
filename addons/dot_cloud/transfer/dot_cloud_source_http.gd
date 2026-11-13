@@ -76,10 +76,28 @@ func download(url: String, dest: String, from: int, extra_headers: Dictionary = 
 	while _active_requests >= max_in_flight:
 		await _slot_freed
 	_active_requests += 1
-	var res := await http.download_to_file(url, dest, from, extra_headers)
+	var res: DotResult
+	if url.begins_with("file://"):
+		# HTTPRequest cannot open file:// ("Error parsing URL"): a content url naming a local directory is copied.
+		res = _copy_local(url.trim_prefix("file://"), dest)
+	else:
+		res = await http.download_to_file(url, dest, from, extra_headers)
 	_active_requests -= 1
 	_slot_freed.emit()
 	return res
+
+
+## Copies a local file to [param dest] in place of a download (whole file: a resume offset has nothing to resume).
+static func _copy_local(path: String, dest: String) -> DotResult:
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.is_empty() and not FileAccess.file_exists(path):
+		return DotResult.fail(DotError.CODE_NETWORK, "No local file at '%s'." % path)
+	var out := FileAccess.open(dest, FileAccess.WRITE)
+	if out == null:
+		return DotResult.fail(DotError.CODE_IO, "Could not write '%s'." % dest)
+	out.store_buffer(bytes)
+	out.close()
+	return DotResult.success(true)
 
 
 func source_name() -> String:

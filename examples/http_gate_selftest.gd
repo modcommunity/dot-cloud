@@ -4,7 +4,7 @@ extends Node
 ## Run: godot --headless --path . res://examples/http_gate_selftest.tscn
 
 const POOL := 16
-const CHECKS := 6
+const CHECKS := 8
 
 var _failures := 0
 var _checks := 0
@@ -41,6 +41,15 @@ func _ready() -> void:
 	while done[0] < 5:
 		await get_tree().process_frame
 	_check("a cap of one runs the downloads in turn", stub.peak == 1, str(stub.peak))
+	var src := "user://http_gate_file_src.bin"
+	var dst := "user://http_gate_file_dst.bin"
+	var f := FileAccess.open(src, FileAccess.WRITE)
+	f.store_buffer(PackedByteArray([1, 2, 3]))
+	f.close()
+	var got := await s.download("file://" + ProjectSettings.globalize_path(src), dst, 0)
+	_check("a file:// url is copied, not sent to HTTPRequest", got.ok and FileAccess.get_file_as_bytes(dst) == PackedByteArray([1, 2, 3]), str(got.error))
+	var missing := await s.download("file:///nonexistent/x.zip", dst, 0)
+	_check("a file:// url to nothing fails cleanly", not missing.ok)
 	_check("every check ran", _checks + 1 == CHECKS, str(_checks))
 	print("\n%d checks, %d failed" % [_checks, _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
