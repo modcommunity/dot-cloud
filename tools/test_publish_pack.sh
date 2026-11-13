@@ -100,8 +100,11 @@ chk "name-list form excludes dot_core" "[ $? -eq 0 ] && ! grep -q dot_core ho/ma
 # a linked addon whose folder differs from its repository (zee-dot-weapons ships addons/zee_weapons)
 mkdir -p "$W/zee-dot-weapons/addons/zee_weapons" "$W/h/addons"; echo z > "$W/zee-dot-weapons/addons/zee_weapons/z.gd"; ln -sfn ../../zee-dot-weapons/addons/zee_weapons "$W/h/addons/zee_weapons"
 printf 'zee-dot-weapons\tv1\n' > "$W/zee.lock"
-rm -rf ho; hp --host-addons "$W/zee.lock"
-chk "a linked addon is matched by its repository" "[ $? -eq 0 ] && ! grep -q zee_weapons ho/manifest.json && grep -q zz_x ho/manifest.json"
+mkdir -p "$W/h/cfg/addon/zee_weapons" "$W/h/cfg/game/g/dot_core"; echo a > "$W/h/cfg/addon/zee_weapons/ads.yml"; echo m > "$W/h/cfg/game/g/dot_core/ph_%.yml"
+rm -rf ho; hp --host-addons "$W/zee.lock" --host-addons "$W/hostdir"
+chk "a linked addon is matched by its repository" "[ $? -eq 0 ] && ! grep -q zee_weapons/z.gd ho/manifest.json && grep -q zz_x ho/manifest.json"
+# only addons/<name> is left out: a game's settings for that addon elsewhere (cfg/addon/zee_weapons/ads.yml) still ship
+chk "a host addon's name elsewhere in the tree still ships" "grep -q 'cfg/addon/zee_weapons/ads.yml' ho/manifest.json && grep -q 'cfg/game/g/dot_core/ph_%.yml' ho/manifest.json && ! grep -q 'dot_core/c.gd' ho/manifest.json"
 rm -f "$W/h/addons/zee_weapons"
 hp --host-addons "$W/missing"
 chk "missing --host-addons argument fails" "[ $? -ne 0 ]"
@@ -131,5 +134,34 @@ printf '[remap]\nimported_formats=["s3tc_bptc","etc2_astc"]\n' > "$W/h/vr/d.png.
 rm -rf ho; hp
 chk "both-format import is silent" "[ $? -eq 0 ] && ! grep -q 'desktop-only' out"
 rm -rf "$W/h/vr"
+# (e) requires.json: derived (dot-core's dot_requires.gd) and capped at the host lock's level; a committed one above it is refused
+DC="$(readlink -f "$HERE/../addons/dot_core" 2>/dev/null || true)"; [ -d "$DC" ] || DC="$(readlink -f "$HERE/../../dot-core/addons/dot_core" 2>/dev/null || true)"
+if [ -f "$DC/tools/dot_requires.gd" ]; then
+    mkdir -p "$W/zz-lv/addons/zz_lv" "$W/rq/addons"
+    printf 'const LEVEL := 3\n' > "$W/zz-lv/addons/zz_lv/zz_lv_api.gd"; printf 'class_name ZzLv\nextends RefCounted\n' > "$W/zz-lv/addons/zz_lv/zz_lv.gd"
+    git -C "$W/zz-lv" init -q && git -C "$W/zz-lv" add -A && git -C "$W/zz-lv" -c user.name=t -c user.email=t@t commit -qm l3 && git -C "$W/zz-lv" tag v1
+    printf 'const LEVEL := 5\n' > "$W/zz-lv/addons/zz_lv/zz_lv_api.gd"
+    ln -s "$DC" "$W/rq/addons/dot_core"; ln -s ../../zz-lv/addons/zz_lv "$W/rq/addons/zz_lv"
+    printf 'config_version=5\n[application]\nconfig/name="rq"\n' > "$W/rq/project.godot"; printf 'extends Node\nvar x := ZzLv.new()\n' > "$W/rq/main.gd"
+    printf 'zz-lv\tv1\n' > "$W/rq.lock"
+    rq() { "$HERE/publish_pack.sh" --source "$W/rq" --id rqdemo --version 1.0.0 --out "$W/ro" --dry-run --pack-addon zz_lv "$@" > "$W/out" 2>&1; }
+    rq --host-addons "$W/rq.lock"
+    chk "derived requires.json ships, capped at the lock's level" "[ $? -eq 0 ] && grep -q '\"requires.json\"' ro/manifest.json && grep -q 'zz_lv 5 capped at the host.s 3' out && [ ! -f rq/requires.json ]"
+    rm -rf "$W/ro"; rq --host-addons "$W/names.txt"
+    chk "no lock: derived at the build's level" "[ $? -eq 0 ] && grep -q 'derived): zz_lv 5' out"
+    rm -rf "$W/ro"; rq --host-addons "$W/rq.lock" --host-level zz_lv=4
+    chk "--host-level names the host's level" "[ $? -eq 0 ] && grep -q 'capped at the host.s 4' out"
+    printf '{"format": 1, "addons": {"zz_lv": 5}}\n' > "$W/rq/requires.json"
+    rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
+    chk "committed requires.json above the host is refused" "[ $? -ne 0 ] && grep -q 'above the host' out"
+    printf '{"format": 1, "addons": {"zz_lv": 3}}\n' > "$W/rq/requires.json"
+    rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
+    chk "committed requires.json at the host's level ships" "[ $? -eq 0 ] && grep -q 'committed): zz_lv 3' out"
+    rm -f "$W/rq/requires.json"; printf 'zz-lv\tnosuchref\n' > "$W/rq.lock"
+    rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
+    chk "an unresolvable lock ref fails and names --host-level" "[ $? -ne 0 ] && grep -q -- '--host-level zz_lv=N' out"
+else
+    echo "skip: requires.json checks need dot-core (addons/dot_core link or ../dot-core)"
+fi
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
