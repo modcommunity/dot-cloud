@@ -1,11 +1,14 @@
 #!/bin/bash
 # Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.ps1.
 #   tools/publish_pack.sh [publish] --source DIR --id NAME [--version V | --bump patch|minor|major] [--lock content.lock.json]
-#                         [--into DIR] [--kind pack|store] [--lock-optional] [--asset ID] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
+#                         [--into DIR] [--kind pack|store] [--lock-optional] [--asset ID | --member-of ID] [--name TEXT] [--meta KEY=VALUE]... [--exclude-dir NAME]...
 #                         [--host-addons FILE|DIR|LOCK]... [--site URL] [--token-file FILE] [--out DIR] [--godot BIN] [--dry-run] [--no-import]
 #   tools/publish_pack.sh relock --id NAME [--version V] [--lock FILE]   (rewrite the lock line of a held version once approved)
 #   publish --resume reuses an unfinished claim instead of failing with 409 version_taken
 #   tools/publish_pack.sh versions [--id NAME] [--site URL] [--token-file FILE]
+#   tools/publish_pack.sh member --id NAME --member-of ASSET [--site URL] [--token-file FILE]   (move a pack's versions into a collection page)
+# --member-of ASSET publishes a map (or any) pack as a member of that collection asset: it keeps its own id, is listed in the asset's
+# collection.json and gets no Workshop page of its own (a bare publish of a map pack creates one).
 # --host-addons leaves out the addons/<name> folders the host already owns (a duplicate class_name breaks the pack). The argument is an
 # addons.lock (repo<TAB>ref), a directory of addon folders (dot-server-deploy/addons) or a directory holding addons.lock or addons/, or a
 # plain list of names, one per line. Names match with - and _ alike. Without it every addon under the source's addons/ is packed.
@@ -20,9 +23,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CMD=publish
 case "${1:-}" in
-    publish|versions|relock) CMD=$1; shift ;;
+    publish|versions|relock|member) CMD=$1; shift ;;
     -*|"") ;;
-    *) echo "publish_pack: unknown verb '$1' (publish, versions or relock; flags start with --)" >&2; exit 2 ;;
+    *) echo "publish_pack: unknown verb '$1' (publish, versions, relock or member; flags start with --)" >&2; exit 2 ;;
 esac
 GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
 SRC=""; HOST=(); PACKADD=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
@@ -45,7 +48,7 @@ while [ $# -gt 0 ]; do
             esac
             ARGS+=(--version "$2"); shift 2 ;;
         --token) echo "publish_pack: the token is never an argument; set DOT_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
-        --id|--bump|--into|--kind|--asset|--name|--meta|--exclude-dir|--depends|--min-engine|--entry|--mount-root) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
+        --id|--bump|--into|--kind|--asset|--member-of|--name|--meta|--exclude-dir|--depends|--min-engine|--entry|--mount-root) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
         -*) ARGS+=("$1"); shift ;;
         *) echo "publish_pack: unexpected argument '$1' (a verb such as 'versions' goes before any flag; the per-game publish.sh wrappers only publish)" >&2; exit 2 ;;
     esac
@@ -119,6 +122,9 @@ fi
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
 if [ "$CMD" = versions ]; then
     exec "${RUN[@]}" versions --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"
+fi
+if [ "$CMD" = member ]; then
+    exec "${RUN[@]}" member --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"
 fi
 if [ "$CMD" = relock ]; then
     exec "${RUN[@]}" relock --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" "${ARGS[@]}"

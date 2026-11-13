@@ -21,10 +21,14 @@ var concurrency := 6
 
 ## Claims [param repo_name]@[param version]. Value: {id, contentId}; build the pack with that contentId.
 ## A positive [param asset_id] links the version to that asset (the site then names the pack after the asset's repo name and lets visitors fetch it).
-func claim(repo_name: String, version: String, files: int, bytes: int, asset_id: int = 0) -> DotResult:
+## A positive [param member_of] instead publishes it as a MEMBER of that collection asset: the pack keeps its own id
+## ([param repo_name]), is listed in the asset's collection.json and gets no Workshop page of its own.
+func claim(repo_name: String, version: String, files: int, bytes: int, asset_id: int = 0, member_of: int = 0) -> DotResult:
 	var body := {"action": "claim", "repoName": repo_name, "version": version, "fileCount": files, "byteSize": bytes}
 	if asset_id > 0:
 		body["assetId"] = asset_id
+	if member_of > 0:
+		body["memberOf"] = member_of
 	var r := _with_config(func(cfg: String) -> DotResult: return _post("/api/app/v1/packs", body, cfg))
 	if r.ok and not (r.value as Dictionary).has("id"):
 		return DotResult.fail(DotError.CODE_PARSE, "The site's claim answer names no id.")
@@ -40,6 +44,14 @@ func versions(repo_name: String = "") -> DotResult:
 	if r.ok:
 		return DotResult.success((r.value as Dictionary).get("versions", []))
 	return r
+
+
+## Links every version of [param repo_name] already published into collection asset [param asset_id] as a member,
+## e.g. a map pack that got a Workshop page of its own. Value: {contentId, assetId, linked, previousAssets, compat, collection};
+## [code]previousAssets[/code] are the pages it left, which the site does not delete.
+func member(repo_name: String, asset_id: int) -> DotResult:
+	var body := {"action": "member", "repoName": repo_name, "assetId": asset_id}
+	return _with_config(func(cfg: String) -> DotResult: return _post("/api/app/v1/packs", body, cfg))
 
 
 ## Marks a claim failed so its number is not left dangling.

@@ -3,12 +3,14 @@
 #       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
 #       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport]
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
+#   .\tools\publish_pack.ps1 member -Id NAME -MemberOf ASSET [-Site URL] [-TokenFile FILE]   (move a pack's versions into a collection page)
+#   publish -MemberOf ASSET: publish as a member of that collection asset (keeps -Id, no Workshop page of its own)
 # Token: $env:DOT_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:DOT_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
 # argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://tmcdev.net.
 # Needs curl.exe (ships with Windows 10+) and Godot on PATH or -Godot. Flags map one to one onto publish_pack.sh's --kebab-case ones.
-param([Parameter(Position = 0)][ValidateSet('publish', 'versions')][string]$Command = 'publish',
+param([Parameter(Position = 0)][ValidateSet('publish', 'versions', 'member')][string]$Command = 'publish',
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
-      [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional, [int]$Asset = 0,
+      [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional, [int]$Asset = 0, [int]$MemberOf = 0,
       [string]$Name, [string[]]$Meta = @(), [string[]]$ExcludeDir = @(), [string]$Site, [string]$TokenFile, [string]$Out,
       [string]$Godot, [switch]$DryRun, [switch]$NoImport)
 $ErrorActionPreference = 'Stop'
@@ -37,6 +39,11 @@ try {
     $run = @('--headless', '--path', $here, '--script', 'addons/dot_cloud/publish/dot_cloud_cli.gd', '--')
     if ($Command -eq 'versions') {
         & $Godot @run versions --token-file (Full $TokenFile) @a
+        exit $LASTEXITCODE
+    }
+    if ($MemberOf -gt 0) { $a += '--member-of', "$MemberOf" }
+    if ($Command -eq 'member') {
+        & $Godot @run member --token-file (Full $TokenFile) @a
         exit $LASTEXITCODE
     }
     if (-not $Source) { Write-Error 'publish_pack: -Source is required'; exit 1 }

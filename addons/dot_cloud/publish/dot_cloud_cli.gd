@@ -56,6 +56,8 @@ func _initialize() -> void:
 			code = _versions(opts)
 		"relock":
 			code = _relock(opts)
+		"member":
+			code = _member(opts)
 		_:
 			printerr("Unknown command '%s'." % command)
 			_usage()
@@ -301,6 +303,35 @@ func _versions(opts: Dictionary) -> int:
 	return EXIT_OK
 
 
+## Relinks every published version of --id into collection asset --member-of (see DotCloudUploader.member).
+func _member(opts: Dictionary) -> int:
+	var missing := _require(opts, ["id", "member-of", "token-file"])
+	if missing != "":
+		printerr("member needs --%s" % missing)
+		return EXIT_USAGE
+	var asset_id := int(str(opts["member-of"]))
+	if asset_id <= 0:
+		printerr("--member-of needs a positive asset id")
+		return EXIT_USAGE
+	var up := DotCloudUploader.new()
+	up.token_file = str(opts["token-file"])
+	if opts.has("site"):
+		up.site = str(opts["site"]).trim_suffix("/")
+	var res := up.member(str(opts["id"]), asset_id)
+	if not res.ok:
+		printerr("member failed: %s" % str(res.error))
+		return EXIT_FAILED
+	var v: Dictionary = res.value
+	print("%s: %d version(s) now members of asset %d" % [str(v.get("contentId", "")), int(v.get("linked", 0)), asset_id])
+	var compat: Dictionary = v.get("compat", {}) if v.get("compat") is Dictionary else {}
+	if not (compat.get("unresolved", []) as Array).is_empty():
+		printerr("warning: provides.games not matched to a site game: %s" % ", ".join(PackedStringArray(compat["unresolved"])))
+	var prev: Array = v.get("previousAssets", []) if v.get("previousAssets") is Array else []
+	if not prev.is_empty():
+		print("left asset(s) %s: no pack points at them any more; delete those pages on the site if they were only this pack" % str(prev))
+	return EXIT_OK
+
+
 ## True when the site's content id is the id asked for, with or without the owner prefix.
 static func _names_pack(content_id: String, id: String) -> bool:
 	return content_id == id or content_id.ends_with("/" + id)
@@ -332,7 +363,14 @@ func _claim(opts: Dictionary) -> DotResult:
 	var asset_id := int(str(opts.get("asset", "0")))
 	if opts.has("asset") and asset_id <= 0:
 		return DotResult.fail(DotError.CODE_INVALID, "--asset needs a positive asset id")
-	var r := up.claim(str(opts["id"]), version, count, bytes, asset_id)
+	var member_of := int(str(opts.get("member-of", "0")))
+	if opts.has("member-of") and (member_of <= 0 or asset_id > 0):
+		return DotResult.fail(DotError.CODE_INVALID, "--member-of needs a positive asset id and no --asset")
+	var r := up.claim(str(opts["id"]), version, count, bytes, asset_id, member_of)
+	if r.ok and member_of > 0 and not _names_pack(str((r.value as Dictionary).get("contentId", "")), str(opts["id"])):
+		var got := str((r.value as Dictionary).get("contentId", ""))
+		up.fail_claim(int((r.value as Dictionary)["id"]), "member claim named %s, not %s" % [got, str(opts["id"])])
+		return DotResult.fail(DotError.CODE_INVALID, "the site named the member pack '%s', not '%s'" % [got, str(opts["id"])])
 	if r.ok and asset_id > 0 and not _names_pack(str((r.value as Dictionary).get("contentId", "")), str(opts["id"])):
 		var got_id := str((r.value as Dictionary).get("contentId", ""))
 		up.fail_claim(int((r.value as Dictionary)["id"]), "asset %d publishes as %s, not %s" % [asset_id, got_id, str(opts["id"])])
@@ -525,7 +563,7 @@ func _user_args() -> PackedStringArray:
 	# does something useful rather than printing usage and confusing the caller.
 	var all := OS.get_cmdline_args()
 	for i in range(all.size()):
-		if ["publish", "keygen", "verify", "inspect", "versions", "help"].has(all[i]):
+		if ["publish", "keygen", "verify", "inspect", "versions", "relock", "member", "help"].has(all[i]):
 			return all.slice(i)
 
 	return PackedStringArray()
@@ -626,6 +664,8 @@ Commands
     --into DIR           lock entry: where a bootstrap puts it     (kept if the entry exists)
     --kind store|pack    lock entry: files on disk, or a mounted pack (pack)
     --asset ID           link the version to this site asset (visitors can fetch a pack only through a visible asset); the asset's repo name must equal --id
+    --member-of ID       publish as a member of this collection asset (a map repository's page): the pack keeps --id, joins the
+                         asset's collection.json and gets no Workshop page of its own. Not with --asset
     --resume             a 409 version_taken from an unfinished claim reuses that claim
     --lock-optional      lock entry: bootstrap may skip it
     --bump patch|minor|major  republish: take the next version of the --lock entry for --id
@@ -638,6 +678,9 @@ Commands
 
   relock    Rewrite the lock entry of a version that was held and is now READY.
     --id NAME  --lock FILE  --token-file PATH  [--version V] [--into DIR] [--kind store|pack] [--site URL]
+
+  member    Move every published version of a pack into a collection asset (no new upload, nothing deleted).
+    --id NAME  --member-of ID  --token-file PATH  [--site URL]
 
   keygen    Generate an RSA signing keypair.
     --private PATH       where to write the private key
