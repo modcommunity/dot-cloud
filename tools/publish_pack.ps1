@@ -46,6 +46,16 @@ function HostLevelOf($lock, $proj, $a) {
     if ($m) { return [int]$m.Matches[0].Groups[1].Value } else { return 1 }
 }
 
+# HostNames ARG: the addon folder names a -HostAddons argument lists (lock file, directory with addons.lock, or a directory of addons), underscores normalised. Same rule as publish_pack.sh.
+function HostNames($f) {
+    if (Test-Path $f -PathType Container) {
+        if (Test-Path (Join-Path $f 'addons.lock')) { $f = Join-Path $f 'addons.lock' }
+        else { $d = if (Test-Path (Join-Path $f 'addons')) { Join-Path $f 'addons' } else { $f }; return @(Get-ChildItem $d -Directory | ForEach-Object { $_.Name -replace '-', '_' }) }
+    }
+    if (-not (Test-Path $f -PathType Leaf)) { throw "publish_pack: -HostAddons $f is not a file or directory" }
+    return @(Get-Content $f | Where-Object { $_ -notmatch '^\s*(#|$)' } | ForEach-Object { (($_ -split "`t")[0].Trim()) -replace '-', '_' } | Where-Object { $_ })
+}
+
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("publish_pack_" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $tmp | Out-Null
 try {
@@ -81,6 +91,25 @@ try {
             Write-Host "publish_pack: importing $p"
             & $Godot --headless --path $p --import *> $null
             if ($LASTEXITCODE -ne 0) { Write-Error "publish_pack: import of $p failed"; exit 1 }
+        }
+    }
+    # -HostAddons leaves out the addons/<name> folders the host already owns (a duplicate class_name breaks the pack), like publish_pack.sh.
+    # Matched by folder name or by the repository a linked addon points into; anchored at addons/ so cfg/addon/<name>/ stays.
+    $sd = Join-Path (Full $Source) 'addons'
+    if (Test-Path $sd -PathType Container) {
+        if ($HostAddons.Count -eq 0) {
+            [Console]::Error.WriteLine("publish_pack: no -HostAddons: packing every addon under $sd (a host that already owns one will refuse the pack; see docs/cdn-publish.md)")
+        } else {
+            $names = @($HostAddons | ForEach-Object { HostNames $_ } | Sort-Object -Unique)
+            $left = @(); $kept = @()
+            foreach ($d in Get-ChildItem $sd -Directory) {
+                $n = $d.Name; $repo = $null
+                $tgt = (Resolve-Path $d.FullName).Path
+                if ($tgt -match '[\\/]([^\\/]+)[\\/]addons[\\/][^\\/]+$') { $repo = $Matches[1] -replace '-', '_' }
+                if ($names -contains $n -or ($repo -and $names -contains $repo)) { $left += $n; $a += '--exclude-dir', "addons/$n" } else { $kept += $n }
+            }
+            [Console]::Error.WriteLine("publish_pack: -HostAddons left out $($left.Count) host-owned addon(s): $(if ($left) { $left -join ' ' } else { 'none' })")
+            [Console]::Error.WriteLine("publish_pack: packing $($kept.Count) other addon(s): $(if ($kept) { $kept -join ' ' } else { 'none' })")
         }
     }
     # requires.json: derived like publish_pack.sh, capped at the host lock's levels; a committed one above them is refused.
