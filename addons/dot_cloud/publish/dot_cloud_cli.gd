@@ -152,6 +152,13 @@ func _apply_options(pub: DotCloudPublisher, opts: Dictionary, claim: Dictionary)
 	for m in _multi(opts, "mirror"):
 		pub.mirrors.append(m)
 
+	for kv in _multi(opts, "extra-file"):
+		var pair := kv.split("=", true, 1)
+		if pair.size() != 2 or pair[0] == "" or pair[1] == "":
+			printerr("--extra-file expects PACKPATH=FILE, got '%s'" % kv)
+			return EXIT_USAGE
+		pub.extra_files[pair[0]] = pair[1]
+
 	for kv in _multi(opts, "meta"):
 		var parts := kv.split("=", true, 1)
 		if parts.size() != 2 or parts[0] == "":
@@ -650,6 +657,7 @@ Commands
     --exclude-dir NAME   leave out any folder of this name (repeatable)
     --include-ignored    also pack wt-* worktrees and folders the source's .gitignore ignores (skipped by default)
     --with-sources       also ship each imported asset's source file
+    --extra-file P=FILE  ship FILE at pack path P, from outside the source (repeatable; a derived requires.json)
     --mirror URL         base URL clients fetch from  (repeatable)
     --key PATH           private key PEM; omit to publish unsigned
     --key-id NAME        key identifier written into the manifest  (default)
