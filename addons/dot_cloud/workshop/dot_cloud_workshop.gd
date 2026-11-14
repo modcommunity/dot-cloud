@@ -31,6 +31,9 @@ const REASON_QUOTA := "quota"
 const REASON_TOO_MANY := "too_many"
 const REASON_INCOMPATIBLE := "incompatible"
 const REASON_SUGGESTED_DECLINED := "suggested_declined"
+## An addon pack (kind [code]addon[/code]) whose version the site's reviewers have not approved:
+## an addon is laid over the process root, so [code]workshop_script_packs = any[/code] does not admit it.
+const REASON_ADDON_UNAPPROVED := "addon_unapproved"
 
 ## [param done] of [param total] packs, and the bytes of what had to be downloaded. [param current]
 ## is the pack being worked on, for a loading bar.
@@ -132,8 +135,13 @@ func is_metered() -> bool:
 
 ## Fetches the game's list and mounts every pack that survives the device's rules, for the solo
 ## session. The value is the summary:
-## [code]{guest, offline, from_cache, revision, mounted, skipped, failed}[/code] plus [code]reason[/code]
+## [code]{guest, offline, from_cache, revision, mounted, skipped, failed, addons}[/code] plus [code]reason[/code]
 ## ("guest", "disabled", "offline_no_cache" or "") and [code]takes_subscriptions[/code].
+##
+## [code]addons[/code] are the subscribed addon packs of a game that accepts kind [code]addon[/code]:
+## never mounted here (an addon needs the process root and its class names, which only the boot
+## overlay gives), but checked and handed to the host as [code]{dir, repo, id, version, title, running}[/code]
+## for a [DotCloudAddonSet] build. See docs/workshop.md, addon packs.
 func sync(game_content_id: String) -> DotResult:
 	if game_content_id.strip_edges() == "":
 		return DotResult.fail(DotError.CODE_INVALID, "No game content id to sync the Workshop for.")
@@ -167,7 +175,7 @@ func sync(game_content_id: String) -> DotResult:
 	DotLog.info(CHANNEL, "synced", {
 		"game": game_content_id, "revision": summary["revision"], "mounted": (summary["mounted"] as Array).size(),
 		"skipped": (summary["skipped"] as Array).size(), "failed": (summary["failed"] as Array).size(),
-		"offline": summary["offline"], "guest": summary["guest"],
+		"addons": (summary["addons"] as Array).size(), "offline": summary["offline"], "guest": summary["guest"],
 	})
 	synced.emit(summary)
 	return DotResult.success(summary)
@@ -223,6 +231,7 @@ func describe() -> Dictionary:
 			"guest": _summary["guest"], "offline": _summary["offline"], "from_cache": _summary["from_cache"],
 			"mounted": (_summary["mounted"] as Array).size(), "skipped": (_summary["skipped"] as Array).size(),
 			"failed": (_summary["failed"] as Array).size(), "reason": _summary["reason"],
+			"addons": (_summary.get("addons", []) as Array).size(),
 		}
 	return d
 
@@ -237,8 +246,8 @@ func describe_lines() -> PackedStringArray:
 		lines.append("  off on this device: %s" % ", ".join(d["device_off"]))
 	if d.has("last"):
 		var l: Dictionary = d["last"]
-		lines.append("  last sync: mounted=%d skipped=%d failed=%d guest=%s offline=%s cache=%s %s" % [
-			l["mounted"], l["skipped"], l["failed"], l["guest"], l["offline"], l["from_cache"], l["reason"]
+		lines.append("  last sync: mounted=%d addons=%d skipped=%d failed=%d guest=%s offline=%s cache=%s %s" % [
+			l["mounted"], l["addons"], l["skipped"], l["failed"], l["guest"], l["offline"], l["from_cache"], l["reason"]
 		])
 	if d["ran_code"]:
 		lines.append("  a pack that runs code is mounted: an online join must restart first")
@@ -384,6 +393,13 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 					manifest.signature_key_id
 				))
 				continue
+			if bool(c.get("addon", false)):
+				_take_addon(c, manifest, summary)
+				continue
+			if DotCloudProvides.is_root_overlay(manifest.provides, _paths_of(manifest)):
+				# The list said it was not an addon; the signed manifest says it is.
+				_fail_pack(failed, id, version, _not_accepted_addon())
+				continue
 			# The signed manifest is the truth about code; the list is the site's summary of it.
 			if (
 				bool(manifest.provides.get("runs_code", false))
@@ -478,11 +494,14 @@ func _mount_planned(cloud_client: DotCloudClient, to_mount: Array[Dictionary], s
 
 
 ## The subscribed packs worth planning: each one the list names, minus those the device, the key, the
-## script policy, the accepted kinds or the pack cap rule out (recorded in [param skipped] or [param failed]).
+## script policy, the accepted kinds or the pack caps rule out (recorded in [param skipped] or [param failed]).
+## An addon pack is a candidate only for a game whose [code]accepts.kinds[/code] names [code]addon[/code],
+## and only when its version is approved.
 func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> Array[Dictionary]:
 	var accepts := list.accepts() if list != null else {}
 	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
 	var candidates: Array[Dictionary] = []
+	var addon_count := 0
 
 	for item in (list.items() if list != null else []):
 		var pack := DotCloudWorkshopList.pack_of(item)
@@ -491,6 +510,11 @@ func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> A
 		if id == "" or version == "":
 			continue
 		var kinds: Array = pack.get("kinds", []) if pack.get("kinds", []) is Array else []
+		var is_addon := kinds.has("addon")
+		if is_addon and not accepted_kinds.has("addon"):
+			# The explicit opt-in: a game that does not name the kind keeps the refusal it always had.
+			_fail_pack(failed, id, version, _not_accepted_addon())
+			continue
 		if not accepted_kinds.is_empty() and not kinds.is_empty() and not _any_in(kinds, accepted_kinds):
 			skipped.append(_skip(id, version, REASON_INCOMPATIBLE))
 			continue
@@ -503,14 +527,124 @@ func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> A
 				DotError.CODE_FORBIDDEN, "The pack is signed with a key a subscription does not trust.", key_id
 			))
 			continue
-		if not _script_allowed(bool(pack.get("runsCode", false)), bool(pack.get("approved", false))):
+		if is_addon and config.workshop_script_packs != "never" and not bool(pack.get("approved", false)):
+			skipped.append(_skip(id, version, REASON_ADDON_UNAPPROVED))
+			continue
+		if not _script_allowed(bool(pack.get("runsCode", false)) or is_addon, bool(pack.get("approved", false))):
 			skipped.append(_skip(id, version, REASON_SCRIPT_POLICY))
 			continue
-		if candidates.size() >= config.workshop_max_packs:
+		if _over(candidates.size(), config.workshop_max_packs):
 			skipped.append(_skip(id, version, REASON_TOO_MANY))
 			continue
-		candidates.append({"id": id, "version": version, "item": item, "pack": pack, "title": str(item.get("name", id))})
+		if is_addon and _over(addon_count, config.workshop_max_addon_packs):
+			skipped.append(_skip(id, version, REASON_TOO_MANY))
+			continue
+		if is_addon:
+			addon_count += 1
+		candidates.append({
+			"id": id, "version": version, "item": item, "pack": pack, "title": str(item.get("name", id)),
+			"addon": is_addon,
+		})
 	return candidates
+
+
+## Whether [param count] already reaches [param limit]; a limit of 0 is none.
+static func _over(count: int, limit: int) -> bool:
+	return limit > 0 and count >= limit
+
+
+static func _not_accepted_addon() -> DotError:
+	return DotError.make(
+		DotError.CODE_FORBIDDEN, "This pack would overlay the build's addons, and this game does not accept addon packs.",
+		"a game opts in with \"addon\" in its provides.json accepts.kinds"
+	)
+
+
+static func _paths_of(manifest: DotCloudManifest) -> PackedStringArray:
+	var out := PackedStringArray()
+	for f in manifest.files:
+		out.append(f.path)
+	return out
+
+
+## An approved addon pack the game accepts: each `addon` entry of its signed manifest becomes one
+## [code]summary.addons[/code] entry for the host's overlay, unless its directory is taken. Taken is
+## a clash and fails the pack loudly: the build's own addon (by [code]res://addons.lock[/code] or by
+## its directory), a running overlay's addon from another pack, or another subscription's.
+func _take_addon(c: Dictionary, manifest: DotCloudManifest, summary: Dictionary) -> void:
+	var id: String = c["id"]
+	var version: String = c["version"]
+	var failed: Array = summary["failed"]
+	var dirs := addon_dirs(manifest)
+	if dirs.is_empty():
+		_fail_pack(failed, id, version, DotError.make(
+			DotError.CODE_INVALID, "The list calls this an addon pack, but its manifest names no addon.", manifest.key()
+		))
+		return
+	var taken := {}
+	for e: Dictionary in summary["addons"]:
+		taken[str(e["dir"])] = str(e["id"])
+	var entries: Array = []
+	for dir in dirs:
+		var clash := addon_clash(dir, id, taken)
+		if clash != "":
+			DotLog.error(CHANNEL, "a subscribed addon clashes with one this process has; not taken", {
+				"pack": manifest.key(), "dir": dir, "why": clash,
+			})
+			_fail_pack(failed, id, version, DotError.make(
+				DotError.CODE_CONFLICT, "A subscribed addon may only add an addon, never replace one.", clash
+			))
+			return
+		entries.append({
+			"dir": dir, "repo": id.get_file(), "id": id, "version": version, "title": str(c["title"]),
+			"running": addon_running(dir, id, version),
+		})
+	for e: Dictionary in entries:
+		(summary["addons"] as Array).append(e)
+		if bool(e["running"]):
+			_ran_code = true
+
+
+## The addon directories (under [code]res://addons/[/code]) a manifest's `addon` entries name.
+static func addon_dirs(manifest: DotCloudManifest) -> PackedStringArray:
+	var out := PackedStringArray()
+	for e: Variant in manifest.provides.get("entries", []):
+		if not (e is Dictionary) or str((e as Dictionary).get("kind", "")) != "addon":
+			continue
+		var dir := str((e as Dictionary).get("dir", "")).trim_suffix("/").get_file()
+		if dir == "" or dir == ".":
+			dir = str((e as Dictionary).get("id", ""))
+		if dir != "" and not out.has(dir):
+			out.append(dir)
+	return out
+
+
+## Why [param id] may not lay its addon at [code]res://addons/<dir>[/code], or "" when it may.
+## [param taken] is dir -> id of the subscribed addons already taken this sync.
+static func addon_clash(dir: String, id: String, taken: Dictionary = {}) -> String:
+	if taken.has(dir) and str(taken[dir]) != id:
+		return "addons/%s is already taken by the subscribed %s" % [dir, taken[dir]]
+	var repo := id.get_file()
+	if DotCloudAddonSet.built_versions().has(repo):
+		return "this build ships %s" % repo
+	var plan := DotCloudAddonSet.read_plan()
+	var held: Dictionary = plan.get("addons", {}) if DotCloudAddonSet.mounted_this_boot(plan) else {}
+	if held.has(dir):
+		var other := str((held[dir] as Dictionary).get("id", ""))
+		return "" if other == id else "the running addon overlay has addons/%s from %s" % [dir, other]
+	if DirAccess.dir_exists_absolute("res://addons/%s" % dir):
+		return "this build has res://addons/%s" % dir
+	return ""
+
+
+## Whether the overlay this process booted on already holds [param id] at [param version] or newer.
+static func addon_running(dir: String, id: String, version: String) -> bool:
+	var plan := DotCloudAddonSet.read_plan()
+	if not DotCloudAddonSet.mounted_this_boot(plan):
+		return false
+	var held: Variant = (plan.get("addons", {}) as Dictionary).get(dir)
+	return held is Dictionary and str((held as Dictionary).get("id", "")) == id \
+		and DotCloudAddonSet.compare_versions(str((held as Dictionary).get("version", "")), version) >= 0
 
 
 ## Mode "ask": one question for the suggested packs that need a download. A refusal (or no
@@ -567,7 +701,7 @@ func _add_suggested(candidates: Array[Dictionary], skipped: Array) -> void:
 			version = latest
 		if device.is_off(id):
 			skipped.append(_skip(id, version, REASON_DEVICE_OFF))
-		elif candidates.size() >= config.workshop_max_packs:
+		elif _over(candidates.size(), config.workshop_max_packs):
 			skipped.append(_skip(id, version, REASON_TOO_MANY))
 		else:
 			candidates.append({
@@ -658,7 +792,7 @@ func _fail_pack(failed: Array, id: String, version: String, error: DotError) -> 
 static func _new_summary() -> Dictionary:
 	return {
 		"guest": false, "offline": false, "from_cache": false, "revision": "", "reason": "",
-		"takes_subscriptions": false, "mounted": [], "skipped": [], "failed": [],
+		"takes_subscriptions": false, "mounted": [], "skipped": [], "failed": [], "addons": [],
 	}
 
 

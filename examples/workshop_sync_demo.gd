@@ -15,7 +15,7 @@ extends Node
 ## Per process: two runs at once (the heavy queue allows two) would otherwise delete each other's files.
 var WORK := "user://dot_cloud_workshop_sync_demo_%d" % OS.get_process_id()
 const GAME := "gamemann/game-playground"
-const CHECKS := 115
+const CHECKS := 133
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -31,6 +31,8 @@ var _world := {"mode": "ok", "revision": "w1:one", "items": [], "removed": [], "
 var _packs := {}
 var _failed_signals: Array = []
 var _progress: Array = []
+## What the fake site says the game accepts; the addon section flips the opt-in.
+var _accepts: Dictionary = ACCEPTS.duplicate(true)
 
 
 func _ready() -> void:
@@ -78,7 +80,8 @@ func _ready() -> void:
 	_ws.cloud = _cloud
 	_ws.config = DotCloudWorkshopConfig.new()
 	_ws.config.workshop_backbone_url = _bb.base_url()
-	_ws.config.workshop_timeout_sec = 1.0
+	# 1 s was too short for the first request on a loaded build VM (offline_no_cache on PH).
+	_ws.config.workshop_timeout_sec = 5.0
 	_ws.config_file = ""
 	_ws.cache_dir = WORK.path_join("workshop")
 	_ws.token_fn = func() -> String: return _token
@@ -96,6 +99,7 @@ func _ready() -> void:
 	await _check_offline()
 	await _check_broken_pack()
 	await _check_device_and_policy()
+	await _check_addons()
 	await _check_metered_and_quota()
 	await _check_guest_and_disabled()
 	await _check_suggested()
@@ -116,6 +120,11 @@ func _make_packs() -> void:
 	_make_pack("ws_m2", "map")
 	_make_pack("ws_q", "map", false, 1)
 	_make_pack("ws_wrongkey", "map", false, 0, "other")
+	_make_pack("ws_addon", "addon", true)
+	_make_pack("ws_addon2", "addon", true)
+	# Both lay their addon at a directory something else owns: this demo's own dot_cloud, and ws_addon's.
+	_make_pack("ws_addon_clash", "addon", true, 0, "tmc", "dot_cloud")
+	_make_pack("ws_addon_twin", "addon", true, 0, "tmc", "ws_addon")
 
 
 # the fake site
@@ -141,16 +150,22 @@ func _site(method: String, path: String, query: Dictionary, headers: Dictionary,
 		return {"status": 200, "json": {"ok": true, "data": {"revision": _world["revision"], "unchanged": true, "full": false, "items": [], "removed": []}}}
 	# The site wraps every answer in {"ok": true, "data": {...}}.
 	return {"status": 200, "json": {"ok": true, "data": {
-		"game": {"contentId": GAME, "accepts": ACCEPTS}, "account": _world["account"],
+		"game": {"contentId": GAME, "accepts": _accepts}, "account": _world["account"],
 		"revision": _world["revision"], "unchanged": false, "full": true,
 		"items": _world["items"], "removed": _world["removed"],
 	}}}
 
 
-func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_id: String = "tmc") -> void:
+func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_id: String = "tmc", addon_dir: String = "") -> void:
 	var dir := WORK.path_join("src_" + id)
 	var entries: Array = []
 	match kind:
+		"addon":
+			var at := addon_dir if addon_dir != "" else id
+			DotPaths.write_text(dir.path_join("addons/%s/plugin.cfg" % at),
+				"[plugin]\n\nname=\"%s\"\ndescription=\"\"\nauthor=\"demo\"\nversion=\"1.0.0\"\nscript=\"p.gd\"\n" % id)
+			DotPaths.write_text(dir.path_join("addons/%s/p.gd" % at), "@tool\nextends EditorPlugin\n")
+			entries.append({"kind": "addon", "id": at, "dir": "addons/" + at})
 		"map":
 			DotPaths.write_text(dir.path_join("maps/m.tscn"), "[gd_scene format=3]\n\n[node name=\"M\" type=\"Node3D\"]\n")
 			entries.append({"kind": "map", "id": "m", "name": id + " map", "scene": "maps/m.tscn", "map_kind": "sandbox"})
@@ -376,6 +391,68 @@ func _check_device_and_policy() -> void:
 	await _ws.set_device_off("ws_off", false)
 
 
+func _check_addons() -> void:
+	_line("")
+	_line("[b]addon packs: a per-game opt-in[/b]")
+	_world["items"] = [_item("ws_addon")]
+	_world["revision"] = "w1:addon-1"
+	var refused: Dictionary = (await _ws.sync(GAME)).value
+	_check(refused["failed"].size() == 1 and refused["failed"][0]["code"] == DotError.CODE_FORBIDDEN and refused["addons"].is_empty(), "a game that does not accept kind addon refuses an addon pack", str(refused["failed"]))
+	_check(not _cloud.is_mounted(&"ws_addon", "1.0.0"), "and nothing of it is mounted")
+
+	_accepts = {"kinds": ["map", "prop", "script", "addon"], "map_kinds": ["sandbox"]}
+	_world["revision"] = "w1:addon-2"
+	var taken: Dictionary = (await _ws.sync(GAME)).value
+	var want := [{"dir": "ws_addon", "repo": "ws_addon", "id": "ws_addon", "version": "1.0.0", "title": "ws_addon", "running": false}]
+	_check(DotValue.same(taken["addons"], want), "a game that accepts addon hands an approved one to the host's overlay", str(taken["addons"]) + str(taken["failed"]))
+	_check(taken["failed"].is_empty() and taken["mounted"].is_empty() and not _cloud.is_mounted(&"ws_addon", "1.0.0"), "armed: it is never mounted under a prefix, where its class names would not register")
+
+	_world["items"] = [_item("ws_addon", false)]
+	_world["revision"] = "w1:addon-3"
+	var unapproved: Dictionary = (await _ws.sync(GAME)).value
+	_check(_reasons(unapproved["skipped"]) == "ws_addon:addon_unapproved" and unapproved["addons"].is_empty(), "an unapproved addon is skipped", _reasons(unapproved["skipped"]))
+	_ws.config.workshop_script_packs = "any"
+	_world["revision"] = "w1:addon-4"
+	var any: Dictionary = (await _ws.sync(GAME)).value
+	_check(_reasons(any["skipped"]) == "ws_addon:addon_unapproved" and any["addons"].is_empty(), "even under 'any': an addon overlays the process root, so only approved ones")
+	_ws.config.workshop_script_packs = "never"
+	_world["items"] = [_item("ws_addon")]
+	_world["revision"] = "w1:addon-5"
+	var never: Dictionary = (await _ws.sync(GAME)).value
+	_check(_reasons(never["skipped"]) == "ws_addon:script_policy" and never["addons"].is_empty(), "'never' skips an approved addon too")
+	_ws.config.workshop_script_packs = "approved"
+
+	_world["items"] = [_item("ws_addon"), _item("ws_addon2")]
+	_world["revision"] = "w1:addon-6"
+	_ws.config.workshop_max_addon_packs = 1
+	var capped: Dictionary = (await _ws.sync(GAME)).value
+	_check(capped["addons"].size() == 1 and _reasons(capped["skipped"]) == "ws_addon2:too_many", "workshop_max_addon_packs caps the addons of one launch", _reasons(capped["skipped"]))
+	_ws.config.workshop_max_addon_packs = 0
+	_world["revision"] = "w1:addon-7"
+	var unlimited: Dictionary = (await _ws.sync(GAME)).value
+	_check(unlimited["addons"].size() == 2 and unlimited["skipped"].is_empty(), "and 0 is no limit")
+
+	_world["items"] = [_item("ws_addon_clash")]
+	_world["revision"] = "w1:addon-8"
+	var clash: Dictionary = (await _ws.sync(GAME)).value
+	_check(clash["failed"].size() == 1 and clash["failed"][0]["code"] == DotError.CODE_CONFLICT and clash["addons"].is_empty(), "an addon at a directory the build has fails loudly as a conflict", str(clash["failed"]))
+	_check(DirAccess.dir_exists_absolute("res://addons/dot_cloud") and DotCloudWorkshop.addon_clash("ws_fresh", "ws_fresh") == "", "armed: a directory nobody has is no clash")
+	_world["items"] = [_item("ws_addon"), _item("ws_addon_twin")]
+	_world["revision"] = "w1:addon-9"
+	var twin: Dictionary = (await _ws.sync(GAME)).value
+	_check(twin["addons"].size() == 1 and twin["addons"][0]["id"] == "ws_addon" and twin["failed"].size() == 1 and twin["failed"][0]["content_id"] == "ws_addon_twin" and twin["failed"][0]["code"] == DotError.CODE_CONFLICT, "two subscriptions at one directory: the second fails as a conflict", str(twin["failed"]))
+
+	var sneaky := _item("ws_addon")
+	(sneaky["pack"] as Dictionary)["kinds"] = ["prop"]
+	_world["items"] = [sneaky]
+	_world["revision"] = "w1:addon-10"
+	var lied: Dictionary = (await _ws.sync(GAME)).value
+	_accepts = ACCEPTS.duplicate(true)
+	_world["revision"] = "w1:addon-11"
+	var lied_closed: Dictionary = (await _ws.sync(GAME)).value
+	_check(lied["addons"].is_empty() and lied["failed"].size() == 1 and lied["failed"][0]["code"] == DotError.CODE_FORBIDDEN and lied_closed["failed"].size() == 1 and lied_closed["mounted"].is_empty(), "a list that calls an addon a prop is refused by its signed manifest", str(lied["failed"]))
+
+
 func _check_metered_and_quota() -> void:
 	_line("")
 	_line("[b]metered connections and storage[/b]")
@@ -429,6 +506,10 @@ func _check_metered_and_quota() -> void:
 	_ws.config.workshop_max_packs = 1
 	var capped: Dictionary = (await _ws.sync(GAME)).value
 	_check(capped["mounted"].size() == 1 and _reasons(capped["skipped"]) == "ws_b:too_many", "workshop_max_packs caps one launch")
+	_ws.config.workshop_max_packs = 0
+	_world["revision"] = "w1:twelve-b"
+	var unlimited: Dictionary = (await _ws.sync(GAME)).value
+	_check(unlimited["mounted"].size() == 2 and unlimited["skipped"].is_empty(), "workshop_max_packs 0 is no limit")
 	_ws.config.workshop_max_packs = old_max
 
 	var odd := _item("ws_a")
