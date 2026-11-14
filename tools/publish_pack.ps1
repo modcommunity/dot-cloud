@@ -83,6 +83,11 @@ try {
         exit $LASTEXITCODE
     }
     if (-not $Source) { Write-Error 'publish_pack: -Source is required'; exit 1 }
+    # Valve guard (same as publish_pack.sh): stock Valve assets never ship in a pack; lists every offending path, no bypass.
+    $ga = @('-I', (Join-Path $PSScriptRoot 'check_valve_files.py'), (Full $Source)); if ($Id) { $ga += '--id', $Id }
+    foreach ($d in $ExcludeDir) { $ga += '--exclude-dir', $d }
+    & python3 @ga
+    if ($LASTEXITCODE -ne 0) { Write-Error 'publish_pack: refusing to publish: the pack holds Valve-origin files (listed above). Nothing was sent.'; exit 1 }
     # A fresh clone has .import markers but no .godot/imported outputs; the publisher refuses those.
     if (-not $NoImport) {
         $p = (Resolve-Path (Full $Source)).Path
