@@ -15,7 +15,7 @@ extends Node
 ## Per process: two runs at once (the heavy queue allows two) would otherwise delete each other's files.
 var WORK := "user://dot_cloud_workshop_sync_demo_%d" % OS.get_process_id()
 const GAME := "gamemann/game-playground"
-const CHECKS := 133
+const CHECKS := 136
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -391,6 +391,16 @@ func _check_device_and_policy() -> void:
 	await _ws.set_device_off("ws_off", false)
 
 
+## Stands in for the build's res://addons.lock; fails the run when it cannot be written.
+func _write_lock(text: String) -> void:
+	var f := FileAccess.open(DotCloudAddonSet.BUILT_LOCK, FileAccess.WRITE)
+	if f == null:
+		_check(false, "armed: the stand-in addons.lock is writable", error_string(FileAccess.get_open_error()))
+		return
+	f.store_string(text)
+	f.close()
+
+
 func _check_addons() -> void:
 	_line("")
 	_line("[b]addon packs: a per-game opt-in[/b]")
@@ -441,6 +451,19 @@ func _check_addons() -> void:
 	_world["revision"] = "w1:addon-9"
 	var twin: Dictionary = (await _ws.sync(GAME)).value
 	_check(twin["addons"].size() == 1 and twin["addons"][0]["id"] == "ws_addon" and twin["failed"].size() == 1 and twin["failed"][0]["content_id"] == "ws_addon_twin" and twin["failed"][0]["code"] == DotError.CODE_CONFLICT, "two subscriptions at one directory: the second fails as a conflict", str(twin["failed"]))
+
+	# The build ships the subscribed addon: its copy serves the subscription, nothing is laid over it.
+	_check(not FileAccess.file_exists(DotCloudAddonSet.BUILT_LOCK), "armed: this project has no addons.lock of its own to stand in for")
+	_write_lock("ws_addon\tv1.0.0\n")
+	_world["items"] = [_item("ws_addon")]
+	_world["revision"] = "w1:addon-built-1"
+	var built_same: Dictionary = (await _ws.sync(GAME)).value
+	_write_lock("ws_addon\tv0.9.0\n")
+	_world["revision"] = "w1:addon-built-2"
+	var built_older: Dictionary = (await _ws.sync(GAME)).value
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(DotCloudAddonSet.BUILT_LOCK))
+	_check(built_same["addons"].is_empty() and built_same["failed"].is_empty() and _reasons(built_same["skipped"]) == "ws_addon:addon_built", "an addon the build ships is met by the build's copy: skipped, not taken, not failed", _reasons(built_same["skipped"]) + str(built_same["failed"]))
+	_check(built_older["addons"].is_empty() and built_older["failed"].is_empty() and _reasons(built_older["skipped"]) == "ws_addon:addon_built", "even a newer subscribed release never replaces the build's copy", _reasons(built_older["skipped"]))
 
 	var sneaky := _item("ws_addon")
 	(sneaky["pack"] as Dictionary)["kinds"] = ["prop"]
