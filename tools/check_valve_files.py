@@ -144,8 +144,11 @@ def scan_lock(lock, only):
 
 
 def install_hook(repo):
-    gd = subprocess.run(["git", "-C", repo, "rev-parse", "--git-path", "hooks"], check=True, capture_output=True, text=True).stdout.strip()
-    hooks = gd if os.path.isabs(gd) else os.path.join(repo, gd)
+    # The repository's own hooks directory, not --git-path hooks: a system core.hooksPath (the
+    # owner-identity guard in /etc/gitconfig) points that at a shared directory, which chains
+    # to <common dir>/hooks/pre-commit.
+    gd = subprocess.run(["git", "-C", repo, "rev-parse", "--git-common-dir"], check=True, capture_output=True, text=True).stdout.strip()
+    hooks = os.path.join(gd if os.path.isabs(gd) else os.path.join(repo, gd), "hooks")
     os.makedirs(hooks, exist_ok=True)
     hook = os.path.join(hooks, "pre-commit"); me = os.path.abspath(__file__)
     line = 'python3 -I "%s" --git --staged "$(git rev-parse --show-toplevel)" || exit 1\n' % me
