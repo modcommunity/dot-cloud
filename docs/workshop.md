@@ -159,7 +159,8 @@ Two tags, `DotContentIndex.SESSION_SOLO` (`&"solo"`) and `SESSION_ONLINE` (`&"on
 | `workshop_metered` | `"ask"` | `ask`, `allow`, `never`: what to do on a metered connection |
 | `workshop_ask_over_bytes` | 52428800 | On `ask`, the download size above which the player is asked even when the connection is not known to be metered |
 | `workshop_timeout_sec` | 10 | The list request's timeout; past it, the cached list is used |
-| `workshop_max_packs` | 200 | The most packs one launch will mount |
+| `workshop_max_packs` | 200 | The most packs one launch will take; 0 is no limit. Addon packs count too |
+| `workshop_max_addon_packs` | 0 | The most addon packs one launch will hand to the overlay; 0 is no limit |
 
 The host sets two callables: `token_fn() -> String` (the signed-in player's bearer, `""` for a guest) and `ask_fn(summary: Dictionary) -> bool` (awaitable; the shell shows "Download 120 MB of subscribed content?" and returns the answer; unset means "no").
 
@@ -225,7 +226,11 @@ The in-shell Subscriptions panel (`TmcWorkshopPanel`) lists the game's items fro
 - **A server-required pack is fetched by the join as it always was.** If the same id and version is already mounted or stored, it is reused and tagged `online`; no other relationship between a subscription and a server's content exists. A different version of the same pack is a different mount prefix and both coexist.
 - **Solo, then online, in one process.** Leaving solo frees the game's tree, which frees every node a pack's content made. The pack files stay mounted (they cannot be unmounted) and their entries are invisible under `online`. UIDs were never re-pointed (`add_only`), so nothing the server's game loads resolves into a subscription pack.
 - **But code stays resident.** A script pack's static variables, signal connections to static buses and anything it registered survive the tree, and a resident script in an online session is a cheat engine waiting for a server. So **if any `runs_code` subscription pack was mounted in this process, an online join restarts the process first**: a page reload carrying the join on the web, a relaunch on desktop, through the same machinery as an addon overlay (`DotCloudAddonSet.persisted` before a browser reload). Data-only packs need no restart. `DotCloudWorkshop.requires_restart_before_online()` is the question the shell asks.
-- **Addon overlays (kind `addon`) are never taken from a subscription.** An overlay mounts at the root, adds class names and replaces the build's code for the whole process; that is a decision for a server's announced addon set, never a player's subscription list. `ensure_for_session` with `allow_root: false` refuses one as `CODE_FORBIDDEN`.
+- **Addon packs (kind `addon`) are a per-game opt-in.** An addon mounts at the root and adds class names for the whole process, so it is never mounted under a prefix. A game whose `provides.json` `accepts.kinds` lacks `"addon"` refuses one as `CODE_FORBIDDEN` (and `ensure_for_session` with `allow_root: false` refuses any root overlay a list mislabels). A game that lists it (Playlot does) gets each approved addon pack back in `summary.addons` as `{dir, repo, id, version, title, running}`; `sync()` mounts nothing of it. The shell adds those entries to its solo `DotCloudAddonSet` overlay, which restarts the process once, the same way a solo's required addons do.
+  - **Approved only.** An addon pack is code whatever its `runsCode` says: it is taken only when the site approved that version, under `any` too (skipped as `addon_unapproved`); `never` skips it as `script_policy`.
+  - **It may add an addon, never replace one.** A directory the build has (`res://addons/<dir>` or a repo in `res://addons.lock`), one the running overlay holds for another pack, or one a second subscription claims in the same sync fails loudly as `CODE_CONFLICT`. Nothing is overlaid silently.
+  - **Limits are settings.** `workshop_max_addon_packs` (0, no limit) caps the addons of one launch, and they count towards `workshop_max_packs`.
+  - **Online.** `running` is true when the overlay mounted this boot already holds that id at that version or newer; such an addon counts as code for `requires_restart_before_online()`. The shell marks subscription entries in the overlay plan (`source: "subscription"`) and drops such a plan before an online restart, so a joined server's process never boots with them.
 
 ## Script packs
 

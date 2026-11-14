@@ -53,5 +53,7 @@ extends RefCounted
 #     in-memory /tmp, outside the IndexedDB mirror whose sync they broke; commit moves across filesystems. Additive.
 # 27: DotCloudSourceHttp retries a base after 429/5xx (throttle_retries, server_error_retries, backoff_base_sec,
 #     backoff_max_sec; Retry-After honoured), download_with_backoff, backoff_delay, retry_limit, throttle_remaining_sec. Additive.
-const LEVEL := 27
+# 28: DotCloudWorkshop takes addon packs for a game whose accepts.kinds has "addon": summary.addons, addon_dirs,
+#     addon_clash, addon_running, REASON_ADDON_UNAPPROVED; config workshop_max_addon_packs; max_packs 0 is no limit. Additive.
+const LEVEL := 28
 const OLDEST := 1

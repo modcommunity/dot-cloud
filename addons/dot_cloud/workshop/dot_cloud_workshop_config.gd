@@ -35,8 +35,12 @@ extends DotConfig
 ## The list request's timeout; past it the cached list is used.
 @export_range(1.0, 120.0, 0.5) var workshop_timeout_sec: float = 10.0
 
-## The most packs one launch will mount.
+## The most packs one launch will mount. 0 is no limit.
 @export var workshop_max_packs: int = 200
+
+## The most subscribed addon packs one launch will lay over the build (see docs/workshop.md, addon
+## packs). 0 is no limit. They also count toward [member workshop_max_packs].
+@export var workshop_max_addon_packs: int = 0
 
 ## Whether the game's suggested packs (its map packs) are mounted: [code]all[/code], [code]none[/code]
 ## or a comma list of groups. See [DotCloudSuggested] for the full precedence.
@@ -68,4 +72,6 @@ func validate() -> DotResult:
 		)
 	if workshop_max_packs < 0:
 		return DotResult.fail(DotError.CODE_INVALID, "workshop_max_packs must not be negative.")
+	if workshop_max_addon_packs < 0:
+		return DotResult.fail(DotError.CODE_INVALID, "workshop_max_addon_packs must not be negative.")
 	return DotResult.success(null)
