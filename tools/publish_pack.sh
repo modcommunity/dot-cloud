@@ -15,6 +15,7 @@
 # A derived requires.json ships at the pack root, capped at the lock's levels (see the requires.json step below).
 # Family addons (dot_*) are the host's and are never packed, whatever the tree looks like: heavy runs the per-game publish.sh on another box
 # from a copy with links resolved, where a wrapper that finds linked addons by symlink sees none. --pack-addon NAME packs one on purpose.
+# Valve-origin files (.vpk .vtf .vmt .mdl .vvd .vtx .phy, textures/orig, an _orig id, content matching the stock index) are refused: tools/check_valve_files.py.
 # More than 5 addon folders left in the pack is refused (a game ships a handful of its own adapters at most).
 # Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
 # an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
@@ -153,6 +154,12 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
     if [ -n "$DESK" ]; then
         echo "publish_pack: warning: $(printf '%s\n' "$DESK" | wc -l) .import file(s) carry only the desktop-only s3tc_bptc VRAM variant (no etc2_astc); web and mobile clients cannot use it. Import them lossy (compress/mode=1) or with vram_texture=false. First: $(printf '%s\n' "$DESK" | head -1)" >&2
     fi
+fi
+# Valve guard: stock Valve/TF2/CS:S/HL2 assets are local-only and never ship in a pack (owner policy). Runs on a dry run too and has no
+# bypass; it lists every offending path and refuses. Content-hash matching needs the stock index (check_valve_files.py --build-index).
+if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
+    GARGS=(); for ((i=0; i<${#ARGS[@]}; i++)); do case "${ARGS[i]}" in --id|--exclude-dir) GARGS+=("${ARGS[i]}" "${ARGS[i+1]}") ;; esac; done
+    python3 -I "$HERE/tools/check_valve_files.py" "$SRC" "${GARGS[@]}" >&2 || { echo "publish_pack: refusing to publish: the pack holds Valve-origin files (listed above). Nothing was sent." >&2; exit 1; }
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 if [ -n "${DOT_CLI_TOKEN:-}" ]; then

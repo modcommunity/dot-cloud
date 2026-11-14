@@ -174,5 +174,20 @@ mkdir -p "$W/fam/zz-lv/addons/zz_lv" "$W/wt/deep/gm/addons"; printf 'const LEVEL
 ln -s ../../zz-lv/addons/zz_lv "$W/wt/deep/gm/addons/zz_lv"; printf 'config_version=5\n' > "$W/wt/deep/gm/project.godot"; echo x > "$W/wt/deep/gm/a.txt"
 DOT_FAMILY_DIR="$W/fam" "$HERE/publish_pack.sh" --source "$W/wt/deep/gm" --id gm --version 1.0.0 --dry-run --no-import --pack-addon zz_lv > "$W/out" 2>&1
 chk "dangling addon link is relinked to the family dir" "grep -q 'relinked .*zz_lv' out && [ -e '$W/wt/deep/gm/addons/zz_lv/zz_lv_api.gd' ]"
+# (h) Valve guard: a pack with a stock file is refused (every path listed, nothing sent); a clean pack passes; the ps1 carries the guard
+mkdir -p "$W/vsrc/tex"; echo ok > "$W/vsrc/a.txt"; cp "$W/src/licence.json" "$W/vsrc/"; echo v > "$W/vsrc/tex/brick.vtf"; echo v > "$W/vsrc/hl2_misc_dir.vpk"
+NPUT=$(grep -c '^PUT' log)
+DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1; RC=$?
+chk "pack with Valve files is refused" "[ $RC -ne 0 ] && grep -q 'tex/brick.vtf' out && grep -q 'hl2_misc_dir.vpk' out && grep -q 'Nothing was sent' out && [ \$(grep -c '^PUT' log) -eq $NPUT ]"
+DOT_VALVE_INDEX=/nonexistent "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 --dry-run > "$W/out" 2>&1
+chk "the guard also runs on --dry-run" "[ $? -ne 0 ] && grep -q 'tex/brick.vtf' out"
+rm "$W/vsrc/tex/brick.vtf" "$W/vsrc/hl2_misc_dir.vpk"
+DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest_orig --version 1.0.0 > "$W/out" 2>&1
+chk "an _orig pack id is refused" "[ $? -ne 0 ] && grep -q '_orig' out"
+DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1
+chk "a clean pack still publishes" "[ $? -eq 0 ] && grep -q 'clean' out"
+chk "ps1 runs the Valve guard" "grep -q 'check_valve_files.py' '$HERE/publish_pack.ps1'"
+python3 -I "$HERE/test_check_valve_files.py" >/dev/null 2>&1
+chk "check_valve_files unit tests" "[ $? -eq 0 ]"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]
