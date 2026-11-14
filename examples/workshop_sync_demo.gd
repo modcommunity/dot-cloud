@@ -138,12 +138,13 @@ func _site(method: String, path: String, query: Dictionary, headers: Dictionary,
 		"503":
 			return {"status": 503, "json": {"error": "down"}}
 	if str(query.get("since", "")) == str(_world["revision"]):
-		return {"status": 200, "json": {"revision": _world["revision"], "unchanged": true, "full": false, "items": [], "removed": []}}
-	return {"status": 200, "json": {
+		return {"status": 200, "json": {"ok": true, "data": {"revision": _world["revision"], "unchanged": true, "full": false, "items": [], "removed": []}}}
+	# The site wraps every answer in {"ok": true, "data": {...}}.
+	return {"status": 200, "json": {"ok": true, "data": {
 		"game": {"contentId": GAME, "accepts": ACCEPTS}, "account": _world["account"],
 		"revision": _world["revision"], "unchanged": false, "full": true,
 		"items": _world["items"], "removed": _world["removed"],
-	}}
+	}}}
 
 
 func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_id: String = "tmc") -> void:

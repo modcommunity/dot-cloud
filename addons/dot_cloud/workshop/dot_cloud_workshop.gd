@@ -323,6 +323,9 @@ func _fetch(game: String, token: String, since: String) -> DotResult:
 	if not res.ok:
 		return res
 	var body: Variant = res.value
+	# The site answers {"ok": true, "data": {...}} like every app route; a flat body is still read.
+	if body is Dictionary and (body as Dictionary).has("ok") and (body as Dictionary).get("data") is Dictionary:
+		body = (body as Dictionary)["data"]
 	if not (body is Dictionary) or not ((body as Dictionary).get("items", []) is Array):
 		return DotResult.fail(DotError.CODE_PARSE, "The Workshop list is not the shape this client reads.")
 	return DotResult.success(body)
