@@ -34,6 +34,10 @@ const REASON_SUGGESTED_DECLINED := "suggested_declined"
 ## An addon pack (kind [code]addon[/code]) whose version the site's reviewers have not approved:
 ## an addon is laid over the process root, so [code]workshop_script_packs = any[/code] does not admit it.
 const REASON_ADDON_UNAPPROVED := "addon_unapproved"
+## An addon pack this build already ships (its repository is in [code]res://addons.lock[/code]): the
+## subscription is met by the build's copy and nothing is laid over it, even when the subscribed
+## release is newer (a subscription never replaces a build's addon files).
+const REASON_ADDON_BUILT := "addon_built"
 
 ## [param done] of [param total] packs, and the bytes of what had to be downloaded. [param current]
 ## is the pack being worked on, for a loading bar.
@@ -580,6 +584,17 @@ func _take_addon(c: Dictionary, manifest: DotCloudManifest, summary: Dictionary)
 		_fail_pack(failed, id, version, DotError.make(
 			DotError.CODE_INVALID, "The list calls this an addon pack, but its manifest names no addon.", manifest.key()
 		))
+		return
+	var built: Dictionary = DotCloudAddonSet.built_versions()
+	if built.has(id.get_file()):
+		var have := str(built[id.get_file()])
+		var newer := DotCloudAddonSet.compare_versions(version, have) > 0
+		var fields := {"pack": manifest.key(), "built": have}
+		if newer:
+			DotLog.warn(CHANNEL, "a subscribed addon is newer than the one this build ships; the build's copy serves it", fields)
+		else:
+			DotLog.info(CHANNEL, "a subscribed addon is one this build ships; the build's copy serves it", fields)
+		(summary["skipped"] as Array).append(_skip(id, version, REASON_ADDON_BUILT))
 		return
 	var taken := {}
 	for e: Dictionary in summary["addons"]:
