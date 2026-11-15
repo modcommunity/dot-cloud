@@ -44,6 +44,13 @@ const PLAN := "user://dot_cloud_addons/plan.json"
 ## The build's own class list, saved by the boot script before an overlay replaces it.
 const SHELL_CLASSES := "user://dot_cloud_addons/shell_classes.cfg"
 
+## The build the boot script kept [constant SHELL_CLASSES] for.
+const SHELL_CLASSES_BUILD := "user://dot_cloud_addons/shell_classes.build"
+
+## What [method mount_now] did: the overlay runs; it could not be mounted here (the plan is left ready for a restart);
+## or it is mounted but an addon still runs the build's compiled copy (the plan is marked failed, as a failed boot is).
+enum MountNow { RUNNING, REFUSED, STALE }
+
 ## The file an export carries that says which addon versions it was built from.
 const BUILT_LOCK := "res://addons.lock"
 
@@ -178,6 +185,90 @@ static func confirm_boot() -> void:
 	plan["state"] = STATE_OK
 	write_plan(plan)
 	DotLog.info(CHANNEL, "booted on the addon overlay", {"addons": _summary(plan.get("addons", {}))})
+
+
+## Mounts the overlay the plan on disk names in this running process and confirms it, doing what the boot script
+## ([code]boot/dot_cloud_boot.gd[/code], which may name no class and so cannot call this) does at a start; keep the two in
+## step. Only safe when none of the overlay's addons is already loaded in this process (a first visit that has none of them):
+## mounting refreshes the global class list, and a compiled copy already in memory would keep running. The caller checks that.
+##
+## [constant MountNow.REFUSED] leaves a `ready` plan untouched for a restart onto it (no plan, another state, another
+## build, a part missing, or the engine refusing the pack).
+static func mount_now() -> MountNow:
+	var plan := read_plan()
+	var packs: Variant = plan.get("packs", [plan.get("pack", "")])
+
+	if str(plan.get("state", "")) != STATE_READY or not (packs is Array) or (packs as Array).is_empty():
+		return MountNow.REFUSED
+
+	var build := build_fingerprint()
+
+	if build == "" or str(plan.get("build", "")) != build:
+		return MountNow.REFUSED
+
+	for part: Variant in packs:
+		if not str(part).begins_with(DIR + "/") or not FileAccess.file_exists(str(part)):
+			return MountNow.REFUSED
+
+	# The build's own class list, kept before the overlay's replaces it: the next overlay is merged from it.
+	if FileAccess.get_file_as_string(SHELL_CLASSES_BUILD) != build:
+		var classes := FileAccess.get_file_as_string(DotCloudScriptClass.CACHE_PATH)
+
+		if classes != "":
+			DotPaths.write_text(SHELL_CLASSES, classes)
+			DotPaths.write_text(SHELL_CLASSES_BUILD, build)
+
+	# Booting, as the boot script leaves it, so confirm_boot checks it; and nothing to resume, or the next visit would
+	# start this game again.
+	var resume: Variant = plan.get("resume", {})
+	plan["resume"] = {}
+	plan["state"] = STATE_BOOTING
+	plan["attempts"] = 0
+	write_plan(plan)
+
+	for part: Variant in packs:
+		if not ProjectSettings.load_resource_pack(str(part), true):
+			plan["state"] = STATE_READY
+			plan["resume"] = resume
+			write_plan(plan)
+			DotLog.warn(CHANNEL, "the engine refused the addon overlay here; restart onto it instead", {"pack": str(part)})
+			return MountNow.REFUSED
+
+	var pack := str((packs as Array)[0])
+	ProjectSettings.set_setting("dot_cloud/addon_overlay", pack)
+	var uids: Variant = plan.get("uids", [])
+
+	if uids is Array:
+		for pair: Variant in uids:
+			if pair is Array and (pair as Array).size() == 2:
+				_register_uid(str(pair[0]), str(pair[1]))
+
+	confirm_boot()
+
+	if str(read_plan().get("state", "")) != STATE_OK:
+		return MountNow.STALE
+
+	DotLog.info(CHANNEL, "mounted the addon overlay without a restart", {
+		"pack": pack.get_file(), "addons": (plan.get("addons", {}) as Dictionary).keys(),
+	})
+	return MountNow.RUNNING
+
+
+## Points a uid the overlay declares at its file, by the boot script's rule: only inside `res://addons/`.
+static func _register_uid(text: String, path: String) -> void:
+	if not path.begins_with("res://addons/") or path.contains(".."):
+		return
+
+	var id := ResourceUID.text_to_id(text)
+
+	if id == ResourceUID.INVALID_ID:
+		return
+
+	if ResourceUID.has_id(id):
+		if ResourceUID.get_id_path(id).begins_with("res://addons/"):
+			ResourceUID.set_id(id, path)
+	else:
+		ResourceUID.add_id(id, path)
 
 
 ## The addons running right now: the build's, overridden by the overlay if it is mounted.

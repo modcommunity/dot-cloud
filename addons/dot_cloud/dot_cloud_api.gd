@@ -55,5 +55,7 @@ extends RefCounted
 #     backoff_max_sec; Retry-After honoured), download_with_backoff, backoff_delay, retry_limit, throttle_remaining_sec. Additive.
 # 28: DotCloudWorkshop takes addon packs for a game whose accepts.kinds has "addon": summary.addons, addon_dirs,
 #     addon_clash, addon_running, REASON_ADDON_UNAPPROVED; config workshop_max_addon_packs; max_packs 0 is no limit. Additive.
-const LEVEL := 28
+# 29: DotCloudAddonSet.mount_now / MountNow / SHELL_CLASSES_BUILD: mount the planned overlay in the running process
+#     (what a shell does for a first visit whose overlay only adds addons). Additive.
+const LEVEL := 29
 const OLDEST := 1
