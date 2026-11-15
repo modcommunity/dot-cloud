@@ -1,17 +1,20 @@
-# Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Same flags as publish_pack.sh.
+# Publish a pack (or a raw store) to the CDN through the site, and pin it in content.lock.json. Most flags are publish_pack.sh's, under PowerShell names (see below).
 #   .\tools\publish_pack.ps1 [publish] -Source DIR -Id NAME [-Version V | -Bump patch|minor|major] [-Lock content.lock.json]
-#       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
+#       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Asset ID] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
 #       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport] [-HostAddons LOCK,...] [-HostLevel name=N,...]
 #   publish derives requires.json like publish_pack.sh (dot-core's dot_requires.gd) and caps each level at the -HostAddons lock's
 #   (addon repo at the locked ref, LEVEL in <addon>_api.gd) or -HostLevel name=N; a committed requires.json above the host is refused.
 #   A requires.floor.json is judged against those same levels (dot_requires.gd --pin NAME=N), not the linked heads.
-#   Not ported yet: leaving the host's addons out of the pack (use publish_pack.sh for a game that links family addons).
+#   -HostAddons leaves out the addons/<name> folders the host owns, matched by folder name or by the repository a linked addon points into.
+#   Without -HostAddons every addon under the source's addons/ is packed. Unlike publish_pack.sh, dot_* family addons are not left out by default.
+#   Shell-only (publish_pack.sh; not in this script): the relock verb, --resume, --pack-addon, --depends, --min-engine, --entry, --mount-root,
+#   --extra-file, the refusal of more than 5 addon folders, relinking dangling addon links in a worktree, and the desktop-only VRAM import warning.
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 #   .\tools\publish_pack.ps1 member -Id NAME -MemberOf ASSET [-Site URL] [-TokenFile FILE]   (move a pack's versions into a collection page)
 #   publish -MemberOf ASSET: publish as a member of that collection asset (keeps -Id, no Workshop page of its own)
 # Token: $env:DOT_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:DOT_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
 # argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://tmcdev.net.
-# Needs curl.exe (ships with Windows 10+) and Godot on PATH or -Godot. Flags map one to one onto publish_pack.sh's --kebab-case ones.
+# Needs Godot on PATH or -Godot, and python3 for the Valve guard (check_valve_files.py). The upload runs inside Godot (dot_cloud_cli.gd); curl is not used.
 param([Parameter(Position = 0)][ValidateSet('publish', 'versions', 'member')][string]$Command = 'publish',
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
       [string]$Lock = 'content.lock.json', [string]$Into, [ValidateSet('', 'pack', 'store')][string]$Kind = '', [switch]$LockOptional, [int]$Asset = 0, [int]$MemberOf = 0,
