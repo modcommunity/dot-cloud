@@ -179,6 +179,7 @@ fi
 # (f) publish_pack.ps1 parity (no PowerShell here: a static check that it carries the same requires.json steps as the bash script)
 PS1="$HERE/publish_pack.ps1"
 chk "ps1 derives requires.json with dot_requires.gd and ships it as an extra file" "grep -q 'dot_requires.gd' '$PS1' && grep -q \"requires.json=\" '$PS1'"
+chk "ps1 passes the host lock's levels to the floor audit like the bash script (--pin)" "grep -q 'requires.floor.json' '$PS1' && grep -q \"'--pin'\" '$PS1' && grep -q 'HostLevelOf \$h \$pp \$n' '$PS1'"
 chk "ps1 takes -HostAddons and -HostLevel" "grep -q '\[string\[\]\]\$HostAddons' '$PS1' && grep -q '\[string\[\]\]\$HostLevel' '$PS1'"
 chk "ps1 leaves out host-owned addons anchored at addons/ like the bash script" "grep -q 'function HostNames' '$PS1' && grep -q 'addons/\$n' '$PS1' && grep -q 'host-owned addon' '$PS1'"
 chk "ps1 caps and refuses like the bash script" "grep -q \"capped at the host's\" '$PS1' && grep -q \"above the host's levels\" '$PS1' && grep -q \"capped at the host.s\" '$HERE/publish_pack.sh'"

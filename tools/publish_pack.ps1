@@ -4,6 +4,7 @@
 #       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport] [-HostAddons LOCK,...] [-HostLevel name=N,...]
 #   publish derives requires.json like publish_pack.sh (dot-core's dot_requires.gd) and caps each level at the -HostAddons lock's
 #   (addon repo at the locked ref, LEVEL in <addon>_api.gd) or -HostLevel name=N; a committed requires.json above the host is refused.
+#   A requires.floor.json is judged against those same levels (dot_requires.gd --pin NAME=N), not the linked heads.
 #   Not ported yet: leaving the host's addons out of the pack (use publish_pack.sh for a game that links family addons).
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 #   .\tools\publish_pack.ps1 member -Id NAME -MemberOf ASSET [-Site URL] [-TokenFile FILE]   (move a pack's versions into a collection page)
@@ -124,8 +125,27 @@ try {
         $req = Join-Path (Full $Source) 'requires.json'; $mode = 'check'
         if (-not (Test-Path $req)) {
             $req = Join-Path $tmp 'requires.json'; $mode = 'cap'
-            & $Godot --headless --path $pp --script res://addons/dot_core/tools/dot_requires.gd -- --out $req *> $null
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $req) -or (Get-Item $req).Length -eq 0) { Write-Error "publish_pack: could not derive requires.json for $pp"; exit 1 }
+            # Floors are judged against the host lock's levels (--pin NAME=N), not the linked heads, which may be a level past the pinned tag. Same as publish_pack.sh.
+            $pins = @()
+            $floor = Join-Path $pp 'requires.floor.json'
+            if (Test-Path $floor -PathType Leaf) {
+                $fdoc = Get-Content -Raw $floor | ConvertFrom-Json
+                foreach ($n in @($fdoc.addons.PSObject.Properties.Name)) {
+                    foreach ($h in $HostLevel) { if ($h.Split('=')[0] -eq $n) { $pins += '--pin', $h } }
+                    foreach ($h in $HostAddons) {
+                        if (Test-Path $h -PathType Container) { $h = Join-Path $h 'addons.lock' }
+                        if (-not (Test-Path $h -PathType Leaf) -or -not ((Get-Content -Raw $h) -match "`t")) { continue }
+                        $lv = HostLevelOf $h $pp $n
+                        if ($null -ne $lv) { $pins += '--pin', "$n=$lv" }
+                    }
+                }
+            }
+            $reqlog = Join-Path $tmp 'req.log'
+            & $Godot --headless --path $pp --script res://addons/dot_core/tools/dot_requires.gd -- --out $req @pins *> $reqlog
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $req) -or (Get-Item $req).Length -eq 0) {
+                Get-Content $reqlog -Tail 20 | ForEach-Object { [Console]::Error.WriteLine($_) }
+                Write-Error "publish_pack: could not derive requires.json for $pp"; exit 1
+            }
             $a += '--extra-file', "requires.json=$req"
         }
         $caps = @{}
