@@ -1,7 +1,7 @@
 # size
 # Baselines only shrink: scripts/<gate> --update lowers or drops entries and refuses to add.
-addons/dot_cloud/client/dot_cloud_client.gd	1217
-addons/dot_cloud/publish/dot_cloud_publisher.gd	892
+addons/dot_cloud/client/dot_cloud_client.gd	1202
+addons/dot_cloud/publish/dot_cloud_publisher.gd	886
 addons/dot_cloud/publish/dot_cloud_publisher.gd::publish	151
 examples/http_demo.gd::_run	91
 examples/mount_demo.gd::_section_mount_and_read	87

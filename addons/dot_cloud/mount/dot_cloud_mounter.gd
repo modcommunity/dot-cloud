@@ -427,9 +427,8 @@ func _verify_objects(
 		job_files.append(f)
 
 	# All submitted at once, never one await per object: a worker job's result
-	# reaches the main thread at the scheduler's next frame, so a loop of run()
-	# costs at least a frame per object. On the threaded web build that held
-	# FC's 678 objects on "Unpacking 0 of 1" for minutes.
+	# lands at the scheduler's next frame, so a run() loop costs a frame an object
+	# (678 objects held for minutes on the threaded web build).
 	var results := await scheduler.run_all(jobs)
 	for i in results.size():
 		if not results[i].ok:

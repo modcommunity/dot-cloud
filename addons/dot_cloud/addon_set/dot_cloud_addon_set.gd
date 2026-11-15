@@ -32,6 +32,7 @@ extends RefCounted
 ## version with a bug that was fixed. Only signed packs from [member namespaces] are taken.
 
 const _Overlay := preload("dot_cloud_addon_set_overlay.gd")
+const _Checks := preload("dot_cloud_addon_set_checks.gd")
 
 const CHANNEL := "cloud.addons"
 
@@ -184,7 +185,7 @@ static func confirm_boot() -> void:
 
 	plan["state"] = STATE_OK
 	write_plan(plan)
-	DotLog.info(CHANNEL, "booted on the addon overlay", {"addons": _summary(plan.get("addons", {}))})
+	DotLog.info(CHANNEL, "booted on the addon overlay", {"addons": _Checks.summary(plan.get("addons", {}))})
 
 
 ## Mounts the overlay the plan on disk names in this running process and confirms it, doing what the boot script
@@ -360,7 +361,7 @@ static func failed_before(wanted: Dictionary) -> bool:
 	var plan := read_plan()
 	return str(plan.get("state", "")) == STATE_FAILED \
 		and str(plan.get("build", "")) == build_fingerprint() \
-		and _same_set(plan.get("addons", {}), wanted)
+		and _Checks.same_set(plan.get("addons", {}), wanted)
 
 
 ## The overlay files [param plan] names, part 0 first; `packs` is absent from a plan written before overlays had parts.
@@ -518,7 +519,7 @@ static func _idb_differs(db_name: String, want: Dictionary) -> DotResult:
 		answered.append(false)
 		var slot := answered.size() - 1
 		ask.onsuccess = DotWeb.create_callback(name, func(_args: Array) -> void:
-			if not _record_matches(bridge, ask.result, want[key]):
+			if not _Checks.record_matches(bridge, ask.result, want[key]):
 				differs.append(key)
 			answered[slot] = true
 		)
@@ -542,25 +543,8 @@ static func _idb_differs(db_name: String, want: Dictionary) -> DotResult:
 	return DotResult.success(differs)
 
 
-## Whether an IDBFS record (`{timestamp, mode, contents}`) holds what [param expected] says.
-static func _record_matches(bridge: Object, record: Variant, expected: Dictionary) -> bool:
-	if record == null:
-		return false
-
-	var contents: Variant = record.contents
-
-	if contents == null or int(contents.byteLength) != int(expected["size"]):
-		return false
-
-	if str(expected["sha"]) == "":
-		return true
-
-	var bytes: PackedByteArray = bridge.call("js_buffer_to_packed_byte_array", contents)
-	return DotHash.sha256_bytes(bytes) == str(expected["sha"])
-
-
 func _refusal(dir: String, repo: String, id: String, version: String) -> String:
-	if not _is_component(dir) or dir.begins_with("."):
+	if not _Checks.is_component(dir) or dir.begins_with("."):
 		return "not a directory name"
 
 	if repo == "" or id == "" or version == "":
@@ -647,7 +631,7 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 		if not downloaded.ok:
 			return downloaded.wrap("Could not download %s." % manifest.key())
 
-		var same := _is_that_addon(dir, manifest)
+		var same := _Checks.is_that_addon(cloud, dir, manifest)
 
 		if not same.ok:
 			return same
@@ -680,7 +664,7 @@ func build(wanted: Dictionary, resume: Dictionary = {}) -> DotResult:
 	_prune(str(plan["pack"]))
 
 	DotLog.info(CHANNEL, "addon overlay ready for the next start", {
-		"pack": plan["pack"], "addons": _summary(wanted),
+		"pack": plan["pack"], "addons": _Checks.summary(wanted),
 	})
 
 	return DotResult.success(plan)
@@ -799,86 +783,3 @@ static func _prune(keep: String) -> void:
 		if name.begins_with("overlay-") and (name.ends_with(".pck") or name.ends_with(".part")) \
 				and not _Overlay.is_part_of(path, keep) and not _Overlay.is_part_of(path, mounted):
 			DirAccess.remove_absolute(path)
-
-
-## Whether [param manifest] is the addon this build keeps under `res://addons/<dir>/`.
-##
-## [b]The server names the directory and the pack separately, and nothing else ties them
-## together.[/b] A list saying `dir: dot_ui` with the dot-net pack would lay dot-net's files
-## over this build's dot-ui and drop dot-ui's classes from the list -- signed code, so no
-## worse than a broken client, but a server must not be able to do even that to its own
-## players. So the pack's own `plugin.cfg` names its plugin script, and a directory the
-## build already has must already hold that script. A directory the build does not have is
-## a new addon and replaces nothing.
-func _is_that_addon(dir: String, manifest: DotCloudManifest) -> DotResult:
-	var cfg_sha := ""
-	var cfg_path := _Overlay.base(manifest, dir) + "plugin.cfg"
-
-	for f in manifest.files:
-		if f.path == cfg_path:
-			cfg_sha = f.sha256
-
-	var cfg := ConfigFile.new()
-
-	if cfg_sha == "" or cfg.load(cloud.store.path_for(cfg_sha)) != OK:
-		return DotResult.fail(DotError.CODE_INVALID, "%s has no readable plugin.cfg." % manifest.key())
-
-	var script := str(cfg.get_value("plugin", "script", "")).get_file()
-	var root := "res://addons/%s" % dir
-
-	if not DirAccess.dir_exists_absolute(root):
-		return DotResult.success(true)
-
-	if script != "" and ResourceLoader.exists(root.path_join(script)):
-		return DotResult.success(true)
-
-	return DotResult.fail(
-		DotError.CODE_INVALID,
-		"%s is not the addon at %s." % [manifest.key(), root],
-		"its plugin script %s is not there" % script
-	)
-
-
-static func _has_file(manifest: DotCloudManifest, path: String) -> bool:
-	for f in manifest.files:
-		if f.path == path:
-			return true
-	return false
-
-
-static func _same_set(a: Variant, b: Variant) -> bool:
-	if not (a is Dictionary and b is Dictionary):
-		return false
-
-	var x := a as Dictionary
-	var y := b as Dictionary
-
-	if x.size() != y.size():
-		return false
-
-	for dir in x:
-		if not y.has(dir) or str((x[dir] as Dictionary).get("version", "")) != str((y[dir] as Dictionary).get("version", "")):
-			return false
-
-	return true
-
-
-static func _is_component(name: String) -> bool:
-	if name == "":
-		return false
-
-	for i in range(name.length()):
-		var c := name.unicode_at(i)
-		var ok := (c >= 48 and c <= 57) or (c >= 97 and c <= 122) or c == 95
-
-		if not ok:
-			return false
-
-	return true
-
-
-static func _summary(wanted: Dictionary) -> Dictionary:
-	var out := {}
-	for dir: String in wanted:
-		out[dir] = str((wanted[dir] as Dictionary).get("version", ""))
-	return out

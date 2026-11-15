@@ -11,6 +11,7 @@ const _Prefetch := preload("dot_cloud_client_prefetch.gd")
 const _Warm := preload("dot_cloud_client_warm.gd")
 const _Job := preload("dot_cloud_client_job.gd")
 const _Manifests := preload("dot_cloud_client_manifests.gd")
+const _Report := preload("dot_cloud_client_report.gd")
 
 ## Registry name the rest of the family looks this up under.
 const SERVICE := &"dot_cloud_client"
@@ -230,12 +231,9 @@ func _exit_tree() -> void:
 func _resolve_scheduler() -> void:
 	if scheduler_ref == null:
 		scheduler_ref = DotNodeRef.of_created(&"CloudScheduler", DotScheduler)
-		# Our own scheduler runs on the main thread in a browser, threaded engine included.
-		# Every job it gets reads or writes user://, and a worker's file call there is
-		# proxied to the page's main thread and answered between frames: measured on
-		# FC's threaded shell, ~350 ms an object, 682 objects verified in about four
-		# minutes on "Unpacking 0 of 1". Sliced on the main thread, the same verify
-		# takes seconds, as it always has on the single-threaded engine.
+		# Runs on the main thread in a browser: a worker's user:// calls are proxied to it
+		# and answered between frames (~350 ms an object on FC's threaded shell).
+		# Sliced on the main thread, the same verify takes seconds.
 		if DotPlatform.is_web() and get_node_or_null(^"CloudScheduler") == null:
 			_add_scheduler()
 
@@ -1201,32 +1199,4 @@ func describe() -> Dictionary:
 
 ## Lines for a `cloud_status` console command.
 func describe_lines() -> PackedStringArray:
-	var out := PackedStringArray()
-	out.append("phase            %s" % phase_name(_phase))
-	out.append("session tag      %s" % session_tag)
-	if config != null:
-		out.append("side             %s (%s)" % [config.resolved_side() if config.resolved_side() != "" else "both", config.side])
-
-	if store != null:
-		out.append_array(store.describe_lines())
-
-	if mounter != null:
-		out.append("mounts:")
-		for l in mounter.describe_lines():
-			out.append("  " + l)
-
-	var index := DotRegistry.get_service(DotContentIndex.SERVICE) as DotContentIndex
-	if index != null:
-		out.append("provided:")
-		for l in index.describe_lines():
-			out.append("  " + l)
-
-	out.append("sources:")
-	for s in sources:
-		var h := s.health()
-		out.append("  %-10s %s" % [
-			str(h["source"]),
-			"ok" if bool(h["available"]) else "unavailable",
-		])
-
-	return out
+	return _Report.lines(self)

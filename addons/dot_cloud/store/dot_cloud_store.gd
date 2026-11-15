@@ -11,6 +11,7 @@ extends RefCounted
 
 const CHANNEL := "cloud.store"
 const _Inventory := preload("dot_cloud_store_inventory.gd")
+const _Report := preload("dot_cloud_store_report.gd")
 
 ## Index schema version.
 const INDEX_VERSION := 1
@@ -728,27 +729,11 @@ func referenced_bytes() -> int:
 
 
 func describe() -> Dictionary:
-	return {
-		"dir": config.cache_dir,
-		"objects": _index.size(),
-		"bytes": _total_bytes,
-		"bytes_human": DotPaths.format_bytes(_total_bytes),
-		"referenced": DotPaths.format_bytes(referenced_bytes()),
-		"limit": DotPaths.format_bytes(_limit_bytes) if _limit_bytes > 0 else "unlimited",
-		"over_limit": is_over_limit(),
-		"packs": packs.records.size(),
-		"pinned_packs": packs.records.values().filter(func(r: Dictionary) -> bool: return bool(r["pinned"])).size(),
-	}
+	return _Report.describe(self)
 
 
 func describe_lines() -> PackedStringArray:
-	var out := PackedStringArray()
-	var d := describe()
-	var keys := d.keys()
-	keys.sort()
-	for k in keys:
-		out.append("%-16s %s" % [str(k), str(d[k])])
-	return out
+	return _Report.describe_lines(self)
 
 
 ## Notes a pack as held (and just used). Called by [DotCloudClient] once its objects are in.

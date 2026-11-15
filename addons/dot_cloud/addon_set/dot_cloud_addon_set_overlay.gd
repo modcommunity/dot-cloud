@@ -17,10 +17,10 @@ const REWRITTEN := ["tscn", "tres", "import"]
 ## Where the addon's directory starts in [param manifest]: "" for a pack that is the addon (a dot-*
 ## release), `addons/<dir>/` for a project that holds it (a game addon's release), else [constant NOT_AN_ADDON].
 static func base(manifest: DotCloudManifest, dir: String) -> String:
-	if DotCloudAddonSet._has_file(manifest, "plugin.cfg"):
+	if has_file(manifest, "plugin.cfg"):
 		return ""
 	var nested := "addons/%s/" % dir
-	return nested if DotCloudAddonSet._has_file(manifest, nested + "plugin.cfg") else NOT_AN_ADDON
+	return nested if has_file(manifest, nested + "plugin.cfg") else NOT_AN_ADDON
 
 
 ## Where [param path] goes: the addon's files under `res://addons/<dir>/`, the rest of a project pack
@@ -79,7 +79,7 @@ static func note_probe(probes: Dictionary, dir: String, manifest: DotCloudManife
 	var api := "%s_api.gd" % dir
 	if target == "res://addons/%s/%s" % [dir, api]:
 		probes[dir] = target
-	elif not DotCloudAddonSet._has_file(manifest, at + api) and (not probes.has(dir) or target < str(probes[dir])):
+	elif not has_file(manifest, at + api) and (not probes.has(dir) or target < str(probes[dir])):
 		probes[dir] = target
 
 
@@ -150,3 +150,10 @@ class Parts:
 			if err == OK:
 				err = DirAccess.rename_absolute(paths[i] + ".part", paths[i])
 		return err
+
+
+static func has_file(manifest: DotCloudManifest, path: String) -> bool:
+	for f in manifest.files:
+		if f.path == path:
+			return true
+	return false
