@@ -78,12 +78,9 @@ var exclude_dirs: PackedStringArray = PackedStringArray([
 ## Off with `--include-ignored`.
 var skip_ignored_dirs: bool = true
 
-## Top-level folders of the source skipped entirely: `examples/` holds editor-only suites and demos, whose scripts do not parse in a web export (they name classes a shell lacks) and which no game scene loads.
-## The same holds for the folders every game repository keeps beside its content and nothing loads at runtime:
-## tests, tools, docs, CI, review `reports/` and `screenshots/` (PNG sheets, megabytes each) and `art-src/`
-## (editable art sources). Games used to list these one by one in their publish.sh and most missed some
-## (prop-hunt shipped 9.4 MB of report PNGs, smash-copter 5 MB). A pack that does load one of them
-## from `res://` sets this array without it.
+## Top-level folders of the source skipped entirely: `examples/` (editor-only suites and demos, whose scripts do not parse in a web export) and the folders every game keeps beside its content
+## that nothing loads at runtime: tests, tools, docs, CI, review `reports/` and `screenshots/` (PNG sheets, megabytes each) and `art-src/` (editable art sources), which games listed one by one
+## and mostly missed (prop-hunt shipped 9.4 MB of report PNGs, smash-copter 5 MB). A pack that does load one of them from `res://` sets this array without it.
 var exclude_roots: PackedStringArray = PackedStringArray([
 	"examples", "tests", "tools", "docs", "ci", ".github", "screenshots", "reports", "art-src",
 ])
@@ -103,9 +100,8 @@ const IMPORTED_DIR := "_imported"
 ## Costs about the size of the meshes again; turn it off for a pack of only scenes and scripts.
 var include_imported: bool = true
 
-## Ship the source file beside its imported form ([code]tile.png[/code] next to its [code].import[/code]). Off by default.
-## Nothing at runtime reads an imported asset's source, and sources were half the bytes of the reference pack.
-## Only a source whose marker names a shipped output is left out; "keep"/"skip" assets ARE their file and stay.
+## Ship the source file beside its imported form ([code]tile.png[/code] next to its [code].import[/code]). Off by default: nothing at runtime reads an imported asset's source, and sources
+## were half the bytes of the reference pack. Only a source whose marker names a shipped output is left out; "keep"/"skip" assets ARE their file and stay.
 ## Turn on for content that reads its own files raw ([code]Image.load_from_file[/code], [code]GLTFDocument[/code]).
 var ship_import_sources: bool = false
 
@@ -134,10 +130,8 @@ var group_rules: Dictionary = {}
 ## No bundle for fewer small objects than this: a request each is cheaper than the archive.
 @export var bundle_min_objects: int = 8
 
-## Text resources whose `res://` references have to move with the pack.
-## .tscn and .tres only: a binary .scn or .res cannot be rewritten by string substitution.
-## .import too, which is what makes [member include_imported] work: its three absolute paths
-## name the authoring project and are rewritten to the mount like any reference.
+## Text resources whose `res://` references have to move with the pack: .tscn and .tres (a binary .scn or .res cannot be rewritten by string substitution),
+## and .import, which is what makes [member include_imported] work: its three absolute paths name the authoring project and are rewritten to the mount.
 static func _is_text_resource(rel: String) -> bool:
 	var e := rel.get_extension().to_lower()
 	return e == "tscn" or e == "tres" or e == "import"

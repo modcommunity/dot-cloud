@@ -6,9 +6,8 @@ extends RefCounted
 const MAX_DEPTH := 4
 
 
-## Resolves a manifest's dependency tree ahead of the downloads and registers each pack's missing bytes,
-## so the job's total is known before the first byte. Manifests are kept for [method ensure_dependency].
-## One level is fetched [member DotCloudConfig.parallel_packs] at a time and registered in list order, so the job's totals do not depend on which fetch finished first; a manifest that fails to resolve is skipped here and fails in [method ensure_all] with its context.
+## Resolves a manifest's dependency tree ahead of the downloads and registers each pack's missing bytes, so the job's total is known before the first byte; manifests are kept for [method ensure_dependency].
+## One level is fetched [member DotCloudConfig.parallel_packs] at a time and registered in list order, so the totals do not depend on which fetch finished first; a manifest that fails to resolve is skipped here and fails in [method ensure_all] with its context.
 ## [param groups] are fetched of this level's packs only, not of theirs.
 static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest, depth: int, groups: PackedStringArray = PackedStringArray()) -> void:
 	if depth >= MAX_DEPTH or c.job == null:

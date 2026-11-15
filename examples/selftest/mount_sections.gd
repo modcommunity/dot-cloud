@@ -199,12 +199,9 @@ static func corrupt_object(h: Node) -> void:
 
 # 10. One id and version, two publishers
 
-## Two parties claiming one `content_id@version`, in ONE process: one [DotCloudMounter] meeting two
-## manifests that agree about id and version and about nothing else.
-##
-## `key()` derives nothing from the bytes, so the second was indistinguishable from a re-mount of the
-## first and the player ran Alice's scripts on Mallory's server. A pack cannot be unmounted, so it is
-## refused with something the caller can act on.
+## Two parties claiming one `content_id@version` in ONE process: one [DotCloudMounter] meeting two manifests that agree about id and version and nothing else.
+## `key()` derives nothing from the bytes, so the second looks like a re-mount of the first and the player would run Alice's scripts on Mallory's server.
+## A pack cannot be unmounted, so it is refused with something the caller can act on.
 static func two_publishers(h: Node) -> void:
 	h._sections_started += 1
 	h._line("[b]10. one id and version, two publishers[/b]")
@@ -258,11 +255,8 @@ static func two_publishers(h: Node) -> void:
 
 # 11. <owner>/<name> content ids
 
-## An id that names who owns it, and the forms that must still be refused.
-##
-## "/" is a second directory level in the mount prefix, which keeps `alice_bob` + `x` apart from
-## `alice` + `bob_x` and makes a key scoped `alice/*` exact. Two segments at most, none empty, no
-## traversal, each still a slug.
+## An id that names who owns it, and the forms that must still be refused. "/" is a second directory level in the mount prefix, which keeps `alice_bob` + `x` apart
+## from `alice` + `bob_x` and makes a key scoped `alice/*` exact. Two segments at most, none empty, no traversal, each still a slug.
 static func namespaced_ids(h: Node) -> void:
 	h._sections_started += 1
 	h._line("[b]11. <owner>/<name> content ids[/b]")

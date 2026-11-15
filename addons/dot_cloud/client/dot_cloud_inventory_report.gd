@@ -1,9 +1,8 @@
 class_name DotCloudInventoryReport
 extends RefCounted
 
-## The account site's downloaded-content inventory, from this client's side: turns [method DotCloudStore.inventory] into
-## the body of the site's report (`PUT /api/app/v1/content-inventory`, tRPC `clientContent.report`) and carries out the
-## actions the site answers with. Transport-free and network-free; the app and the web shell each add their own transport
+## The account site's downloaded-content inventory, from this client's side: turns [method DotCloudStore.inventory] into the body of the site's report (`PUT /api/app/v1/content-inventory`,
+## tRPC `clientContent.report`) and carries out the actions the site answers with. Transport-free and network-free; the app and the web shell each add their own transport
 ## ([DotCloudInventoryBridge]'s `sync` op for the shell). Schema: website-city docs/api/content-inventory.md.
 
 const CHANNEL := "cloud.inventory"
@@ -54,11 +53,9 @@ static func body(inventory: Array, ack: Array = []) -> Dictionary:
 	return {"packs": packs, "ack": acks}
 
 
-## Carries out the site's [param pending] (`[{packId, version, action}]`) on [param store] and returns
-## `{done, refused, ack}`: counts, plus the actions to acknowledge. A refusal a restart will not cure (the pack is
-## unknown here) is acknowledged, or its row would stay pending for ever; one caused by the pack being mounted or
-## pinned ([code]CODE_STATE[/code]) is not, so it runs again on the next report. An unknown action is skipped.
-## Delete never forces: a pinned pack is refused until the site unpins it. Pin and unpin cover every version of the id.
+## Carries out the site's [param pending] (`[{packId, version, action}]`) on [param store] and returns `{done, refused, ack}`: counts, plus the actions to acknowledge. A refusal a restart
+## will not cure (the pack is unknown here) is acknowledged, or its row would stay pending for ever; one caused by the pack being mounted or pinned ([code]CODE_STATE[/code]) is not, so it runs
+## again on the next report. An unknown action is skipped. Delete never forces: a pinned pack is refused until the site unpins it. Pin and unpin cover every version of the id.
 static func apply_pending(store: DotCloudStore, pending: Array) -> Dictionary:
 	var done := 0
 	var refused := 0

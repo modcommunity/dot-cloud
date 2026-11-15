@@ -15,14 +15,9 @@ static func signature_refusals(h: Node, manifest: DotCloudManifest, key_pair: Di
 	)
 	h._check("tamper refused", not tamper_check.ok)
 
-	# A key too weak to mean anything must be refused before any crypto runs.
-	# 1024-bit RSA still verifies happily under mbedTLS, and a valid signature
-	# from a broken key is indistinguishable from a good one everywhere
-	# downstream of here — which is the whole reason MIN_KEY_BITS exists.
-	# Generated through Crypto directly, because DotCloudSignature.generate_keypair
-	# refuses to produce one this small — which is the point: the weak key in the
-	# real scenario was never made here. It came from an old setup, or from a
-	# trusted_keys entry in a layered config file.
+	# A key too weak to mean anything must be refused before any crypto runs: 1024-bit RSA still verifies under mbedTLS, and a valid signature from a broken
+	# key looks good everywhere downstream, which is why MIN_KEY_BITS exists. Generated through Crypto directly because DotCloudSignature.generate_keypair
+	# refuses this size: such a key comes from an old setup or a trusted_keys entry in a layered config file.
 	var weak_key := Crypto.new().generate_rsa(1024)
 	if weak_key == null:
 		h._fail(
@@ -38,10 +33,8 @@ static func signature_refusals(h: Node, manifest: DotCloudManifest, key_pair: Di
 		h._fail("signing with the weak key", weak_sig)
 		return false
 
-	# This signature is genuinely valid: 128 bytes, and mbedTLS verifies it
-	# against its own key without complaint. It must be refused as FORBIDDEN —
-	# too weak to consider — and not as INTEGRITY, which would mean the key was
-	# considered and only the bytes disagreed.
+	# This signature is genuinely valid (128 bytes, and mbedTLS verifies it against its own key), yet must be refused as FORBIDDEN, too weak
+	# to consider, and not as INTEGRITY, which would mean the key was considered and only the bytes disagreed.
 	var weak_check := DotCloudSignature.verify(
 		manifest.raw_bytes,
 		str(weak_sig.value),

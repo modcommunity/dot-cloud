@@ -471,10 +471,9 @@ func _mount_planned(cloud_client: DotCloudClient, to_mount: Array[Dictionary], s
 	cloud_client.end_job()
 
 
-## The subscribed packs worth planning: each one the list names, minus those the device, the key, the
-## script policy, the accepted kinds or the pack caps rule out (recorded in [param skipped] or [param failed]).
-## An addon pack is a candidate only for a game whose [code]accepts.kinds[/code] names [code]addon[/code],
-## and only when its version is approved.
+## The subscribed packs worth planning: each one the list names, minus those the device, the key, the script policy, the accepted kinds or the pack caps rule out
+## (recorded in [param skipped] or [param failed]). An addon pack is a candidate only for a game whose [code]accepts.kinds[/code] names [code]addon[/code], and only
+## when its version is approved.
 func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> Array[Dictionary]:
 	var accepts := list.accepts() if list != null else {}
 	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
@@ -526,10 +525,9 @@ func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> A
 	return candidates
 
 
-## An approved addon pack the game accepts: each `addon` entry of its signed manifest becomes one
-## [code]summary.addons[/code] entry for the host's overlay, unless its directory is taken. Taken is
-## a clash and fails the pack loudly: the build's own addon (by [code]res://addons.lock[/code] or by
-## its directory), a running overlay's addon from another pack, or another subscription's.
+## An approved addon pack the game accepts: each `addon` entry of its signed manifest becomes one [code]summary.addons[/code] entry for the host's overlay, unless its
+## directory is taken. Taken is a clash and fails the pack loudly: the build's own addon (by [code]res://addons.lock[/code] or by its directory), a running overlay's
+## addon from another pack, or another subscription's.
 func _take_addon(c: Dictionary, manifest: DotCloudManifest, summary: Dictionary) -> void:
 	var id: String = c["id"]
 	var version: String = c["version"]

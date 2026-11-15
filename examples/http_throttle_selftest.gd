@@ -1,8 +1,7 @@
 extends Node
 
-## DotCloudSourceHttp under a CDN that answers 429/503: waits (Retry-After first), retries the same base,
-## never lets a later base's 404 end the download, and stops after a bounded number of tries.
-## Runs the web download path (in memory through DotHttp._request), the one the web shell uses.
+## DotCloudSourceHttp under a CDN that answers 429/503: waits (Retry-After first), retries the same base, never lets a later base's 404 end the download, and stops after
+## a bounded number of tries. Runs the web download path (in memory through DotHttp._request), the one the web shell uses.
 ## Run: godot --headless --path . res://examples/http_throttle_selftest.tscn
 
 const TestServer := preload("res://examples/http_test_server.gd")

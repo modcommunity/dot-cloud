@@ -122,10 +122,9 @@ static func fetch(c: DotCloudClient, manifest_url: String) -> DotResult:
 	if not checked.ok:
 		return checked
 
-	# A pack's objects live beside its manifest, so where it came from is always a valid mirror;
-	# without it a client pointed at a content root asks for objects one directory too high.
-	# Appended, never prepended: a mirror the publisher named is where the operator wants load.
-	# A manifest kept on disk names no pack directory, so each HTTP base's own one is used instead.
+	# A pack's objects live beside its manifest, so where it came from is always a valid mirror (without it a client pointed at a content root asks
+	# one directory too high). Appended, never prepended: a mirror the publisher named is where the operator wants load. A manifest kept on disk
+	# names no pack directory, so each HTTP base's own one is used instead.
 	var homes := PackedStringArray([manifest_url]) if not c.is_local_manifest_url(manifest_url) \
 		else c._http_manifest_urls(manifest.content_id, manifest.version)
 	for url in homes:

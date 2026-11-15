@@ -1,12 +1,9 @@
 class_name DotCloudChunker
 extends RefCounted
 
-## Content-defined chunking and delta planning for the "chunks" manifest block (designed in docs/sources.md,
-## not yet wired into the publisher or downloader). Pure functions, no I/O.
-##
-## Algorithm "fastcdc-v1": a gear rolling hash with normalised cut masks. A boundary depends only on the bytes
-## near it, so inserting data early in a file moves one or two boundaries and leaves the rest identical, which
-## is what makes unchanged chunks reusable across versions.
+## Content-defined chunking and delta planning for the "chunks" manifest block (designed in docs/sources.md, not yet wired into the publisher or downloader). Pure functions, no I/O.
+## Algorithm "fastcdc-v1": a gear rolling hash with normalised cut masks. A boundary depends only on the bytes near it, so inserting data early in a file moves one or two
+## boundaries and leaves the rest identical, which is what makes unchanged chunks reusable across versions.
 
 const ALGO := "fastcdc-v1"
 const DEFAULT_AVG := 1048576

@@ -19,10 +19,9 @@ var retries := 3
 var concurrency := 6
 
 
-## Claims [param repo_name]@[param version]. Value: {id, contentId}; build the pack with that contentId.
-## A positive [param asset_id] links the version to that asset (the site then names the pack after the asset's repo name and lets visitors fetch it).
-## A positive [param member_of] instead publishes it as a MEMBER of that collection asset: the pack keeps its own id
-## ([param repo_name]), is listed in the asset's collection.json and gets no Workshop page of its own.
+## Claims [param repo_name]@[param version]. Value: {id, contentId}; build the pack with that contentId. A positive [param asset_id] links the version to that asset (the site then names the pack after the asset's repo name and lets visitors fetch it).
+## A positive [param member_of] instead publishes it as a MEMBER of that collection asset: the pack keeps its own id ([param repo_name]), is listed in the asset's collection.json
+## and gets no Workshop page of its own.
 func claim(repo_name: String, version: String, files: int, bytes: int, asset_id: int = 0, member_of: int = 0) -> DotResult:
 	var body := {"action": "claim", "repoName": repo_name, "version": version, "fileCount": files, "byteSize": bytes}
 	if asset_id > 0:

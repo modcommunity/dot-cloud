@@ -6,16 +6,9 @@ extends RefCounted
 const _Sides := preload("dot_cloud_publisher_sides.gd")
 
 
-## Reads the source's `groups.json` and returns pack path -> PackedStringArray of the groups the file
-## joins from it (a path in no rule is absent). Two shapes, mixable: [code]{"group": ["prefix/",
-## "glob*"]}[/code] and [code]{"prefix/": "group"}[/code], the shape of `sides.json` and of
-## [member DotCloudPublisher.group_rules]. Patterns follow the sides rules (a trailing `/` is a directory
-## prefix; anything else is a `String.match` glob over the pack path, where `*` crosses `/`), and an
-## `.import` marker and an imported output relocated to `_imported/` ([param owners], output -> asset,
-## as in the sides rules) also match by the path of the asset they stand for, so a rule written against
-## `models/gun.*` covers `_imported/gun.glb-<hash>.scn` too. Refused as CODE_INVALID: a
-## pattern that matches nothing (a typo would publish the files ungrouped and say nothing), an empty
-## group, a pattern that is not a pack path, a malformed entry.
+## Reads the source's `groups.json` and returns pack path -> PackedStringArray of the groups the file joins (a path in no rule is absent). Two shapes, mixable: [code]{"group": ["prefix/", "glob*"]}[/code] and [code]{"prefix/": "group"}[/code]
+## (as `sides.json` and [member DotCloudPublisher.group_rules]). Patterns follow the sides rules (trailing `/` is a directory prefix, else a `String.match` glob where `*` crosses `/`); an `.import` marker and an output relocated to `_imported/` ([param owners]) match by their asset's path.
+## Refused as CODE_INVALID: a pattern that matches nothing (a typo would publish the files ungrouped and say nothing), an empty group, a pattern that is not a pack path, a malformed entry.
 static func groups_for(pub: DotCloudPublisher, source_dir: String, relatives: PackedStringArray, owners: Dictionary = {}) -> DotResult:
 	var file := source_dir.path_join(DotCloudPublisher.GROUPS_FILE)
 	if not FileAccess.file_exists(file):

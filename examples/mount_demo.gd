@@ -558,7 +558,7 @@ func _mount_row(described: Dictionary, key: String) -> Dictionary:
 
 	return {}
 
-# --- 8. A refused uid is only an error when the held file differs ----------
+# 8. A refused uid is only an error when the held file differs
 
 var _records: Array = []
 

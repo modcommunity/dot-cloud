@@ -312,10 +312,8 @@ func fetch(
 			last = _keep_error(last, committed)
 			# The mirror's fault as much as a 500 is; another base may serve the right bytes.
 			_note_base_failure(base)
-			# [b]With the reason.[/b] "failed verification" alone cannot tell a mirror
-			# serving the wrong bytes from a 404 body being hashed, and those are
-			# opposite problems: one is a corrupt or stale host, the other is a URL
-			# built wrong. The detail carries both hashes and the size.
+			# [b]With the reason.[/b] "failed verification" alone cannot tell a mirror serving the wrong bytes (a corrupt or stale host) from a 404 body
+			# being hashed (a URL built wrong). The detail carries both hashes and the size.
 			DotLog.warn(
 				CHANNEL,
 				"content from mirror failed verification",

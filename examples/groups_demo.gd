@@ -1,16 +1,8 @@
 extends Node
 
-## Download groups from the source's `groups.json` (a course's meshes beside the pack's core files).
-##
-## Covered here: both shapes of the file, the groups written into the manifest entries, a file in no rule
-## left ungrouped, a file in two groups, the merge with `DotCloudPublisher.group_rules`, the `.import`
-## marker and the relocated `_imported/` output following their asset, a client given only a group fetching that group's files, a mounted pack
-## topped up with one group and then every group (`ensure_groups_at`, `"*"`), and the publisher's refusals
-## (a pattern matching nothing, an empty group, the name `*`, a non-pack path, a malformed file).
-##
-## [codeblock]
-## godot --headless --path . res://examples/groups_demo.tscn
-## [/codeblock]
+## Download groups from the source's `groups.json`. Covers both shapes of the file, the groups in the manifest entries, a file in no rule or in two, the merge with `DotCloudPublisher.group_rules`,
+## the `.import` marker and `_imported/` output following their asset, a client fetching only its group's files, a mounted pack topped up with one group then all (`ensure_groups_at`, `"*"`), and the
+## publisher's refusals (a pattern matching nothing, an empty group, the name `*`, a non-pack path, a malformed file). Run: [code]godot --headless --path . res://examples/groups_demo.tscn[/code]
 
 const WORK := "user://dot_cloud_groups_demo"
 

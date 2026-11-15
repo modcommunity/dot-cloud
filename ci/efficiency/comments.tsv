@@ -16,9 +16,9 @@ addons/dot_cloud/manifest/dot_cloud_provides.gd::long_block	1
 addons/dot_cloud/manifest/dot_cloud_script_scan.gd::long_block	2
 addons/dot_cloud/mount/dot_cloud_mounter.gd::long_block	3
 addons/dot_cloud/publish/dot_cloud_cli.gd::long_block	2
-addons/dot_cloud/publish/dot_cloud_publisher.gd::long_block	11
+addons/dot_cloud/publish/dot_cloud_publisher.gd::long_block	10
 addons/dot_cloud/publish/dot_cloud_registry.gd::long_block	5
-addons/dot_cloud/store/dot_cloud_store.gd::long_block	4
+addons/dot_cloud/store/dot_cloud_store.gd::long_block	2
 addons/dot_cloud/transfer/dot_cloud_downloader.gd::long_block	6
 addons/dot_cloud/transfer/dot_cloud_netchan_timeout.gd::long_block	1
 addons/dot_cloud/transfer/dot_cloud_source.gd::history	1
@@ -40,8 +40,7 @@ examples/delivered_scene_demo.gd::long_block	7
 examples/http_demo.gd::history	4
 examples/http_demo.gd::long_block	8
 examples/http_test_server.gd::long_block	3
-examples/mount_demo.gd::history	1
-examples/mount_demo.gd::long_block	10
+examples/mount_demo.gd::long_block	7
 examples/netchan_chunk_server.gd::history	1
 examples/netchan_chunk_server.gd::long_block	1
 examples/netchan_demo.gd::history	2
@@ -49,7 +48,7 @@ examples/netchan_demo.gd::long_block	5
 examples/sides_demo.gd::long_block	1
 examples/store_demo.gd::history	1
 examples/store_demo.gd::long_block	6
-examples/sync_demo.gd::long_block	5
+examples/sync_demo.gd::long_block	3
 examples/workshop_backbone.gd::long_block	1
 examples/workshop_demo.gd::long_block	1
 examples/workshop_sync_demo.gd::long_block	1
