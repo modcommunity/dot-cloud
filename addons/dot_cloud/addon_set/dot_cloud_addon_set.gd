@@ -72,7 +72,7 @@ const REMAPPED := ["gd", "tscn", "tres", "scn", "res", "gdshader", "shader"]
 ## Where an addon pack may come from: an owner (`modcommunity/`, ending in a slash) or one
 ## exact content id. The signature says who published a pack; this says whose packs may
 ## replace this build's code, which is a narrower question.
-var namespaces: PackedStringArray = PackedStringArray(["modcommunity/"])
+var namespaces: PackedStringArray = PackedStringArray(["modcommunity/", "gamespice-platform/"])
 
 ## The client that fetches and verifies the packs.
 var cloud: DotCloudClient = null
@@ -283,9 +283,22 @@ static func running_versions() -> Dictionary:
 
 		for dir: String in addons:
 			var entry: Dictionary = addons[dir]
-			out[str(entry.get("repo", ""))] = str(entry.get("version", ""))
+			var key := _Checks.version_key(out, [str(entry.get("repo", "")), str(entry.get("id", ""))])
+			out[key if key != "" else str(entry.get("repo", ""))] = str(entry.get("version", ""))
 
 	return out
+
+
+## The version [param versions] (repo -> version) holds for a pack named by [param names] (a repo, an id, or both),
+## under either id (`gamespice-platform/combat`, `modcommunity/dot-combat`); "" when none. See [method _Checks.pack_key].
+static func version_of(versions: Dictionary, names: Array) -> String:
+	var key := _Checks.version_key(versions, names)
+	return str(versions[key]) if key != "" else ""
+
+
+## Whether [param versions] knows this pack under either id.
+static func has_pack(versions: Dictionary, names: Array) -> bool:
+	return _Checks.version_key(versions, names) != ""
 
 
 ## Whether the boot script mounted [param plan]'s overlay in this process.
@@ -327,7 +340,7 @@ func plan_for(server: Array) -> Dictionary:
 			refused[dir if dir != "" else repo] = why
 			continue
 
-		var have := str(built.get(repo, ""))
+		var have := version_of(built, [repo, id])
 
 		if have != "" and compare_versions(version, have) <= 0:
 			continue
@@ -553,7 +566,7 @@ func _refusal(dir: String, repo: String, id: String, version: String) -> String:
 	# The repository is what this build's lock is keyed by, so it decides "newer than what
 	# I have" -- and it has to be the pack's own name, or a list could compare one addon's
 	# version and fetch another's.
-	if id.get_file() != repo:
+	if _Checks.pack_key(id) != _Checks.pack_key(repo):
 		return "%s is not the repository %s" % [id, repo]
 
 	var allowed := false

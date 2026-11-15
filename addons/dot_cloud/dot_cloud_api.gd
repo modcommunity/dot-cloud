@@ -57,5 +57,8 @@ extends RefCounted
 #     addon_clash, addon_running, REASON_ADDON_UNAPPROVED; config workshop_max_addon_packs; max_packs 0 is no limit. Additive.
 # 29: DotCloudAddonSet.mount_now / MountNow / SHELL_CLASSES_BUILD: mount the planned overlay in the running process
 #     (what a shell does for a first visit whose overlay only adds addons). Additive.
-const LEVEL := 29
+# 30: DotCloudAddonSet.version_of / has_pack: the build's lock is found under the old
+#     (`modcommunity/dot-<name>`) or the new (`gamespice-platform/<name>`) id, and `gamespice-platform/` is a default
+#     namespace. Additive.
+const LEVEL := 30
 const OLDEST := 1

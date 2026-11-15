@@ -97,3 +97,31 @@ static func summary(wanted: Dictionary) -> Dictionary:
 	for dir: String in wanted:
 		out[dir] = str((wanted[dir] as Dictionary).get("version", ""))
 	return out
+
+
+## The name a pack goes by in [method built_versions] whichever id spells it: the last path
+## part without the old `dot-` prefix, so `gamespice-platform/combat`, `modcommunity/dot-combat`
+## and a lock's `dot-combat` or `combat` are all `combat`.
+static func pack_key(name: String) -> String:
+	return name.strip_edges().get_file().trim_prefix("dot-")
+
+
+## The key of [param versions] (repo -> version) that [param names] (a repo, an id, or both)
+## stand for, in the spelling the dictionary already uses; "" when none does. Exact matches win,
+## so a lock that spells both ids apart keeps its own entries.
+static func version_key(versions: Dictionary, names: Array) -> String:
+	for name: String in names:
+		if name != "" and versions.has(name):
+			return name
+
+	for name: String in names:
+		var want := pack_key(name)
+
+		if want == "":
+			continue
+
+		for key: String in versions:
+			if pack_key(key) == want:
+				return key
+
+	return ""

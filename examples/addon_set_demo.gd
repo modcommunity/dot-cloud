@@ -24,7 +24,7 @@ const WORK := "user://dot_cloud_addon_set_demo"
 const LOCK := "res://addons.lock"
 
 ## Every check, including the one that compares against it. See docs/testing.md.
-const CHECKS := 71
+const CHECKS := 85
 
 var _failures := 0
 var _checks := 0
@@ -48,6 +48,7 @@ func _run() -> void:
 	_versions()
 	_class_list()
 	_policy()
+	_pack_ids()
 	var cloud := await _published_client()
 
 	if cloud != null:
@@ -174,6 +175,80 @@ func _policy() -> void:
 	ProjectSettings.set_setting("dot_cloud/addon_overlay", "")
 	DotCloudAddonSet.forget()
 	_check(DotCloudAddonSet.read_plan().is_empty(), "forget() leaves no plan")
+	_done()
+
+
+# 2b
+
+## The build's lock names a pack by its repository (`dot-probe`); the site now also calls it
+## `gamespice-platform/probe`. Either id, and either spelling in a lock, is the same pack, so
+## moving to the new ids never makes a shell refetch an addon it already has.
+func _pack_ids() -> void:
+	_section("a pack is the same under the old and the new id")
+	var set := DotCloudAddonSet.new()
+	var old_id := "modcommunity/dot-probe"
+	var new_id := "gamespice-platform/probe"
+
+	var built := DotCloudAddonSet.built_versions()
+	_check(built.has("dot-probe") and built["dot-probe"] == "0.1.0", "the old lock format still reads repo -> version")
+
+	var by_old: Dictionary = set.plan_for([_entry("dot_probe", old_id, "0.1.0")])
+	_check((by_old["wanted"] as Dictionary).is_empty(), "old id, old lock: the built version is found")
+
+	var by_new_old_repo: Dictionary = set.plan_for([{"dir": "dot_probe", "repo": "dot-probe", "id": new_id, "version": "0.1.0"}])
+	_check((by_new_old_repo["wanted"] as Dictionary).is_empty() and (by_new_old_repo["refused"] as Dictionary).is_empty(),
+		"new id with the repository still named dot-probe: same entry, nothing to fetch", str(by_new_old_repo["refused"]))
+
+	var by_new: Dictionary = set.plan_for([{"dir": "dot_probe", "repo": "probe", "id": new_id, "version": "v0.1.0"}])
+	_check((by_new["wanted"] as Dictionary).is_empty() and (by_new["refused"] as Dictionary).is_empty(),
+		"new id and a bare repo name: the same entry again", str(by_new["refused"]))
+
+	var newer: Dictionary = set.plan_for([{"dir": "dot_probe", "repo": "dot-probe", "id": new_id, "version": "0.2.0"}])
+	_check((newer["wanted"] as Dictionary).has("dot_probe") and str(newer["wanted"]["dot_probe"]["id"]) == new_id,
+		"a newer version under the new id is wanted, and fetched under that id")
+
+	var older: Dictionary = set.plan_for([{"dir": "dot_core", "repo": "dot-core", "id": "gamespice-platform/core", "version": "0.1.4"}])
+	_check((older["wanted"] as Dictionary).is_empty(), "an older version under the new id is still never taken")
+
+	# A lock that has moved forward spells the pack by its new id; the old id finds it too.
+	_write(LOCK, "# new spelling\ngamespice-platform/probe\tv0.1.0\ndot-core\tv0.1.5\n")
+	var moved_old: Dictionary = set.plan_for([_entry("dot_probe", old_id, "0.1.0")])
+	_check((moved_old["wanted"] as Dictionary).is_empty(), "new lock spelling, old id: the built version is found")
+
+	var moved_new: Dictionary = set.plan_for([{"dir": "dot_probe", "repo": "probe", "id": new_id, "version": "0.2.0"}])
+	_check((moved_new["wanted"] as Dictionary).has("dot_probe"), "new lock spelling, new id, newer: wanted")
+
+	# Mixed: one pack spelled each way in the lock, a server announcing them the other way round.
+	var mixed: Dictionary = set.plan_for([
+		{"dir": "dot_probe", "repo": "dot-probe", "id": old_id, "version": "0.2.0"},
+		{"dir": "dot_core", "repo": "core", "id": "gamespice-platform/core", "version": "0.1.5"},
+	])
+	_check((mixed["wanted"] as Dictionary).keys() == ["dot_probe"], "mixed spellings: only the pack that is newer is wanted", str(mixed["wanted"].keys()))
+
+	var crossed: Dictionary = set.plan_for([{"dir": "dot_probe", "repo": "dot-probe", "id": "gamespice-platform/net", "version": "9.0.0"}])
+	_check((crossed["wanted"] as Dictionary).is_empty() and (crossed["refused"] as Dictionary).has("dot_probe"),
+		"a new id that is another pack's is refused as a mislabelled repository", str(crossed["refused"]))
+
+	var default_ns := DotCloudAddonSet.new()
+	var foreign: Dictionary = default_ns.plan_for([{"dir": "dot_probe", "repo": "probe", "id": "mallory/probe", "version": "9.0.0"}])
+	_check((foreign["refused"] as Dictionary).has("dot_probe"), "the new owner is a default namespace, another owner still is not")
+
+	# What the overlay raised is found under either id as well, and never listed twice.
+	_write(LOCK, "# for addon_set_demo\ndot-probe\tv0.1.0\ndot-core\tv0.1.5\n")
+	DotCloudAddonSet.write_plan({"pack": "user://dot_cloud_addons/overlay-y.pck", "addons": {
+		"dot_probe": {"dir": "dot_probe", "repo": "probe", "id": new_id, "version": "0.2.0"}}})
+	ProjectSettings.set_setting("dot_cloud/addon_overlay", "user://dot_cloud_addons/overlay-y.pck")
+
+	var running := DotCloudAddonSet.running_versions()
+	_check(running.get("dot-probe") == "0.2.0" and not running.has("probe"), "an overlay entry under the new spelling raises the build's entry, not a second one", str(running))
+
+	var held: Dictionary = set.plan_for([_entry("dot_probe", old_id, "0.2.0")])
+	_check((held["wanted"] as Dictionary).is_empty(), "the overlay's version is held across the id change")
+
+	ProjectSettings.set_setting("dot_cloud/addon_overlay", "")
+	DotCloudAddonSet.forget()
+	_check(DotCloudAddonSet.version_of(built, ["unknown", "modcommunity/dot-unknown"]) == ""
+		and not DotCloudAddonSet.has_pack(built, ["modcommunity/dot-unknown"]), "a pack the lock does not have is not found under either id")
 	_done()
 
 
