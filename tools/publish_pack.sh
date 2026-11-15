@@ -177,7 +177,7 @@ fi
 # requires.json: what the pack needs of the host's addons. The solo shell fetches a game's addon packs from it and
 # dot-cloud refuses a pack above the host's levels before mounting, so a game without one misses its addons (Prop Hunt
 # 0.1.16 had no zee_weapons and failed to parse). Derived like dot-ci's package.sh (dot-core's dot_requires.gd, which
-# applies requires.floor.json), then capped at the levels the host's addons.lock pins: the checkout's own addons are
+# applies requires.floor.json, judged against the lock's levels), then capped at the levels the host's addons.lock pins: the checkout's own addons are
 # usually newer than the shell players run. A committed requires.json is the game's word and is only checked: a level
 # above the host's is refused. --host-level NAME=N names a host level by hand (one the lock cannot resolve).
 if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
@@ -185,8 +185,20 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
     if [ -f "$P/project.godot" ] && [ -f "$P/addons/dot_core/tools/dot_requires.gd" ]; then
         REQ="$SRC/requires.json"
         if [ ! -f "$REQ" ]; then
-            REQ="$TMP/requires.json"
-            "$GODOT" --headless --path "$P" --script res://addons/dot_core/tools/dot_requires.gd -- --out "$REQ" >"$TMP/req.log" 2>&1 \
+            REQ="$TMP/requires.json"; PINS=()
+            # Floors are judged against the host lock's levels, not the linked heads, which may be a level past the pinned tag.
+            if [ -f "$P/requires.floor.json" ]; then
+                for a in $(python3 -I -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("addons", {})))' "$P/requires.floor.json"); do
+                    for s in "${HOSTLV[@]}"; do [ "${s%%=*}" = "$a" ] && PINS+=(--pin "$s"); done
+                    for h in "${HOST[@]}"; do
+                        [ -d "$h" ] && h="$h/addons.lock"
+                        [ -f "$h" ] && grep -q $'\t' "$h" || continue
+                        lv="$(host_level "$h" "$P" "$a")" || exit 2
+                        [ -n "$lv" ] && PINS+=(--pin "$a=$lv")
+                    done
+                done
+            fi
+            "$GODOT" --headless --path "$P" --script res://addons/dot_core/tools/dot_requires.gd -- --out "$REQ" "${PINS[@]}" >"$TMP/req.log" 2>&1 \
                 && [ -s "$REQ" ] || { tail -20 "$TMP/req.log" >&2; echo "publish_pack: could not derive requires.json for $P" >&2; exit 1; }
             ARGS+=(--extra-file "requires.json=$REQ")
         fi
