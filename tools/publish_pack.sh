@@ -161,6 +161,8 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
     GARGS=(); for ((i=0; i<${#ARGS[@]}; i++)); do case "${ARGS[i]}" in --id|--exclude-dir) GARGS+=("${ARGS[i]}" "${ARGS[i+1]}") ;; esac; done
     python3 -I "$HERE/tools/check_valve_files.py" "$SRC" "${GARGS[@]}" >&2 || { echo "publish_pack: refusing to publish: the pack holds Valve-origin files (listed above). Nothing was sent." >&2; exit 1; }
 fi
+# No `exec` below: it replaces the shell, so the EXIT trap never ran and every call leaked $TMP
+# (token file, import log, and the whole <out>/bundles + objects tree, GBs on tmpfs).
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 if [ -n "${DOT_CLI_TOKEN:-}" ]; then
     ( umask 077; printf %s "$DOT_CLI_TOKEN" > "$TMP/token" ); TOKEN_FILE="$TMP/token"
@@ -238,14 +240,14 @@ fi
 [ -f "$HERE/.godot/global_script_class_cache.cfg" ] || "$GODOT" --headless --path "$HERE" --import >/dev/null 2>&1 || true
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
 if [ "$CMD" = versions ]; then
-    exec "${RUN[@]}" versions --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"
+    "${RUN[@]}" versions --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"; exit $?
 fi
 if [ "$CMD" = member ]; then
-    exec "${RUN[@]}" member --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"
+    "${RUN[@]}" member --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"; exit $?
 fi
 if [ "$CMD" = relock ]; then
-    exec "${RUN[@]}" relock --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" "${ARGS[@]}"
+    "${RUN[@]}" relock --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" "${ARGS[@]}"; exit $?
 fi
 [ -n "$OUT" ] || OUT="$TMP/out"
-[ "$DRY" ] && exec "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"
+if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
 "${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}"
