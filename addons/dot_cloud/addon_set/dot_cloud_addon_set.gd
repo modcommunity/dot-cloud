@@ -4,7 +4,7 @@ extends RefCounted
 ## Newer addons for a build that already shipped, as packs, applied at the next boot.
 ##
 ## [b]The point: an addon release should not need a new client build.[/b] Every addon tag
-## is already published as a signed pack (`modcommunity/dot-ui@0.1.5`). A server says which
+## is already published as a signed pack (`gamespice-platform/ui@0.1.5`). A server says which
 ## addon versions it runs; a client whose build is older fetches those packs, lays them
 ## over its own `res://addons/<addon>/` in one overlay pack, and restarts into it -- a
 ## page reload in a browser, a relaunch on desktop.
