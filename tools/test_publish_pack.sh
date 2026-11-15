@@ -3,7 +3,12 @@
 # versions, a wrong token, and the lock file after each. Usage: tools/test_publish_pack.sh [godot-binary]
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GODOT="${1:-${GODOT:-godot}}"; export GODOT
+GODOT="${1:-${GODOT:-godot}}"
+# Resolve to an absolute path: the --dry-run check runs with HOME overridden, which hides $HOME/.local/bin from publish_pack's fallback.
+[ -x "$GODOT" ] || GODOT="$(command -v "$GODOT" 2>/dev/null || true)"; [ -n "$GODOT" ] || GODOT="$HOME/.local/bin/godot"; export GODOT
+[ -x "$GODOT" ] || { echo "test_publish_pack: no godot binary (pass one, set GODOT, or put godot on PATH)" >&2; exit 2; }
+# The publish CLI needs dot-core's classes; without the link every check below fails with an unrelated parse error.
+[ -d "$HERE/../addons/dot_core" ] || { echo "test_publish_pack: addons/dot_core missing; run: ln -s ../../dot-core/addons/dot_core addons/dot_core (then rm -rf .godot if a run already cached without it)" >&2; exit 2; }
 W="$(mktemp -d)"; PASS=0; FAIL=0
 chk() { if eval "$2"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $1"; fi; }
 python3 -I "$HERE/test/mock_site.py" "$W/log" secret > "$W/port" & SRV=$!
