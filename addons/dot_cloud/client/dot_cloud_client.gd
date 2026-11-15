@@ -230,6 +230,14 @@ func _exit_tree() -> void:
 func _resolve_scheduler() -> void:
 	if scheduler_ref == null:
 		scheduler_ref = DotNodeRef.of_created(&"CloudScheduler", DotScheduler)
+		# Our own scheduler runs on the main thread in a browser, threaded engine included.
+		# Every job it gets reads or writes user://, and a worker's file call there is
+		# proxied to the page's main thread and answered between frames: measured on
+		# FC's threaded shell, ~350 ms an object, 682 objects verified in about four
+		# minutes on "Unpacking 0 of 1". Sliced on the main thread, the same verify
+		# takes seconds, as it always has on the single-threaded engine.
+		if DotPlatform.is_web() and get_node_or_null(^"CloudScheduler") == null:
+			_add_scheduler()
 
 	var res := scheduler_ref.resolve(self)
 	if res.ok and res.value is DotScheduler:
@@ -243,9 +251,16 @@ func _resolve_scheduler() -> void:
 		"could not resolve a scheduler; creating one",
 		{"ref": scheduler_ref.describe()}
 	)
-	scheduler = DotScheduler.new()
-	scheduler.name = "CloudScheduler"
-	add_child(scheduler)
+	scheduler = _add_scheduler()
+
+
+func _add_scheduler() -> DotScheduler:
+	var s := DotScheduler.new()
+	s.name = "CloudScheduler"
+	# Before add_child: the scheduler starts its workers in _ready.
+	s.use_threads = not DotPlatform.is_web()
+	add_child(s)
+	return s
 
 
 func _build_sources() -> void:

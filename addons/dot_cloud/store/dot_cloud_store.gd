@@ -489,14 +489,24 @@ func verify_all(scheduler: DotScheduler) -> DotResult:
 	var checked := 0
 	var dropped := 0
 
+	var hashes: Array[String] = []
+	var jobs: Array[DotJob] = []
 	for h in _index.keys():
 		var path := path_for(h)
 		if not FileAccess.file_exists(path):
 			_forget(h)
 			dropped += 1
 			continue
+		hashes.append(h)
+		jobs.append(DotHashJob.new(path, h))
 
-		var res := await scheduler.run(DotHashJob.new(path, h))
+	# Submitted together: one await per object costs a frame each when the jobs
+	# run on worker threads (DotCloudMounter._verify_objects says more).
+	var results := await scheduler.run_all(jobs)
+	for i in results.size():
+		var h := hashes[i]
+		var path := path_for(h)
+		var res := results[i]
 		checked += 1
 
 		if not res.ok:

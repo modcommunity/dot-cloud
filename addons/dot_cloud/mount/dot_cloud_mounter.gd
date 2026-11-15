@@ -412,6 +412,8 @@ func _verify_objects(
 	scheduler: DotScheduler
 ) -> DotResult:
 	var seen := {}
+	var jobs: Array[DotJob] = []
+	var job_files: Array[DotCloudFile] = []
 
 	for f in files:
 		if seen.has(f.sha256):
@@ -421,13 +423,18 @@ func _verify_objects(
 		if not store.has(f.sha256):
 			continue
 
-		var res := await scheduler.run(
-			DotHashJob.new(store.path_for(f.sha256), f.sha256)
-		)
+		jobs.append(DotHashJob.new(store.path_for(f.sha256), f.sha256))
+		job_files.append(f)
 
-		if not res.ok:
-			return res.wrap(
-				"Cached content for '%s' failed verification." % f.path
+	# All submitted at once, never one await per object: a worker job's result
+	# reaches the main thread at the scheduler's next frame, so a loop of run()
+	# costs at least a frame per object. On the threaded web build that held
+	# FC's 678 objects on "Unpacking 0 of 1" for minutes.
+	var results := await scheduler.run_all(jobs)
+	for i in results.size():
+		if not results[i].ok:
+			return results[i].wrap(
+				"Cached content for '%s' failed verification." % job_files[i].path
 			)
 
 	return DotResult.success(seen.size())
