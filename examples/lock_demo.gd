@@ -4,7 +4,7 @@ extends Node
 ## Run: godot --headless --path . res://examples/lock_demo.tscn
 
 const WORK := "user://dot_cloud_lock_demo"
-const CHECKS := 50
+const CHECKS := 53
 const SECTIONS := 6
 
 var _failures: int = 0
@@ -56,6 +56,11 @@ func _section_bases() -> void:
 	_check("DOT_PACKS_FROM beats cdn", _bases(doc, {"cdn": "https://c.example", "environment": {"DOT_PACKS_FROM": "/srv/packs"}}) == ["/srv/packs"])
 	_check("--from beats everything", _bases(doc, {"from": "https://f.example/x/", "cdn": "https://c.example", "environment": {"DOT_PACKS_FROM": "/srv"}}) == ["https://f.example/x"])
 	_check("none fetches nothing", _bases(doc, {"environment": {"DOT_PACKS_FROM": "none"}}).is_empty())
+	_check("GS_CDN_URL beats DOT_CDN_URL", _bases(doc, {"environment": {"GS_CDN_URL": "https://g.example", "DOT_CDN_URL": "https://e.example"}}) == ["https://g.example/content"])
+	_check("GS_PACKS_FROM is read", _bases(doc, {"environment": {"GS_PACKS_FROM": "/srv/gs"}}) == ["/srv/gs"])
+	var gsenvf := WORK.path_join("bootstrap_gs.env")
+	DotPaths.write_text(gsenvf, "GS_CDN_URL=\"https://gsfile.example\"\nDOT_CDN_URL=\"https://envfile.example\"\n")
+	_check("GS_CDN_URL in the env file beats DOT_CDN_URL", _bases(doc, {"environment": {}}, gsenvf) == ["https://gsfile.example/content"])
 	_end()
 
 

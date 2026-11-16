@@ -65,9 +65,9 @@ static func resolve_bases(doc: Dictionary, opts: Dictionary, env_file: String) -
 		return PackedStringArray()
 	var file := parse_dotenv(env_file)
 	if from == "" and cdn == "":
-		cdn = str(file.get("DOT_CDN_URL", ""))
+		cdn = str(file.get("GS_CDN_URL", file.get("DOT_CDN_URL", "")))
 	if from == "" and cdn == "":
-		from = str(file.get("DOT_PACKS_FROM", ""))
+		from = str(file.get("GS_PACKS_FROM", file.get("DOT_PACKS_FROM", "")))
 	if cdn != "" and from == "":
 		from = cdn.rstrip("/")
 		if from.contains("://") and not from.ends_with("/content"):
@@ -194,7 +194,9 @@ static func _ident(v: String) -> String:
 
 
 static func _env(environment: Dictionary, key: String) -> String:
-	return str(environment[key]) if environment.has(key) else OS.get_environment(key)
+	if key.begins_with("DOT_") and environment.has("GS_" + key.substr(4)):
+		return str(environment["GS_" + key.substr(4)])
+	return str(environment[key]) if environment.has(key) else DotConfig.gs_env(key)
 
 
 static func _abs(path: String) -> String:
