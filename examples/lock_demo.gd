@@ -49,7 +49,7 @@ func _section_bases() -> void:
 	var envf := WORK.path_join("bootstrap.env")
 	DotPaths.write_text(envf, "# c\nDOT_CDN_URL=\"https://envfile.example\"\n")
 	_check("lock origin then mirrors", _bases(doc, {"environment": {}}) == ["https://dev.example/content", "https://m.example/c"])
-	_check("default dotgames.org", _bases({}, {"environment": {}}) == ["https://dotgames.org/content"])
+	_check("default content.gamespice.net", _bases({}, {"environment": {}}) == ["https://content.gamespice.net/content"])
 	_check("env file beats lock", _bases(doc, {"environment": {}}, envf) == ["https://envfile.example/content"])
 	_check("DOT_CDN_URL beats env file", _bases(doc, {"environment": {"DOT_CDN_URL": "https://e.example/content"}}, envf) == ["https://e.example/content"])
 	_check("--cdn beats DOT_CDN_URL", _bases(doc, {"cdn": "https://c.example", "environment": {"DOT_CDN_URL": "https://e.example"}}, envf) == ["https://c.example/content"])

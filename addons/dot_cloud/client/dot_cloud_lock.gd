@@ -4,7 +4,7 @@ extends RefCounted
 ## A repository's `content.lock.json` read the way dot-bootstrap/tools/fetch_lock.sh reads it: which packs to fetch and
 ## from where. [method DotCloudClient.ensure_locked] mounts the result. Format and rules: docs/cdn-publish.md.
 
-const DEFAULT_ORIGIN := "https://dotgames.org/content"
+const DEFAULT_ORIGIN := "https://content.gamespice.net/content"
 
 ## Parsed `packs` entries that are wanted: {id, version, manifest_sha256, into, kind, optional}.
 var packs: Array[Dictionary] = []
@@ -51,7 +51,7 @@ static func load_file(lock_path: String, opts: Dictionary = {}) -> DotResult:
 
 
 ## The CDN precedence of fetch_lock.sh, first set wins: `from` / DOT_PACKS_FROM (`none` fetches nothing), `cdn` / DOT_CDN_URL, the
-## env file's DOT_CDN_URL then DOT_PACKS_FROM, the lock's `origin` then `mirrors`, https://dotgames.org. A CDN URL is the site root, so
+## env file's DOT_CDN_URL then DOT_PACKS_FROM, the lock's `origin` then `mirrors`, https://content.gamespice.net (formerly dotgames.org, still served). A CDN URL is the site root, so
 ## "/content" is added unless it ends in it. Empty array for `none`.
 static func resolve_bases(doc: Dictionary, opts: Dictionary, env_file: String) -> PackedStringArray:
 	var environment: Dictionary = opts.get("environment", {})
