@@ -12,8 +12,8 @@
 #   .\tools\publish_pack.ps1 versions [-Id NAME] [-Site URL] [-TokenFile FILE]
 #   .\tools\publish_pack.ps1 member -Id NAME -MemberOf ASSET [-Site URL] [-TokenFile FILE]   (move a pack's versions into a collection page)
 #   publish -MemberOf ASSET: publish as a member of that collection asset (keeps -Id, no Workshop page of its own)
-# Token: $env:DOT_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:DOT_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
-# argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:DOT_SITE, else https://tmcdev.net.
+# Token: $env:GS_CLI_TOKEN (a creator token), else the file in -TokenFile / $env:GS_CLI_TOKEN_FILE / ~\.config\dot\cli-token. Never an
+# argument; an env token is copied to a temp file that is removed on exit. Site: -Site, $env:GS_SITE, else https://tmcdev.net.
 # Needs Godot on PATH or -Godot, and python3 for the Valve guard (check_valve_files.py). The upload runs inside Godot (dot_cloud_cli.gd); curl is not used.
 param([Parameter(Position = 0)][ValidateSet('publish', 'versions', 'member')][string]$Command = 'publish',
       [string]$Source, [string]$Id, [string]$Version, [ValidateSet('', 'patch', 'minor', 'major')][string]$Bump = '',
@@ -22,10 +22,11 @@ param([Parameter(Position = 0)][ValidateSet('publish', 'versions', 'member')][st
       [string[]]$HostAddons = @(), [string[]]$HostLevel = @(),
       [string]$Godot, [switch]$DryRun, [switch]$NoImport)
 $ErrorActionPreference = 'Stop'
+foreach ($e in Get-ChildItem env:DOT_*) { $g = 'GS_' + $e.Name.Substring(4); if (-not (Test-Path "env:$g")) { Set-Item "env:$g" $e.Value; if (-not $env:GS_QUIET_DEPRECATION) { [Console]::Error.WriteLine("WARN: $($e.Name) is deprecated, use $g") } } }  # old DOT_* names still work
 $here = Split-Path -Parent $PSScriptRoot
 if (-not $Godot) { $Godot = if ($env:GODOT) { $env:GODOT } else { 'godot' } }
-if (-not $Site) { $Site = $env:DOT_SITE }
-if (-not $TokenFile) { $TokenFile = if ($env:DOT_CLI_TOKEN_FILE) { $env:DOT_CLI_TOKEN_FILE } else { Join-Path $HOME '.config\dot\cli-token' } }
+if (-not $Site) { $Site = $env:GS_SITE }
+if (-not $TokenFile) { $TokenFile = if ($env:GS_CLI_TOKEN_FILE) { $env:GS_CLI_TOKEN_FILE } else { Join-Path $HOME '.config\dot\cli-token' } }
 function Full($p) { if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path (Get-Location).Path $p } }
 
 # HostLevelOf LOCK PROJECT ADDON: the API level the lock pins for ADDON ($null when the lock does not carry it). Same rule as publish_pack.sh.
@@ -63,12 +64,12 @@ function HostNames($f) {
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("publish_pack_" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $tmp | Out-Null
 try {
-    if ($env:DOT_CLI_TOKEN) {
+    if ($env:GS_CLI_TOKEN) {
         $TokenFile = Join-Path $tmp 'token'
-        [IO.File]::WriteAllText($TokenFile, $env:DOT_CLI_TOKEN)
+        [IO.File]::WriteAllText($TokenFile, $env:GS_CLI_TOKEN)
     }
     if (-not $DryRun -and (-not (Test-Path $TokenFile) -or (Get-Item $TokenFile).Length -eq 0)) {
-        Write-Error "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TokenFile)"; exit 2
+        Write-Error "publish_pack: no token (set GS_CLI_TOKEN or write one to $TokenFile)"; exit 2
     }
     $a = @()
     if ($Id) { $a += '--id', $Id }

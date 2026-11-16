@@ -12,9 +12,9 @@ Rules, each hit printed as `<path>: <reason>`; exit 1 when any hit, 2 on a usage
   - Source engine formats: .vtf .vmt .mdl .vvd .vtx .phy .ani are never ours (convert to png/glb)
   - a textures/orig or materials/ folder holding such files, and a pack id ending in _orig
   - a file whose CRC32 and size match an entry of the stock index (any name, any extension): the index is built from the
-    owner's own install (--build-index) and lives outside git: $DOT_VALVE_INDEX, else ~/.cache/dot/valve_stock.idx.
+    owner's own install (--build-index) and lives outside git: $GS_VALVE_INDEX, else ~/.cache/dot/valve_stock.idx.
     Without an index the name/extension rules still run and a note says the content match was skipped.
-No limit on hits listed. $DOT_VALVE_ALLOW names a file of path globs (one per line) that are exempt, for fixtures.
+No limit on hits listed. $GS_VALVE_ALLOW names a file of path globs (one per line) that are exempt, for fixtures.
 """
 import fnmatch, os, subprocess, sys, zlib
 
@@ -23,7 +23,7 @@ SKIP_DIRS = {".git", ".godot"}
 
 
 def index_path():
-    return os.environ.get("DOT_VALVE_INDEX") or os.path.expanduser("~/.cache/dot/valve_stock.idx")
+    return os.environ.get("GS_VALVE_INDEX", os.environ.get("DOT_VALVE_INDEX")) or os.path.expanduser("~/.cache/dot/valve_stock.idx")
 
 
 def load_index(path):
@@ -39,11 +39,11 @@ def load_index(path):
 
 def build_index(out, roots):
     here = os.path.dirname(os.path.abspath(__file__))
-    cands = [os.environ.get("DOT_FAMILY_DIR", ""), os.path.join(here, "..", "..", ".."), "/home/gamedev/godot"]
+    cands = [os.environ.get("GS_FAMILY_DIR", os.environ.get("DOT_FAMILY_DIR", "")), os.path.join(here, "..", "..", ".."), "/home/gamedev/godot"]
     mod = next((os.path.join(c, "dot-map-convert", "dotbsp", "vpk.py") for c in cands
                 if c and os.path.isfile(os.path.join(c, "dot-map-convert", "dotbsp", "vpk.py"))), None)
     if mod is None:
-        print("check_valve_files: dot-map-convert/dotbsp/vpk.py not found; set DOT_FAMILY_DIR", file=sys.stderr); return 2
+        print("check_valve_files: dot-map-convert/dotbsp/vpk.py not found; set GS_FAMILY_DIR", file=sys.stderr); return 2
     # Loaded by path under a stub package: dotbsp's __init__ and vtf pull numpy, which the archive-tree reader does not need.
     import importlib.util, types
     pkg = types.ModuleType("dotbsp"); pkg.__path__ = [os.path.dirname(mod)]
@@ -191,8 +191,8 @@ def main(argv):
     else:
         print("check_valve_files: note: no stock index at %s (--build-index); content-hash match skipped, name/extension rules ran" % ip, file=sys.stderr)
     allow = []
-    if os.environ.get("DOT_VALVE_ALLOW"):
-        allow = [l.strip() for l in open(os.environ["DOT_VALVE_ALLOW"]) if l.strip() and not l.startswith("#")]
+    if os.environ.get("GS_VALVE_ALLOW", os.environ.get("DOT_VALVE_ALLOW")):
+        allow = [l.strip() for l in open((os.environ.get("GS_VALVE_ALLOW") or os.environ["DOT_VALVE_ALLOW"])) if l.strip() and not l.startswith("#")]
     try:
         files = git_files(root, staged) if git else walk(root, excl)
         hits = scan(files, pack_id, idx, allow)

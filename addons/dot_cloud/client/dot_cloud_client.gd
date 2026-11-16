@@ -827,7 +827,7 @@ func ensure_locked(lock_path: String, opts: Dictionary = {}) -> DotResult:
 	var lock: DotCloudLock = loaded.value
 	var report := {"mounted": [], "skipped": lock.skipped.duplicate(), "failed": []}
 	if lock.bases.is_empty():
-		DotLog.info(CHANNEL, "DOT_PACKS_FROM=none, no locked content fetched")
+		DotLog.info(CHANNEL, "GS_PACKS_FROM=none, no locked content fetched")
 		return DotResult.success(report)
 	for p in lock.packs:
 		var id := String(p["id"])

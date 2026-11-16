@@ -6,7 +6,7 @@ TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_valve_fil
 
 
 def run(*args, env=None):
-    e = dict(os.environ, DOT_VALVE_INDEX="/nonexistent"); e.update(env or {})
+    e = dict(os.environ, GS_VALVE_INDEX="/nonexistent"); e.update(env or {})
     return subprocess.run([sys.executable, "-I", TOOL, *args], capture_output=True, text=True, env=e)
 
 
@@ -47,7 +47,7 @@ class Guard(unittest.TestCase):
         with open(idx, "w") as f:
             f.write("%08x\t%d\tmaterials/brick/x.vtf\n" % (zlib.crc32(data), len(data)))
         pack = os.path.join(self.d, "pack"); put(pack, "tex/wall.png", data); put(pack, "tex/other.png", b"mine")
-        r = run(pack, env={"DOT_VALVE_INDEX": idx})
+        r = run(pack, env={"GS_VALVE_INDEX": idx})
         self.assertEqual(r.returncode, 1); self.assertIn("tex/wall.png", r.stdout); self.assertIn("materials/brick/x.vtf", r.stdout)
         self.assertNotIn("other.png", r.stdout)
 
@@ -69,7 +69,7 @@ class Guard(unittest.TestCase):
         self.assertEqual(run("--install-hook", self.d).returncode, 0)
         put(self.d, "m.mdl"); subprocess.run(["git", "-C", self.d, "add", "-A"], check=True)
         c = subprocess.run(["git", "-C", self.d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"],
-                           capture_output=True, text=True, env=dict(os.environ, DOT_VALVE_INDEX="/nonexistent"))
+                           capture_output=True, text=True, env=dict(os.environ, GS_VALVE_INDEX="/nonexistent"))
         self.assertNotEqual(c.returncode, 0); self.assertIn("m.mdl", c.stdout + c.stderr)
 
     def test_excluded_dir_is_not_scanned(self):
@@ -96,7 +96,7 @@ class Guard(unittest.TestCase):
         put(self.d, "fixture/tiny.vpk"); al = os.path.join(self.d, "allow")
         with open(al, "w") as f:
             f.write("fixture/*\n")
-        self.assertEqual(run(self.d, env={"DOT_VALVE_ALLOW": al}).returncode, 0)
+        self.assertEqual(run(self.d, env={"GS_VALVE_ALLOW": al}).returncode, 0)
 
 
 if __name__ == "__main__":

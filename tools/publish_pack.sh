@@ -17,8 +17,8 @@
 # from a copy with links resolved, where a wrapper that finds linked addons by symlink sees none. --pack-addon NAME packs one on purpose.
 # Valve-origin files (.vpk .vtf .vmt .mdl .vvd .vtx .phy, textures/orig, an _orig id, content matching the stock index) are refused: tools/check_valve_files.py.
 # More than 5 addon folders left in the pack is refused (a game ships a handful of its own adapters at most).
-# Token: $DOT_CLI_TOKEN (a creator token), else the file in --token-file / $DOT_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
-# an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, $DOT_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
+# Token: GS_CLI_TOKEN (a creator token), else the file in --token-file / GS_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
+# an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, GS_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
 # The source's project is imported first (--no-import skips it): a fresh clone has .import markers but no .godot/imported outputs.
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
@@ -29,7 +29,7 @@ case "${1:-}" in
     -*|"") ;;
     *) echo "publish_pack: unknown verb '$1' (publish, versions, relock or member; flags start with --)" >&2; exit 2 ;;
 esac
-GODOT="${GODOT:-godot}"; SITE="${DOT_SITE:-}"; TOKEN_FILE="${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}"
+GODOT="${GODOT:-godot}"; SITE="${GS_SITE:-${DOT_SITE:-}}"; TOKEN_FILE="${GS_CLI_TOKEN_FILE:-${DOT_CLI_TOKEN_FILE:-$HOME/.config/dot/cli-token}}"
 # Godot is not on PATH under `sudo -u gamedev heavy` (sudo's secure PATH): fall back to the user's ~/.local/bin/godot.
 command -v "$GODOT" >/dev/null 2>&1 || ! [ -x "$HOME/.local/bin/godot" ] || GODOT="$HOME/.local/bin/godot"
 SRC=""; HOST=(); HOSTLV=(); PACKADD=(); OUT=""; LOCK="content.lock.json"; DRY=""; IMPORT=1; ARGS=()
@@ -51,7 +51,7 @@ while [ $# -gt 0 ]; do
                 *) echo "publish_pack: --version '${2:-}' is not semver (X.Y.Z)" >&2; exit 2 ;;
             esac
             ARGS+=(--version "$2"); shift 2 ;;
-        --token) echo "publish_pack: the token is never an argument; set DOT_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
+        --token) echo "publish_pack: the token is never an argument; set GS_CLI_TOKEN or use --token-file" >&2; exit 2 ;;
         --host-level) HOSTLV+=("${2:?}"); shift 2 ;;
         --id|--bump|--into|--kind|--asset|--member-of|--name|--meta|--exclude-dir|--depends|--min-engine|--entry|--mount-root|--extra-file) ARGS+=("$1" "${2:?publish_pack: $1 needs a value}"); shift 2 ;;
         -*) ARGS+=("$1"); shift ;;
@@ -89,7 +89,7 @@ host_level() {
     printf '%s\n' "${line:-1}"
 }
 # Game addon links are relative (addons/dot_x -> ../../dot-x/addons/dot_x), which resolve beside a ~/godot checkout but dangle in a
-# worktree under ~/wt. Point a dangling one at the same repository in the family directory: $DOT_FAMILY_DIR, else the directory holding
+# worktree under ~/wt. Point a dangling one at the same repository in the family directory: GS_FAMILY_DIR, else the directory holding
 # the project's main checkout (git common dir), else /home/gamedev/godot. A link that resolves is never touched.
 relink_broken_addons() {
     local proj=$1 l t repo fam c
@@ -99,7 +99,7 @@ relink_broken_addons() {
         [ -n "$repo" ] || { echo "publish_pack: $l -> $t is dangling and names no repository" >&2; continue; }
         fam=""
         c="$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-        for d in "${DOT_FAMILY_DIR:-}" "${c:+$(dirname "$(dirname "$c")")}" /home/gamedev/godot; do
+        for d in "${GS_FAMILY_DIR:-${DOT_FAMILY_DIR:-}}" "${c:+$(dirname "$(dirname "$c")")}" /home/gamedev/godot; do
             [ -n "$d" ] && [ -e "$d/$repo/addons/$(basename "$l")" ] && { fam="$d"; break; }
         done
         if [ -n "$fam" ]; then ln -sfn "$fam/$repo/addons/$(basename "$l")" "$l"; echo "publish_pack: relinked $l -> $fam/$repo/addons/$(basename "$l")" >&2
@@ -164,10 +164,10 @@ fi
 # No `exec` below: it replaces the shell, so the EXIT trap never ran and every call leaked $TMP
 # (token file, import log, and the whole <out>/bundles + objects tree, GBs on tmpfs).
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-if [ -n "${DOT_CLI_TOKEN:-}" ]; then
-    ( umask 077; printf %s "$DOT_CLI_TOKEN" > "$TMP/token" ); TOKEN_FILE="$TMP/token"
+if [ -n "${GS_CLI_TOKEN:-${DOT_CLI_TOKEN:-}}" ]; then
+    ( umask 077; printf %s "${GS_CLI_TOKEN:-${DOT_CLI_TOKEN:-}}" > "$TMP/token" ); TOKEN_FILE="$TMP/token"
 fi
-[ -s "$TOKEN_FILE" ] || { [ "$DRY" ] && [ "$CMD" = publish ]; } || { echo "publish_pack: no token (set DOT_CLI_TOKEN or write one to $TOKEN_FILE)" >&2; exit 2; }
+[ -s "$TOKEN_FILE" ] || { [ "$DRY" ] && [ "$CMD" = publish ]; } || { echo "publish_pack: no token (set GS_CLI_TOKEN or write one to $TOKEN_FILE)" >&2; exit 2; }
 [ -n "$SITE" ] && ARGS+=(--site "$SITE")
 if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ "$IMPORT" ]; then
     P="$SRC"; while [ "$P" != / ] && [ ! -f "$P/project.godot" ]; do P="$(dirname "$P")"; done

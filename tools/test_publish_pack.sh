@@ -14,11 +14,11 @@ chk() { if eval "$2"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: 
 python3 -I "$HERE/test/mock_site.py" "$W/log" secret > "$W/port" & SRV=$!
 trap 'kill $SRV 2>/dev/null; rm -rf "$W"' EXIT
 until grep -q PORT= "$W/port"; do sleep 0.2; done
-export DOT_SITE="http://127.0.0.1:$(sed 's/PORT=//' "$W/port")"
+export GS_SITE="http://127.0.0.1:$(sed 's/PORT=//' "$W/port")"
 mkdir -p "$W/src/sub"; echo one > "$W/src/a.txt"; echo two > "$W/src/sub/b.txt"; echo big > "$W/src/c.txt"
 echo '[{"paths": [""], "licence": "CC0-1.0", "author": "Tester", "url": "https://example.com"}]' > "$W/src/licence.json"
 cd "$W"
-pub() { DOT_CLI_TOKEN="${TOK:-secret}" "$HERE/publish_pack.sh" --source "$W/src" --id demo --lock "$W/content.lock.json" "$@" > "$W/out" 2>&1; }
+pub() { GS_CLI_TOKEN="${TOK:-secret}" "$HERE/publish_pack.sh" --source "$W/src" --id demo --lock "$W/content.lock.json" "$@" > "$W/out" 2>&1; }
 pub --version 1.0.0 --into .stores/x --kind store --lock-optional
 chk "first publish exits 0" "[ $? -eq 0 ]"
 chk "lock has 1.0.0" "grep -q '\"version\": \"1.0.0\"' content.lock.json"
@@ -31,22 +31,22 @@ chk "bump exits 0" "[ $? -eq 0 ]"
 chk "lock now 1.0.1" "grep -q '\"version\": \"1.0.1\"' content.lock.json && ! grep -q '\"version\": \"1.0.0\"' content.lock.json"
 chk "republish keeps the entry's into" "grep -q '\.stores/x' content.lock.json"
 chk "only the changed object travelled" "[ \$(( \$(grep -c '^PUT' log) - P1 )) -le 2 ]"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" versions --id demo > "$W/v" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" versions --id demo > "$W/v" 2>&1
 chk "versions lists both" "grep -q 1.0.0 v && grep -q 1.0.1 v"
 "$HERE/publish_pack.sh" frobnicate --source src --id demo > "$W/o2" 2>&1; RC=$?
 chk "unknown verb exits 2 and publishes nothing" "[ $RC -eq 2 ] && grep -q 'unknown verb' o2 && ! grep -q 'frobnicate' log"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" publish --source src --id demo versions > "$W/o2" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" publish --source src --id demo versions > "$W/o2" 2>&1
 chk "stray word after publish (wrapper 'versions') exits 2" "[ $? -eq 2 ] && grep -q unexpected o2"
 NPUT=$(grep -c '^PUT' log)
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source src --id demo --version latest > "$W/o2" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source src --id demo --version latest > "$W/o2" 2>&1
 chk "non-semver --version exits 2" "[ $? -eq 2 ] && grep -q 'not semver' o2 && [ \$(grep -c '^PUT' log) -eq $NPUT ]"
 TOK=wrong pub --bump patch
 chk "wrong token fails" "[ $? -ne 0 ]"
 chk "lock untouched by failure" "grep -q '\"version\": \"1.0.1\"' content.lock.json"
-DOT_CLI_TOKEN=x "$HERE/publish_pack.sh" --token abc --source src --id demo >/dev/null 2>&1
+GS_CLI_TOKEN=x "$HERE/publish_pack.sh" --token abc --source src --id demo >/dev/null 2>&1
 chk "--token refused" "[ $? -eq 2 ]"
 # (b) an unfinished claim: without --resume a clear error, with it the claim is reused
-curl -s -H "Authorization: Bearer secret" -d '{"action":"claim","repoName":"demo","version":"2.0.0","fileCount":1,"byteSize":1}' "$DOT_SITE/api/app/v1/packs" > /dev/null
+curl -s -H "Authorization: Bearer secret" -d '{"action":"claim","repoName":"demo","version":"2.0.0","fileCount":1,"byteSize":1}' "$GS_SITE/api/app/v1/packs" > /dev/null
 pub --version 2.0.0
 chk "open claim without --resume fails" "[ $? -ne 0 ]"
 chk "error names version_taken and --resume" "grep -q version_taken out && grep -q -- '--resume' out"
@@ -70,25 +70,25 @@ pub --version 3.1.0 --member-of 116
 chk "--member-of sends memberOf and publishes as --id" "[ \$? -eq 0 ] && grep -q 'CLAIM memberOf=116' log && grep -q '\"version\": \"3.1.0\"' content.lock.json"
 pub --version 3.1.1 --member-of 116 --asset 7
 chk "--member-of with --asset is refused" "[ \$? -ne 0 ] && grep -q 'no --asset' out"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo --member-of 116 > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo --member-of 116 > "$W/out" 2>&1
 chk "member relinks the pack's versions" "[ \$? -eq 0 ] && grep -q 'MEMBER demo asset=116' log && grep -q 'members of asset 116' out"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id nosuch --member-of 116 > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id nosuch --member-of 116 > "$W/out" 2>&1
 chk "member of an unpublished pack fails" "[ \$? -ne 0 ]"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" member --id demo > "$W/out" 2>&1
 chk "member without --member-of is a usage error" "[ \$? -ne 0 ] && grep -q 'needs --member-of' out"
 # (c) a HELD release has no lock line until approved; relock writes it
 rm -f held.lock.json
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/src" --id heldpack --version 1.0.0 --lock "$W/held.lock.json" > "$W/out" 2>&1
 chk "held publish exits 0 without a lock" "[ $? -eq 0 ] && grep -qi 'held for review' out && [ ! -f held.lock.json ]"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 > "$W/out" 2>&1
 chk "relock before approval fails" "[ $? -ne 0 ] && grep -q 'no READY' out && [ ! -f held.lock.json ]"
-curl -s -X POST "$DOT_SITE/__approve/heldpack/1.0.0" > /dev/null
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 --into .stores/h --kind store > "$W/out" 2>&1
+curl -s -X POST "$GS_SITE/__approve/heldpack/1.0.0" > /dev/null
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" --version 1.0.0 --into .stores/h --kind store > "$W/out" 2>&1
 chk "relock after approval exits 0" "[ $? -eq 0 ]"
 chk "relock wrote the entry with sha, into and kind" "grep -q 'tester/heldpack' held.lock.json && grep -q '\"manifest_sha256\": \"[0-9a-f]\{64\}' held.lock.json && grep -q '\.stores/h' held.lock.json && grep -q '\"store\"' held.lock.json && grep -q 'cdn.test' held.lock.json"
-DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" > "$W/out" 2>&1
+GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" relock --id heldpack --lock "$W/held.lock.json" > "$W/out" 2>&1
 chk "relock with no --version reads it from the lock and keeps into" "[ $? -eq 0 ] && grep -q '\.stores/h' held.lock.json"
-env -u DOT_CLI_TOKEN HOME="$W/nohome" DOT_CLI_TOKEN_FILE="$W/none" "$HERE/publish_pack.sh" --source "$W/src" --id demo --version 9.0.0 --out "$W/dry" --dry-run > "$W/out" 2>&1
+env -u GS_CLI_TOKEN HOME="$W/nohome" GS_CLI_TOKEN_FILE="$W/none" "$HERE/publish_pack.sh" --source "$W/src" --id demo --version 9.0.0 --out "$W/dry" --dry-run > "$W/out" 2>&1
 chk "--dry-run builds with no token and sends nothing" "[ $? -eq 0 ] && [ -f '$W/dry/manifest.json' ] && ! grep -q '9.0.0' log"
 # (d) --host-addons: addons/dot_core is host-owned and left out, addons/zz_x stays; without the flag both ship
 mkdir -p "$W/h/addons/dot_core" "$W/h/addons/zz_x" "$W/hostdir/dot_core" "$W/hostdir/other"; echo c > "$W/h/addons/dot_core/c.gd"; echo x > "$W/h/addons/zz_x/x.gd"; echo r > "$W/h/root.txt"
@@ -191,19 +191,19 @@ chk "ps1 caps and refuses like the bash script" "grep -q \"capped at the host's\
 # (g) a worktree's dangling relative addon link is relinked into the family directory
 mkdir -p "$W/fam/zz-lv/addons/zz_lv" "$W/wt/deep/gm/addons"; printf 'const LEVEL := 3\n' > "$W/fam/zz-lv/addons/zz_lv/zz_lv_api.gd"
 ln -s ../../zz-lv/addons/zz_lv "$W/wt/deep/gm/addons/zz_lv"; printf 'config_version=5\n' > "$W/wt/deep/gm/project.godot"; echo x > "$W/wt/deep/gm/a.txt"
-DOT_FAMILY_DIR="$W/fam" "$HERE/publish_pack.sh" --source "$W/wt/deep/gm" --id gm --version 1.0.0 --dry-run --no-import --pack-addon zz_lv > "$W/out" 2>&1
+GS_FAMILY_DIR="$W/fam" "$HERE/publish_pack.sh" --source "$W/wt/deep/gm" --id gm --version 1.0.0 --dry-run --no-import --pack-addon zz_lv > "$W/out" 2>&1
 chk "dangling addon link is relinked to the family dir" "grep -q 'relinked .*zz_lv' out && [ -e '$W/wt/deep/gm/addons/zz_lv/zz_lv_api.gd' ]"
 # (h) Valve guard: a pack with a stock file is refused (every path listed, nothing sent); a clean pack passes; the ps1 carries the guard
 mkdir -p "$W/vsrc/tex"; echo ok > "$W/vsrc/a.txt"; cp "$W/src/licence.json" "$W/vsrc/"; echo v > "$W/vsrc/tex/brick.vtf"; echo v > "$W/vsrc/hl2_misc_dir.vpk"
 NPUT=$(grep -c '^PUT' log)
-DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1; RC=$?
+GS_VALVE_INDEX=/nonexistent GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1; RC=$?
 chk "pack with Valve files is refused" "[ $RC -ne 0 ] && grep -q 'tex/brick.vtf' out && grep -q 'hl2_misc_dir.vpk' out && grep -q 'Nothing was sent' out && [ \$(grep -c '^PUT' log) -eq $NPUT ]"
-DOT_VALVE_INDEX=/nonexistent "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 --dry-run > "$W/out" 2>&1
+GS_VALVE_INDEX=/nonexistent "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 --dry-run > "$W/out" 2>&1
 chk "the guard also runs on --dry-run" "[ $? -ne 0 ] && grep -q 'tex/brick.vtf' out"
 rm "$W/vsrc/tex/brick.vtf" "$W/vsrc/hl2_misc_dir.vpk"
-DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest_orig --version 1.0.0 > "$W/out" 2>&1
+GS_VALVE_INDEX=/nonexistent GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest_orig --version 1.0.0 > "$W/out" 2>&1
 chk "an _orig pack id is refused" "[ $? -ne 0 ] && grep -q '_orig' out"
-DOT_VALVE_INDEX=/nonexistent DOT_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1
+GS_VALVE_INDEX=/nonexistent GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1
 chk "a clean pack still publishes" "[ $? -eq 0 ] && grep -q 'clean' out"
 chk "ps1 runs the Valve guard" "grep -q 'check_valve_files.py' '$HERE/publish_pack.ps1'"
 python3 -I "$HERE/test_check_valve_files.py" >/dev/null 2>&1
