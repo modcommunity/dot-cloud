@@ -178,4 +178,4 @@ func _write(path: String, text: String) -> void:
 
 
 func _say(text: String) -> void:
-	print("[dot_cloud boot] ", text)
+	print("[gs_cloud boot] ", text)
