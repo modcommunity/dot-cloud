@@ -21,7 +21,7 @@ Everything downstream trusts it: the hashes decide what counts as a valid downlo
 
 A signature inside the manifest over a canonical re-serialisation failed to verify every time, because the file on disk was pretty-printed and the signed bytes were not. Canonical JSON is a whole specification (RFC 8785); an opaque base64url payload means the verifier checks the exact bytes it received with no reformatting anywhere, the same reason JWS is shaped this way. `DotCloudManifest.from_json_bytes()` is the single entry point and unwraps the envelope transparently, so no caller can verify against the wrong bytes.
 
-**RSA, not Ed25519.** Godot's `Crypto` exposes RSA sign/verify via mbedTLS and no EdDSA. Ed25519 would be better and needs a GDExtension.
+**RSA for manifests, Ed25519 for tokens.** Godot's `Crypto` exposes RSA sign/verify via mbedTLS and no EdDSA, so manifests are signed with RSA. `DotCloudSignature.verify_ed25519(bytes, signature, key_bytes)` checks an Ed25519 signature made elsewhere (the site's entitlement tokens; raw 64-byte signature, raw 32-byte key) with the pure-GDScript `DotCloudEd25519` (and `DotCloudSha512`), so it works on every export target. It is strict (RFC 8032: scalar below the group order, canonical key, point on the curve), fails with a code and a reason, and verifies only; it costs about a second of script time, so verify a token once and keep the verdict.
 
 ## A key floor, enforced on verify
 

@@ -116,4 +116,4 @@ Short forms; the reasoning is in the linked file.
 
 ## Deliberately not here
 
-Delta patching (designed in [sources](docs/sources.md#delta-patches-designed-not-built), not built), stored compression (it would break "the filename is the hash of the content"; `Accept-Encoding: gzip` covers the wire), an editor dock (publishing is CLI-only), and Ed25519 (Godot's `Crypto` has no EdDSA; it needs a GDExtension).
+Delta patching (designed in [sources](docs/sources.md#delta-patches-designed-not-built), not built), stored compression (it would break "the filename is the hash of the content"; `Accept-Encoding: gzip` covers the wire), an editor dock (publishing is CLI-only), and a GDExtension Ed25519 (Godot's `Crypto` has no EdDSA; `DotCloudEd25519` is the pure-script verifier, verify only).

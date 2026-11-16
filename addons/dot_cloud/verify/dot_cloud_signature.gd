@@ -19,10 +19,12 @@ extends RefCounted
 ## [member DotCloudConfig.require_signed_manifests] exists and why it defaults to
 ## refusing unsigned content.
 ##
-## [b]RSA, not Ed25519.[/b] Godot's [Crypto] exposes RSA sign/verify through
-## mbedTLS and no EdDSA. Ed25519 would be the better choice — shorter keys,
-## no parameter choices to get wrong — and is not available without a GDExtension.
-## RSA-2048 or better with SHA-256 is what this uses.
+## [b]RSA for manifests, Ed25519 for tokens.[/b] Godot's [Crypto] exposes RSA
+## sign/verify through mbedTLS and no EdDSA, so manifests are signed with
+## RSA-2048 or better and SHA-256. A signature made elsewhere with Ed25519 (the
+## site's entitlement tokens) is checked by [method verify_ed25519], which runs
+## the pure-GDScript [DotCloudEd25519] because a GDExtension would not reach
+## every export target.
 
 const CHANNEL := "cloud.sig"
 
@@ -109,6 +111,21 @@ static func verify(
 		)
 
 	return DotResult.success(true)
+
+
+## Verifies an Ed25519 signature over [param bytes].
+##
+## [param signature] is the raw 64-byte signature and [param key_bytes] the raw 32-byte public
+## key (base64url-decode them first; this takes bytes, not text). Fails loudly with a code for
+## every wrong length, a key off the curve and a signature that does not match; never returns
+## success for anything it did not check. Verification costs a second or two of script time, so
+## verify a token once and keep the verdict.
+static func verify_ed25519(
+	bytes: PackedByteArray,
+	signature: PackedByteArray,
+	key_bytes: PackedByteArray
+) -> DotResult:
+	return DotCloudEd25519.verify(bytes, signature, key_bytes)
 
 
 #
