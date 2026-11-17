@@ -65,6 +65,16 @@ func _run_check(dir: String) -> void:
 	OS.kill(server)
 
 
+## The mock's peak of PUTs in flight since the last call (it resets); -1 if it cannot be read.
+func _peak() -> int:
+	var out: Array = []
+	var code := OS.execute("python3", ["-c", "import urllib.request,sys;sys.stdout.write(urllib.request.urlopen('http://127.0.0.1:%d/peak',timeout=5).read().decode())" % PORT], out, true)
+	if code != 0 or out.is_empty():
+		return -1
+	var doc: Variant = JSON.parse_string(str(out[0]))
+	return int((doc as Dictionary).get("peak", -1)) if doc is Dictionary else -1
+
+
 func _cfg(tok: String) -> String:
 	var cfg := OS.get_user_data_dir().path_join("upload_demo/auth.cfg")
 	var f := FileAccess.open(cfg, FileAccess.WRITE)
@@ -90,6 +100,7 @@ func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
 	var r: DotResult = up._put_many(jobs, cb)
 	var fast := Time.get_ticks_msec() - t0
+	var peak_parallel := _peak()
 	_check(r.ok and r.value == false, "parallel PUTs succeed")
 	_check(seen[0] == 24 and seen[1] == 24 * 8, "progress counts %s" % str(seen))
 
@@ -97,8 +108,12 @@ func _ready() -> void:
 	for j: Dictionary in jobs:
 		_check(up._put(j["put"], j["path"]).ok, "serial PUT")
 	var slow := Time.get_ticks_msec() - t1
-	print("24 objects, 0.2 s each: parallel(6) %d ms, serial %d ms" % [fast, slow])
-	_check(fast * 3 < slow, "parallel is at least 3x faster")
+	var peak_serial := _peak()
+	print("24 objects, 0.2 s each: parallel(6) %d ms, serial %d ms; peak in flight %d / %d" % [fast, slow, peak_parallel, peak_serial])
+	# Counted by the mock, not timed: a loaded build box (PH) stretches wall clock but not overlap.
+	_check(peak_parallel >= 2 and peak_parallel <= 6, "parallel PUTs overlap, at most 6 in flight (peak %d)" % peak_parallel)
+	_check(peak_serial == 1, "serial PUTs never overlap (peak %d)" % peak_serial)
+	_check(fast < slow, "parallel is faster than serial")
 
 	var bad := _jobs(dir, 4, "bb", "ok")
 	bad[2]["put"]["url"] = "http://127.0.0.1:%d/fail/%s" % [PORT, bad[2]["put"]["sha256"]]

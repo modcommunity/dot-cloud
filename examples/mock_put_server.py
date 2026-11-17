@@ -1,7 +1,8 @@
 """Mock site for upload_demo. PUT: /ok/* accepts, /fail/* is 500, /expired/* is 403.
 POST /api/app/v1/packs/upload (manifest, next, finalize; needs a Bearer token) serves the objects under argv[3] (an out dir): the first `next` hands out expired URLs for half of them, later pages fresh ones.
+GET /peak answers {"peak": n}, the most PUTs that were in flight at once since the last /peak, and resets it.
 argv: port, delay seconds, optional out dir."""
-import base64, json, os, sys, time
+import base64, json, os, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -11,6 +12,9 @@ if len(sys.argv) > 3:
         OBJS += [(f, os.path.getsize(os.path.join(d, f))) for f in fs]
 GOT = set()
 ROUND = [0]
+LOCK = threading.Lock()
+INFLIGHT = [0]
+PEAK = [0]
 
 
 class H(BaseHTTPRequestHandler):
@@ -40,9 +44,24 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True, "data": {"status": "READY", "manifestUrl": "u", "manifestSha256": "s"}})
         self._json(400, {"ok": False, "code": "BAD", "message": a})
 
+    def do_GET(self):
+        if self.path != "/peak":
+            return self._json(404, {"ok": False})
+        with LOCK:
+            peak = PEAK[0]
+            PEAK[0] = 0
+        self._json(200, {"peak": peak})
+
     def do_PUT(self):
         self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        time.sleep(float(sys.argv[2]))
+        with LOCK:
+            INFLIGHT[0] += 1
+            PEAK[0] = max(PEAK[0], INFLIGHT[0])
+        try:
+            time.sleep(float(sys.argv[2]))
+        finally:
+            with LOCK:
+                INFLIGHT[0] -= 1
         kind = self.path.split("/")[1]
         code = {"fail": 500, "expired": 403}.get(kind, 200)
         if code == 200:
