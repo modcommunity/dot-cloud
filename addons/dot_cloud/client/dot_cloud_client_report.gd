@@ -5,7 +5,7 @@ extends RefCounted
 
 
 ## Lines describing [param client].
-static func lines(client: DotCloudClient) -> PackedStringArray:
+static func lines(client: Node) -> PackedStringArray:
 	var out := PackedStringArray()
 	out.append("phase            %s" % client.phase_name(client.phase()))
 	out.append("session tag      %s" % client.session_tag)
@@ -28,7 +28,7 @@ static func lines(client: DotCloudClient) -> PackedStringArray:
 
 	out.append("sources:")
 	for s in client.sources:
-		var h := s.health()
+		var h: Dictionary = s.health()
 		out.append("  %-10s %s" % [
 			str(h["source"]),
 			"ok" if bool(h["available"]) else "unavailable",

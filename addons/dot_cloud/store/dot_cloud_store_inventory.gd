@@ -6,7 +6,7 @@ extends RefCounted
 const CHANNEL := "cloud.store"
 
 
-static func inventory(s: DotCloudStore) -> Array[Dictionary]:
+static func inventory(s: RefCounted) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var gone: Array = []
 	for k in s.packs.records:
@@ -32,8 +32,8 @@ static func inventory(s: DotCloudStore) -> Array[Dictionary]:
 	return out
 
 
-static func set_pinned(s: DotCloudStore, id: String, pinned: bool) -> DotResult:
-	var keys := s.packs.keys_for_id(id)
+static func set_pinned(s: RefCounted, id: String, pinned: bool) -> DotResult:
+	var keys: PackedStringArray = s.packs.keys_for_id(id)
 	if keys.is_empty():
 		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
 	for k in keys:
@@ -46,7 +46,7 @@ static func set_pinned(s: DotCloudStore, id: String, pinned: bool) -> DotResult:
 	return DotResult.success(keys.size())
 
 
-static func set_game_pinned(s: DotCloudStore, game: String, pinned: bool) -> DotResult:
+static func set_game_pinned(s: RefCounted, game: String, pinned: bool) -> DotResult:
 	if pinned and game.length() > DotCloudPackBook.MAX_GAME_ID:
 		return DotResult.fail(DotError.CODE_INVALID, "Game id too long.")
 	if pinned and s.packs.pinned_games.size() >= DotCloudPackBook.MAX_PINNED_GAMES and not s.packs.pinned_games.has(game):
@@ -56,7 +56,7 @@ static func set_game_pinned(s: DotCloudStore, game: String, pinned: bool) -> Dot
 		if s.packs.records[k]["game"] == game:
 			s.packs.records[k]["pinned"] = pinned
 			n += 1
-	var at := s.packs.pinned_games.find(game)
+	var at: int = s.packs.pinned_games.find(game)
 	if pinned and at < 0:
 		s.packs.pinned_games.append(game)
 	elif not pinned and at >= 0:
@@ -68,8 +68,8 @@ static func set_game_pinned(s: DotCloudStore, game: String, pinned: bool) -> Dot
 	return DotResult.success(n)
 
 
-static func delete(s: DotCloudStore, id: String, version: String = "", force: bool = false) -> DotResult:
-	var keys := s.packs.keys_for_id(id, version)
+static func delete(s: RefCounted, id: String, version: String = "", force: bool = false) -> DotResult:
+	var keys: PackedStringArray = s.packs.keys_for_id(id, version)
 	if keys.is_empty():
 		return DotResult.fail(DotError.CODE_INVALID, "No downloaded content with that id.", id)
 	for k in keys:
@@ -78,7 +78,7 @@ static func delete(s: DotCloudStore, id: String, version: String = "", force: bo
 		if s.in_use_fn.is_valid() and bool(s.in_use_fn.call(k)):
 			return DotResult.fail(DotError.CODE_STATE, "That content is in use; restart to delete it.", k)
 
-	var shared := s.packs.hashes_used_outside(keys)
+	var shared: Dictionary = s.packs.hashes_used_outside(keys)
 	var freed := 0
 	for k in keys:
 		for h in (s.packs.records[k]["hashes"] as Array):
@@ -99,8 +99,8 @@ static func delete(s: DotCloudStore, id: String, version: String = "", force: bo
 	return DotResult.success(freed)
 
 
-static func quota_report(s: DotCloudStore) -> Dictionary:
-	var free := await s.free_bytes()
+static func quota_report(s: RefCounted) -> Dictionary:
+	var free: int = await s.free_bytes()
 	var quota := -1
 	var usage := -1
 	if DotPlatform.is_web():
@@ -118,7 +118,7 @@ static func quota_report(s: DotCloudStore) -> Dictionary:
 	return {"free": free, "quota": quota, "usage": usage, "quota_cause": cause}
 
 
-static func clear_unpinned(s: DotCloudStore) -> DotResult:
+static func clear_unpinned(s: RefCounted) -> DotResult:
 	var freed := 0
 	var ids := {}
 	for k in s.packs.records.keys():
@@ -126,7 +126,7 @@ static func clear_unpinned(s: DotCloudStore) -> DotResult:
 		if not bool(r["pinned"]) and not (s.in_use_fn.is_valid() and bool(s.in_use_fn.call(k))):
 			ids[k] = r
 	for k in ids:
-		var done := s.delete(ids[k]["id"], ids[k]["version"])
+		var done: DotResult = s.delete(ids[k]["id"], ids[k]["version"])
 		if done.ok:
 			freed += int(done.value)
 	return DotResult.success(freed)

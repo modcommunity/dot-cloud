@@ -11,19 +11,21 @@ const SET_BUDGET := "dot_cloud/warm/budget_msec"
 const SET_BLOCKING := "dot_cloud/warm/blocking_msec"
 const SET_TAIL_BUDGET := "dot_cloud/warm/background_budget_msec"
 const SET_SKIP := "dot_cloud/warm/skip_dirs"
+## Top-level pack folders whose scripts are not warmed ([constant DotCloudClient.WARM_SKIP_DIRS]).
+const SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 
 
 ## True for a file under a tooling directory at any depth: a pack ships `addons/<x>/examples/`, whose scripts do not parse in a running game.
 static func _skipped(path: String) -> bool:
 	var parts := path.split("/")
 	for i in parts.size() - 1:
-		if DotCloudClient.WARM_SKIP_DIRS.has(parts[i]) or (ProjectSettings.get_setting(SET_SKIP, PackedStringArray()) as PackedStringArray).has(parts[i]):
+		if SKIP_DIRS.has(parts[i]) or (ProjectSettings.get_setting(SET_SKIP, PackedStringArray()) as PackedStringArray).has(parts[i]):
 			return true
 	return false
 
 
 ## The addon classes a pack names, compiled while its big objects still download.
-static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> void:
+static func prewarm_classes(c: Node, manifest: DotCloudManifest) -> void:
 	if DotPlatform.has_threads() or c._prewarming or not c.is_inside_tree():
 		return
 	var names := PackedStringArray()
@@ -31,7 +33,7 @@ static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> vo
 	for file in manifest.files:
 		if file.path.get_extension() != "gd" or _skipped(file.path):
 			continue
-		var object := c.store.path_for(file.sha256)
+		var object: String = c.store.path_for(file.sha256)
 		if FileAccess.file_exists(object):
 			names.append(file.path)
 			files.append(object)
@@ -39,7 +41,7 @@ static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> vo
 	c._prewarm = DotCloudSliceLoader.new()
 	var t0 := Time.get_ticks_msec()
 	var classes := DotCloudSliceLoader.named_class_scripts(names, files)
-	var res := await c._prewarm.load_all(c.get_tree(), classes, false)
+	var res: DotResult = await c._prewarm.load_all(c.get_tree(), classes, false)
 	DotLog.info(CHANNEL, "addon classes prewarmed", {
 		"classes": classes.size(), "left_to_warm": c._prewarm.remaining.size(), "ms": Time.get_ticks_msec() - t0, "ok": res.ok,
 	})
@@ -48,7 +50,7 @@ static func prewarm_classes(c: DotCloudClient, manifest: DotCloudManifest) -> vo
 
 
 ## See [method DotCloudClient.warm_content].
-static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringArray, force: bool, on_progress: Callable) -> DotCloudSliceLoader:
+static func warm_content(c: Node, tree: SceneTree, keys: PackedStringArray, force: bool, on_progress: Callable) -> DotCloudSliceLoader:
 	var loader := DotCloudSliceLoader.new()
 	if on_progress.is_valid():
 		loader.progress.connect(func(done: int, total: int, _path: String) -> void: on_progress.call(done, total))
@@ -58,7 +60,7 @@ static func warm_content(c: DotCloudClient, tree: SceneTree, keys: PackedStringA
 	var scripts := PackedStringArray()
 	var seen := {}
 	for key in keys:
-		var manifest := c.manifest_for(key)
+		var manifest: DotCloudManifest = c.manifest_for(key)
 		if manifest == null:
 			continue
 		for file in manifest.files:

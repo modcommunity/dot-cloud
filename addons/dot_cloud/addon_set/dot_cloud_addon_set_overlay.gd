@@ -7,6 +7,9 @@ extends RefCounted
 ## refuses a value over 133169152 bytes (127 MiB): a larger overlay is never saved and the reload never comes.
 const PART_BYTES := 96 * 1024 * 1024
 
+## [constant DotCloudAddonSet.REMAPPED] lives here so this file never names the addon set.
+const REMAPPED := ["gd", "tscn", "tres", "scn", "res", "gdshader", "shader"]
+
 ## [method base] of a pack that holds no addon.
 const NOT_AN_ADDON := "\n"
 
@@ -60,7 +63,7 @@ static func path(dir: String, manifests: Dictionary, fingerprint: String, groups
 ## Adds [param source] at [param target], and its self-pointing `.remap` when it is a resource.
 static func add(packer: Parts, target: String, source: String, remap_file: String) -> int:
 	var err := packer.add_file(target, source)
-	if err == OK and target.get_extension().to_lower() in DotCloudAddonSet.REMAPPED:
+	if err == OK and target.get_extension().to_lower() in REMAPPED:
 		err = add_remap(packer, remap_file, target)
 	return err
 

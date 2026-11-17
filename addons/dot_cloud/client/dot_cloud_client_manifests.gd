@@ -4,7 +4,7 @@ extends RefCounted
 ## [method DotCloudClient.verify_manifest]), in a file of its own so the client stays inside the size budget.
 ## Nothing here is used on its own.
 
-static func resolve(c: DotCloudClient,
+static func resolve(c: Node,
 	content_id: StringName,
 	version: String = "",
 	manifest_url: String = ""
@@ -15,13 +15,13 @@ static func resolve(c: DotCloudClient,
 		return DotResult.fail(DotError.CODE_INVALID, "No content id to resolve.")
 
 	if not c._started:
-		var started := await c.start()
+		var started: DotResult = await c.start()
 		if not started.ok:
 			return started
 
 	var effective_version := version if version != "" else "0.0.0"
 
-	var candidates := (
+	var candidates: PackedStringArray = (
 		PackedStringArray([manifest_url]) if manifest_url != ""
 		else c.manifest_urls_for(content_id, effective_version)
 	)
@@ -37,7 +37,7 @@ static func resolve(c: DotCloudClient,
 	var last: DotResult = null
 
 	for candidate in candidates:
-		var fetched := await c.fetch_manifest(candidate)
+		var fetched: DotResult = await c.fetch_manifest(candidate)
 
 		if not fetched.ok:
 			# Tried in order and the first hit wins, so a base that does not have this
@@ -83,11 +83,11 @@ static func resolve(c: DotCloudClient,
 	)
 
 
-static func fetch(c: DotCloudClient, manifest_url: String) -> DotResult:
+static func fetch(c: Node, manifest_url: String) -> DotResult:
 	var bytes: PackedByteArray
 
 	if c.is_local_manifest_url(manifest_url):
-		var read := DotPaths.read_bytes(c._local_manifest_path(manifest_url))
+		var read := DotPaths.read_bytes(c._local_manifest_path(manifest_url) as String)
 		if not read.ok:
 			return read.wrap("Could not read the content manifest.")
 		bytes = read.value
@@ -101,7 +101,7 @@ static func fetch(c: DotCloudClient, manifest_url: String) -> DotResult:
 			+ "not a URL; set http_base_urls to fetch it"
 		)
 	else:
-		var res := await c._http.get_bytes(manifest_url)
+		var res: DotResult = await c._http.get_bytes(manifest_url)
 		if not res.ok:
 			return res.wrap("Could not download the content manifest.")
 		bytes = res.value
@@ -118,14 +118,14 @@ static func fetch(c: DotCloudClient, manifest_url: String) -> DotResult:
 
 	var manifest: DotCloudManifest = parsed.value
 
-	var checked := c.verify_manifest(manifest)
+	var checked: DotResult = c.verify_manifest(manifest)
 	if not checked.ok:
 		return checked
 
 	# A pack's objects live beside its manifest, so where it came from is always a valid mirror (without it a client pointed at a content root asks
 	# one directory too high). Appended, never prepended: a mirror the publisher named is where the operator wants load. A manifest kept on disk
 	# names no pack directory, so each HTTP base's own one is used instead.
-	var homes := PackedStringArray([manifest_url]) if not c.is_local_manifest_url(manifest_url) \
+	var homes: PackedStringArray = PackedStringArray([manifest_url]) if not c.is_local_manifest_url(manifest_url) \
 		else c._http_manifest_urls(manifest.content_id, manifest.version)
 	for url in homes:
 		var here := url.get_base_dir()
@@ -135,7 +135,7 @@ static func fetch(c: DotCloudClient, manifest_url: String) -> DotResult:
 	return DotResult.success(manifest)
 
 
-static func verify(c: DotCloudClient, manifest: DotCloudManifest) -> DotResult:
+static func verify(c: Node, manifest: DotCloudManifest) -> DotResult:
 	if not c.config.require_signed_manifests:
 		if manifest.signature != "":
 			# Verify anyway when a signature is present: it costs nothing and a
@@ -152,7 +152,7 @@ static func verify(c: DotCloudClient, manifest: DotCloudManifest) -> DotResult:
 				return opportunistic
 		return DotResult.success(true)
 
-	c._set_phase(DotCloudClient.Phase.VERIFYING_SIGNATURE, "Checking content signature…")
+	c._set_phase(c.Phase.VERIFYING_SIGNATURE, "Checking content signature…")
 
 	if manifest.raw_bytes.is_empty():
 		return DotResult.fail(

@@ -25,17 +25,17 @@ const _Finish := preload("dot_cloud_publisher_finish.gd")
 const TOKENS_ENGINE_FILE := "engine.txt"
 
 ## The file at the source root that says what the pack offers a game.
-const PROVIDES_FILE := "provides.json"
+const PROVIDES_FILE := _Sides.PROVIDES_FILE
 const LICENCE_FILE := "licence.json"
 
 ## The file at the source root that says which files only one side fetches (API 8):
 ## [code]{"client": ["lightmaps/"], "server": ["server/*.json"]}[/code]. See [member side_rules].
-const SIDES_FILE := "sides.json"
+const SIDES_FILE := _Sides.SIDES_FILE
 
 ## The file at the source root that puts files in download groups, read next to [constant SIDES_FILE] and
 ## merged with [member group_rules]: [code]{"course_a": ["worlds/course_a.*"]}[/code] or
 ## [code]{"worlds/course_a.*": "course_a"}[/code]. A pattern matching nothing is refused.
-const GROUPS_FILE := "groups.json"
+const GROUPS_FILE := _Groups.GROUPS_FILE
 
 var content_id: String = ""
 var version: String = "0.0.0"

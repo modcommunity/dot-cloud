@@ -4,20 +4,22 @@ extends RefCounted
 ## the size budget. Nothing here is used on its own.
 
 const _Sides := preload("dot_cloud_publisher_sides.gd")
+## [constant GROUPS_FILE] lives here so this file never names the publisher.
+const GROUPS_FILE := "groups.json"
 
 
 ## Reads the source's `groups.json` and returns pack path -> PackedStringArray of the groups the file joins (a path in no rule is absent). Two shapes, mixable: [code]{"group": ["prefix/", "glob*"]}[/code] and [code]{"prefix/": "group"}[/code]
 ## (as `sides.json` and [member DotCloudPublisher.group_rules]). Patterns follow the sides rules (trailing `/` is a directory prefix, else a `String.match` glob where `*` crosses `/`); an `.import` marker and an output relocated to `_imported/` ([param owners]) match by their asset's path.
 ## Refused as CODE_INVALID: a pattern that matches nothing (a typo would publish the files ungrouped and say nothing), an empty group, a pattern that is not a pack path, a malformed entry.
-static func groups_for(pub: DotCloudPublisher, source_dir: String, relatives: PackedStringArray, owners: Dictionary = {}) -> DotResult:
-	var file := source_dir.path_join(DotCloudPublisher.GROUPS_FILE)
+static func groups_for(pub: RefCounted, source_dir: String, relatives: PackedStringArray, owners: Dictionary = {}) -> DotResult:
+	var file := source_dir.path_join(GROUPS_FILE)
 	if not FileAccess.file_exists(file):
 		return DotResult.success({})
 	var read := DotPaths.read_json(file)
 	if not read.ok:
-		return read.wrap("Could not read %s." % DotCloudPublisher.GROUPS_FILE)
+		return read.wrap("Could not read %s." % GROUPS_FILE)
 	if not (read.value is Dictionary):
-		return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % DotCloudPublisher.GROUPS_FILE)
+		return DotResult.fail(DotError.CODE_PARSE, "%s must be a JSON object." % GROUPS_FILE)
 
 	var rules := _rules(read.value as Dictionary)
 	if not rules.ok:
@@ -49,7 +51,7 @@ static func groups_for(pub: DotCloudPublisher, source_dir: String, relatives: Pa
 				"Group rule '%s' (group '%s') matches nothing in the pack." % [rule[0], rule[1]],
 				"a typo here publishes the files ungrouped and says nothing"
 			)
-	DotLog.debug(DotCloudPublisher.CHANNEL, "group rules applied", {"content": pub.content_id, "grouped": out.size()})
+	DotLog.debug(_Sides.CHANNEL, "group rules applied", {"content": pub.content_id, "grouped": out.size()})
 	return DotResult.success(out)
 
 
@@ -81,4 +83,4 @@ static func _rules(doc: Dictionary) -> DotResult:
 
 
 static func _bad(why: String) -> DotResult:
-	return DotResult.fail(DotError.CODE_INVALID, "%s: %s." % [DotCloudPublisher.GROUPS_FILE, why])
+	return DotResult.fail(DotError.CODE_INVALID, "%s: %s." % [GROUPS_FILE, why])

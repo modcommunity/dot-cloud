@@ -9,7 +9,7 @@ const MAX_DEPTH := 4
 ## Resolves a manifest's dependency tree ahead of the downloads and registers each pack's missing bytes, so the job's total is known before the first byte; manifests are kept for [method ensure_dependency].
 ## One level is fetched [member DotCloudConfig.parallel_packs] at a time and registered in list order, so the totals do not depend on which fetch finished first; a manifest that fails to resolve is skipped here and fails in [method ensure_all] with its context.
 ## [param groups] are fetched of this level's packs only, not of theirs.
-static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest, depth: int, groups: PackedStringArray = PackedStringArray()) -> void:
+static func register_dependencies(c: Node, manifest: DotCloudManifest, depth: int, groups: PackedStringArray = PackedStringArray()) -> void:
 	if depth >= MAX_DEPTH or c.job == null:
 		return
 	var wanted: Array = []
@@ -17,7 +17,7 @@ static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest,
 	for dep in manifest.dependencies:
 		var id := StringName(str(dep["id"]))
 		var version := str(dep["version"])
-		var key := DotCloudClient.content_key_for(id, version)
+		var key: String = c.content_key_for(id, version)
 		if seen.has(key) or c.is_mounted(id, version):
 			continue
 		seen[key] = true
@@ -48,25 +48,25 @@ static func register_dependencies(c: DotCloudClient, manifest: DotCloudManifest,
 		c._job_manifests[m.key()] = m
 		if not groups.is_empty():
 			c._job_groups[m.key()] = groups
-		var plan := c.plan_for(m, groups)
+		var plan: Dictionary = c.plan_for(m, groups)
 		c.job.add_pack(m.key(), int(plan["missing_bytes"]), int(plan["missing_files"]))
 		await register_dependencies(c, m, depth + 1)
 
 
 ## Registers an already resolved manifest and its dependency tree.
-static func register_manifest(c: DotCloudClient, m: DotCloudManifest, groups: PackedStringArray = PackedStringArray()) -> void:
+static func register_manifest(c: Node, m: DotCloudManifest, groups: PackedStringArray = PackedStringArray()) -> void:
 	if c.job == null:
 		return
 	c._job_manifests[m.key()] = m
 	if not groups.is_empty():
 		c._job_groups[m.key()] = groups
-	var plan := c.plan_for(m, groups)
+	var plan: Dictionary = c.plan_for(m, groups)
 	c.job.add_pack(m.key(), int(plan["missing_bytes"]), int(plan["missing_files"]))
 	await register_dependencies(c, m, 1)
 
 
 ## The download-only pass over every registered manifest, [member DotCloudConfig.parallel_packs] at a time. Returns {key: DotError} for the failures.
-static func download_all(c: DotCloudClient) -> Dictionary:
+static func download_all(c: Node) -> Dictionary:
 	var manifests: Array = c._job_manifests.values()
 	var failed := {}
 	var state := {"next": 0, "live": 0}
@@ -93,7 +93,7 @@ static func download_all(c: DotCloudClient) -> Dictionary:
 
 
 ## One file of [param m] from the store, fetched alone when missing.
-static func read_file(c: DotCloudClient, m: DotCloudManifest, path: String) -> DotResult:
+static func read_file(c: Node, m: DotCloudManifest, path: String) -> DotResult:
 	var wanted: DotCloudFile = null
 	for f in m.files:
 		if f.path == path:
@@ -115,10 +115,10 @@ static func read_file(c: DotCloudClient, m: DotCloudManifest, path: String) -> D
 
 
 ## [method DotCloudClient.ensure] for one dependency, reusing the manifest [method register_dependencies] already fetched.
-static func ensure_dependency(c: DotCloudClient, dep: Dictionary, below: PackedStringArray) -> DotResult:
+static func ensure_dependency(c: Node, dep: Dictionary, below: PackedStringArray) -> DotResult:
 	var id := StringName(str(dep["id"]))
 	var version := str(dep["version"])
-	var key := DotCloudClient.content_key_for(id, version)
+	var key: String = c.content_key_for(id, version)
 	var known: DotCloudManifest = c._job_manifests.get(key)
 	if known == null or c.is_mounted(id, version):
 		return await c.ensure(id, version, PackedStringArray(), "", below)
@@ -126,7 +126,7 @@ static func ensure_dependency(c: DotCloudClient, dep: Dictionary, below: PackedS
 
 
 ## Acquires every dependency, [member DotCloudConfig.parallel_packs] at a time. A failure stops new ones starting and lets the running ones finish; the result names the first failure in list order and lists every failed id in its context.
-static func ensure_all(c: DotCloudClient, key: String, deps: Array, below: PackedStringArray) -> DotResult:
+static func ensure_all(c: Node, key: String, deps: Array, below: PackedStringArray) -> DotResult:
 	var results: Array = []
 	results.resize(deps.size())
 	var state := {"next": 0, "live": 0, "stop": false}

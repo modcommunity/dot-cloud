@@ -8,15 +8,15 @@ const CHANNEL := "cloud"
 
 ## Downloads the packs a server will want into the store before connecting, mounting nothing; see
 ## [method DotCloudClient.prefetch].
-static func run(c: DotCloudClient, doc: Dictionary) -> DotResult:
+static func run(c: Node, doc: Dictionary) -> DotResult:
 	if not c._started:
-		var started := await c.start()
+		var started: DotResult = await c.start()
 		if not started.ok:
 			return started
 	if DotPlatform.is_web() and not c.config.prefetch_on_web:
 		return DotResult.fail(DotError.CODE_UNSUPPORTED, "Prefetch is off in the browser.", "prefetch_on_web")
 
-	var parsed := parse(doc, c.config.prefetch_max_packs)
+	var parsed := parse(doc, c.config.prefetch_max_packs as int)
 	if not parsed.ok:
 		return parsed
 	var plan: Dictionary = parsed.value
@@ -28,23 +28,23 @@ static func run(c: DotCloudClient, doc: Dictionary) -> DotResult:
 	var skipped: Array = (plan["over_cap"] as Array).duplicate()
 	var fetched := 0
 	var bytes := 0
-	var budget := c.config.prefetch_max_bytes
+	var budget: int = c.config.prefetch_max_bytes
 
 	for entry: Dictionary in plan["packs"]:
 		var id := str(entry["id"])
 		var version := str(entry["version"])
-		var resolved := await c.resolve_manifest(StringName(id), version)
+		var resolved: DotResult = await c.resolve_manifest(StringName(id), version)
 		if not resolved.ok:
 			skipped.append({"id": id, "version": version, "why": resolved.error.message})
 			continue
 		var manifest: DotCloudManifest = resolved.value
-		var need := c.plan_for(manifest)
+		var need: Dictionary = c.plan_for(manifest)
 		var missing := int(need["missing_bytes"])
 		if missing > budget - bytes:
 			skipped.append({"id": id, "version": version, "why": "over the prefetch byte budget (%s)" % DotPaths.format_bytes(missing)})
 			continue
 		var key := manifest.key()
-		var done := await c._download(manifest, PackedStringArray(), key)
+		var done: DotResult = await c._download(manifest, PackedStringArray(), key)
 		# The sync claims refs; a prefetched pack nobody mounted must stay evictable.
 		if not c.mounter.is_mounted(key) and not c._inflight.has(key):
 			c.store.release_refs(key)
@@ -56,7 +56,7 @@ static func run(c: DotCloudClient, doc: Dictionary) -> DotResult:
 		bytes += missing
 
 	if c._inflight.is_empty() and not (c.pool != null and c.pool.running() > 0):
-		c._set_phase(DotCloudClient.Phase.IDLE, "")
+		c._set_phase(c.Phase.IDLE, "")
 	DotLog.info(CHANNEL, "prefetch finished", {
 		"server": plan["server_id"], "fetched": fetched, "skipped": skipped.size(),
 		"bytes": DotPaths.format_bytes(bytes),

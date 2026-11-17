@@ -4,7 +4,7 @@ extends RefCounted
 ## inside the size budget. Nothing here is used on its own.
 
 
-static func describe(store: DotCloudStore) -> Dictionary:
+static func describe(store: RefCounted) -> Dictionary:
 	return {
 		"dir": store.config.cache_dir,
 		"objects": store._index.size(),
@@ -18,7 +18,7 @@ static func describe(store: DotCloudStore) -> Dictionary:
 	}
 
 
-static func describe_lines(store: DotCloudStore) -> PackedStringArray:
+static func describe_lines(store: RefCounted) -> PackedStringArray:
 	var out := PackedStringArray()
 	var d := describe(store)
 	var keys := d.keys()

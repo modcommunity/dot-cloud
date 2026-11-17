@@ -67,7 +67,7 @@ const STATE_FAILED := "failed"
 
 ## The extensions a build may have remapped. Each one in the overlay gets a `.remap`
 ## pointing at itself; anything else is read with FileAccess and needs none.
-const REMAPPED := ["gd", "tscn", "tres", "scn", "res", "gdshader", "shader"]
+const REMAPPED := _Overlay.REMAPPED
 
 ## Where an addon pack may come from: an owner (`modcommunity/`, ending in a slash) or one
 ## exact content id. The signature says who published a pack; this says whose packs may

@@ -1120,7 +1120,7 @@ signal _prewarm_done
 
 
 ## Top-level pack folders whose scripts are not warmed.
-const WARM_SKIP_DIRS := ["tools", "examples", "tests", "ci"]
+const WARM_SKIP_DIRS := _Warm.SKIP_DIRS
 
 
 ## Compiles the scripts of the mounted packs [param keys], and the addon classes they name, a slice
