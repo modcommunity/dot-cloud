@@ -161,10 +161,10 @@ func _section_mount() -> void:
 
 func _section_parser() -> void:
 	_begin("yml subset")
-	var l := DotCloudLock.parse_list("merge: true # c\nremove: [dot-voice, a/b@1]\nentries:\n  - dot-core\n  - dot-vote@v0.2.1\n  - repo: game-arena\n    pin: v1\n  - pack: o/p@1.2.0\n")
+	var l := DotCloudLock.parse_list("merge: true # c\nremove: [dot-voice, a/b@1]\nentries:\n  - dot-core\n  - dot-vote@v0.2.1\n  - repo: game-fatal-contact\n    pin: v1\n  - pack: o/p@1.2.0\n")
 	_check("merge", l["merge"] == true)
 	_check("flow remove", l["remove"] == [["repo", "dot-voice"], ["pack", "a/b"]])
-	_check("block entries", l["entries"] == [["repo", "dot-core"], ["repo", "dot-vote"], ["repo", "game-arena"], ["pack", "o/p"]], str(l["entries"]))
+	_check("block entries", l["entries"] == [["repo", "dot-core"], ["repo", "dot-vote"], ["repo", "game-fatal-contact"], ["pack", "o/p"]], str(l["entries"]))
 	_check("dotenv", DotCloudLock.parse_dotenv(_write("e.env", "A=1\n#B=2\nC = 'x y'\n")) == {"A": "1", "C": "x y"})
 	_end()
 

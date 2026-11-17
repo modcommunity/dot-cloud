@@ -51,7 +51,7 @@ The lock file is `content.lock.json` at the repository root:
 A worked example: pin a CC0 asset store into a game.
 
 ```bash
-cd ~/godot/game-arena
+cd ~/godot/game-fatal-contact
 echo '[{"paths": [""], "licence": "CC0-1.0", "author": "Kenney", "url": "https://kenney.nl"}]' > ~/stores/kenney/licence.json
 export GS_CLI_TOKEN=tmcc_...   # a creator token; or put it in ~/.config/dot/cli-token
 ~/godot/dot-cloud/tools/publish_pack.sh --source ~/stores/kenney --id zz-stores --version 1.0.0 \

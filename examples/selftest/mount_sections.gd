@@ -284,7 +284,7 @@ static func namespaced_ids(h: Node) -> void:
 	# A bare id is what every first-party pack already is, and must not have become
 	# invalid by adding the two-segment form beside it.
 	h._check("a one-segment id still validates",
-		h._manifest("arena", "1.0.0", [["a.txt", body, true]]).validate().ok)
+		h._manifest("fc", "1.0.0", [["a.txt", body, true]]).validate().ok)
 
 	# [b]The separator is the point, so the flattened spelling must stay distinct.[/b]
 	# If these two ever compared equal, the ambiguity this whole form exists to remove

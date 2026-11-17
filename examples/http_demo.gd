@@ -86,10 +86,10 @@ func _run() -> void:
 		return
 
 	var pub := DotCloudPublisher.new()
-	pub.content_id = "http_arena"
+	pub.content_id = "http_fc"
 	pub.version = "1.0.0"
-	pub.display_name = "HTTP Arena"
-	pub.entry_scene = "arena.txt"
+	pub.display_name = "HTTP FC"
+	pub.entry_scene = "fc.txt"
 	pub.signing_key_pem = str(key_pair["private"])
 
 	var published := pub.publish(source_dir, publish_dir)
@@ -712,7 +712,7 @@ func _write_source_content(dir: String) -> DotResult:
 		return wrote_big
 
 	var files := {
-		"arena.txt": "hello over http\n",
+		"fc.txt": "hello over http\n",
 		"data/config.json": "{\"tickrate\": 64}\n",
 	}
 

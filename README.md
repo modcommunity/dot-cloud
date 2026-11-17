@@ -36,7 +36,7 @@ godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- 
 
 godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
     publish --source content/dm_arena --out dist/dm_arena \
-    --id dm_arena --version 1.2.0 --entry arena.tscn --key keys/content.key
+    --id dm_arena --version 1.2.0 --entry dm_arena.tscn --key keys/content.key
 ```
 
 The output is a static directory with a `manifest.json` and an `objects/` tree. Any web server or CDN can host it with no configuration.

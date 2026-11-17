@@ -70,7 +70,7 @@ static func rewrite_paths(abs: String, staged: String, inside: Dictionary, mount
 	return DotResult.success(staged)
 
 
-## The path under another version of this pack ("" when it is not one): `dot_cloud/arena/0.1.24/a.gd` gives `a.gd`.
+## The path under another version of this pack ("" when it is not one): `dot_cloud/fc/0.1.24/a.gd` gives `a.gd`.
 static func _strip_other_version(path: String, mount_root: String, content_id: String, version: String) -> String:
 	var head := "%s/%s/" % [mount_root, content_id]
 	if not path.begins_with(head) or path.begins_with(head + version + "/"):

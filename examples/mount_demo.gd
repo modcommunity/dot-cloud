@@ -191,7 +191,7 @@ func _section_traversal() -> void:
 	# thing mount_root exists to make impossible: mount at res:// and the next
 	# manifest ships scripts/anything.gd.
 	for bad in ["../evil", "1.0.0/../../x", "a/b", "..\\..\\x"]:
-		var m := _manifest("arena", bad, [])
+		var m := _manifest("fc", bad, [])
 		var res := m.validate()
 		_check(
 			"version '%s' refused" % bad,
@@ -201,7 +201,7 @@ func _section_traversal() -> void:
 
 	# ...and the real ones still pass, which is why this is not a slug check.
 	for good in ["1.0.0", "0.0.1", "2.1.0-rc.4+build17", "v3"]:
-		var m := _manifest("arena", good, [])
+		var m := _manifest("fc", good, [])
 		var res := m.validate()
 		_check("version '%s' allowed" % good, res.ok,
 			str(res.error) if not res.ok else "")
@@ -267,7 +267,7 @@ func _section_mount_and_read() -> void:
 	_line("[b]3. mount, read back, and the namespace[/b]")
 
 	var mounter := DotCloudMounter.new(_config)
-	var body := _blob("arena-v1", 2048)
+	var body := _blob("fc-v1", 2048)
 	_store.put_bytes(body, DotHash.sha256_bytes(body))
 
 	# A real .tscn, not a .txt standing in for one. entry_scene_of() gates on
@@ -281,7 +281,7 @@ func _section_mount_and_read() -> void:
 	).to_utf8_buffer()
 	_store.put_bytes(scene_src, DotHash.sha256_bytes(scene_src))
 
-	var m := _manifest("arena", "1.0.0", [
+	var m := _manifest("fc", "1.0.0", [
 		["level.txt", body, true],
 		["level.tscn", scene_src, true],
 	])
@@ -297,7 +297,7 @@ func _section_mount_and_read() -> void:
 	_check("returns the prefix", str(res.value) == m.mount_prefix(), str(res.value))
 	_check(
 		"prefix carries id and version",
-		str(res.value) == "res://dot_cloud/arena/1.0.0", str(res.value)
+		str(res.value) == "res://dot_cloud/fc/1.0.0", str(res.value)
 	)
 
 	var read := DotPaths.read_bytes(m.mount_prefix().path_join("level.txt"))
@@ -331,7 +331,7 @@ func _section_mount_and_read() -> void:
 
 	# An entry_scene the engine has no loader for is an IO failure, not a
 	# success handing back a dead path.
-	var m_txt := _manifest("arena", "1.0.1", [["level.txt", body, true]])
+	var m_txt := _manifest("fc", "1.0.1", [["level.txt", body, true]])
 	m_txt.entry_scene = "level.txt"
 	var txt_mounted: DotResult = await mounter.mount(m_txt, _store, _scheduler)
 	if txt_mounted.ok:

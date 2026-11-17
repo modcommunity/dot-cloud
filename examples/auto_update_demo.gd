@@ -88,7 +88,7 @@ func _section_empty_restarts_at_once() -> void:
 	var u := _make({})
 	_check("defaults: enabled", u.config.enabled and u.config.when_empty)
 	_check("defaults: cap 3600, warn 300", u.config.max_wait == 3600 and u.config.warn_seconds == 300)
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	u.step()
 	_t = 599.0
 	u.step()
@@ -110,7 +110,7 @@ func _section_empty_restarts_at_once() -> void:
 func _section_waits_for_empty() -> void:
 	_begin("players present, when_empty waits")
 	var u := _make({"max_wait": 7200})
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	_players = 4
 	await u.check_now()
 	_check("found", u.state == DotCloudAutoUpdate.State.WAITING)
@@ -130,7 +130,7 @@ func _section_waits_for_empty() -> void:
 func _section_cap_forces_restart() -> void:
 	_begin("cap reached with players present")
 	var u := _make({"max_wait": 1800, "warn_seconds": 300, "warn_steps": ["300", "60", "10", "5"]})
-	_latest = {"gamemann/arena": "0.2.0", "gamemann/surf_map": "1.1.0"}
+	_latest = {"gamemann/fc": "0.2.0", "gamemann/surf_map": "1.1.0"}
 	_players = 3
 	var found: DotResult = await u.check_now()
 	_check("two updates found", found.ok and (found.value as Array).size() == 2, str(found.value))
@@ -166,7 +166,7 @@ func _section_cap_forces_restart() -> void:
 func _section_cap_disabled() -> void:
 	_begin("cap disabled never restarts while occupied")
 	var u := _make({"max_wait": 0})
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	_players = 1
 	await u.check_now()
 	for i in 200:
@@ -184,7 +184,7 @@ func _section_cap_disabled() -> void:
 func _section_not_when_empty() -> void:
 	_begin("when_empty off: countdown, players leave")
 	var u := _make({"when_empty": false, "warn_seconds": 120, "warn_steps": ["300", "60", "10"]})
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	_players = 2
 	await u.check_now()
 	u.step()
@@ -209,7 +209,7 @@ func _section_not_when_empty() -> void:
 func _section_disabled() -> void:
 	_begin("disabled never restarts")
 	var u := _make({"enabled": false})
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	for i in 100:
 		_t += 600.0
 		u.step()
@@ -233,7 +233,7 @@ func _section_disabled() -> void:
 func _section_loop_guard() -> void:
 	_begin("a restart that did not apply is not repeated")
 	var u := _make({})
-	_latest = {"gamemann/arena": "0.2.0"}
+	_latest = {"gamemann/fc": "0.2.0"}
 	await u.check_now()
 	u.step()
 	_check("first restart", _restarts.size() == 1)
@@ -241,17 +241,17 @@ func _section_loop_guard() -> void:
 	var again := _make({}, true)
 	await again.check_now()
 	_check("same version not found again", again.state == DotCloudAutoUpdate.State.IDLE, DotCloudAutoUpdate.State.keys()[again.state])
-	_latest = {"gamemann/arena": "0.3.0"}
+	_latest = {"gamemann/fc": "0.3.0"}
 	await again.check_now()
 	_check("a newer one is", again.state == DotCloudAutoUpdate.State.WAITING)
 	_done(again)
-	_latest = {"gamemann/arena": "0.2.0"}
-	var applied := _make({}, true, [{"id": "gamemann/arena", "version": "0.2.0"}])
+	_latest = {"gamemann/fc": "0.2.0"}
+	var applied := _make({}, true, [{"id": "gamemann/fc", "version": "0.2.0"}])
 	await applied.check_now()
-	_check("applied clears the record", not (applied.describe()["requested"] as Dictionary).has("gamemann/arena"))
+	_check("applied clears the record", not (applied.describe()["requested"] as Dictionary).has("gamemann/fc"))
 	_done(applied)
-	var ignored := _make({"ignore": ["gamemann/arena"]}, false, [{"id": "gamemann/arena", "version": "0.1.0"}])
-	_latest = {"gamemann/arena": "9.0.0"}
+	var ignored := _make({"ignore": ["gamemann/fc"]}, false, [{"id": "gamemann/fc", "version": "0.1.0"}])
+	_latest = {"gamemann/fc": "9.0.0"}
 	await ignored.check_now()
 	_check("ignored id never checked", _asked == 0 and ignored.state == DotCloudAutoUpdate.State.IDLE)
 	_done(ignored)
@@ -320,9 +320,9 @@ func _section_failures() -> void:
 	u.latest_fn = func(_id: String) -> DotResult: return DotResult.fail(DotError.CODE_FORBIDDEN, "Not allowed.")
 	await u.check_now()
 	_check("an unpublished id is not a failure", int(u.last_check.get("errors", 0)) == 0, str(u.last_check))
-	u.latest_fn = func(_id: String) -> DotResult: return DotResult.success({"id": "gamemann/arena2", "version": "0.1.0"})
+	u.latest_fn = func(_id: String) -> DotResult: return DotResult.success({"id": "gamemann/fc2", "version": "0.1.0"})
 	await u.check_now()
-	_check("moved id is an update", u.state == DotCloudAutoUpdate.State.WAITING and str(u.updates[0]["to"]) == "gamemann/arena2@0.1.0", str(u.updates))
+	_check("moved id is an update", u.state == DotCloudAutoUpdate.State.WAITING and str(u.updates[0]["to"]) == "gamemann/fc2@0.1.0", str(u.updates))
 	_done(u)
 
 
@@ -334,9 +334,9 @@ func _make(overrides: Dictionary, keep_state: bool = false, running: Array = [])
 	_warn_texts = []
 	_restarts = []
 	_running = running if not running.is_empty() else [
-		{"id": "gamemann/arena", "version": "0.1.0"},
+		{"id": "gamemann/fc", "version": "0.1.0"},
 		{"id": "gamemann/surf_map", "version": "1.0.0"},
-		{"id": "gamemann/arena", "version": "0.1.0"},
+		{"id": "gamemann/fc", "version": "0.1.0"},
 	]
 	if not keep_state:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(WORK.path_join("state.json")))

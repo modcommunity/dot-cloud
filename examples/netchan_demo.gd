@@ -138,9 +138,9 @@ func _prepare() -> bool:
 		return false
 
 	var pub := DotCloudPublisher.new()
-	pub.content_id = "netchan_arena"
+	pub.content_id = "netchan_fc"
 	pub.version = "1.0.0"
-	pub.display_name = "Netchan Arena"
+	pub.display_name = "Netchan FC"
 	pub.signing_key_pem = str(_key_pair["private"])
 
 	var published := pub.publish(source_dir, _publish_dir)

@@ -5,7 +5,7 @@ extends SceneTree
 ## [codeblock]
 ## godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
 ##     publish --source content/dm_arena --out dist/dm_arena \
-##     --id dm_arena --version 1.2.0 --entry arena.tscn \
+##     --id dm_arena --version 1.2.0 --entry dm_arena.tscn \
 ##     --key keys/content.key --mirror https://cdn.example.com/dm_arena
 ##
 ## godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \

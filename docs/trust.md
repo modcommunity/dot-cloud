@@ -29,7 +29,7 @@ A signature inside the manifest over a canonical re-serialisation failed to veri
 
 ## A key says what it is trusted for
 
-A bare PEM in `trusted_keys` is trusted for every content id there is. With two publishers that is the hole: the second signs a manifest claiming `content_id: arena`, and any client that has not mounted it takes the pack, code included, under somebody else's game's name. An entry may name its namespace:
+A bare PEM in `trusted_keys` is trusted for every content id there is. With two publishers that is the hole: the second signs a manifest claiming `content_id: fc`, and any client that has not mounted it takes the pack, code included, under somebody else's game's name. An entry may name its namespace:
 
 ```json
 "trusted_keys": {
@@ -41,7 +41,7 @@ A bare PEM in `trusted_keys` is trusted for every content id there is. With two 
 }
 ```
 
-`verify_for` does both halves and the failure says which ("The manifest is not signed by any trusted key" against "'community-alice' is not trusted to publish 'arena'"). **Verification first, entitlement second**: a scope check on an unverified manifest is a check on a claim the attacker wrote.
+`verify_for` does both halves and the failure says which ("The manifest is not signed by any trusted key" against "'community-alice' is not trusted to publish 'fc'"). **Verification first, entitlement second**: a scope check on an unverified manifest is a check on a claim the attacker wrote.
 
 `DotCloudConfig.validate()` warns about several keys with at least one unscoped, and says nothing about a single unscoped key. It warns rather than refuses: a client that will not start is worse than one that says so, and the content still has to be signed by a key in the set.
 

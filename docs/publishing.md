@@ -8,7 +8,7 @@ godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- 
 
 godot --headless --path . --script addons/dot_cloud/publish/dot_cloud_cli.gd -- \
     publish --source content/dm_arena --out dist/dm_arena \
-    --id dm_arena --version 1.2.0 --entry arena.tscn \
+    --id dm_arena --version 1.2.0 --entry dm_arena.tscn \
     --key keys/content.key --mirror https://cdn.example.com/dm_arena
 ```
 
@@ -30,7 +30,7 @@ A `.glb` or a `.png` is **not a loadable resource**. The editor imports it into 
 
 ```
 character-a.glb    exists=false  file=true   load=null
-arena.tscn         exists=true   file=true   load=PackedScene
+dm_arena.tscn         exists=true   file=true   load=PackedScene
 ```
 
 `file=true` is the trap. `include_imported` (on by default) ships the imported form and the markers, and `_is_text_resource` covers `.import` so the rewrite below moves the three absolute paths inside each marker (the imported resource, the source file, `dest_files`) onto the mount. The `.md5` companions stay behind: only the editor reads them.

@@ -44,7 +44,7 @@ func _run() -> void:
 		DotPaths.write_bytes(src.path_join(junk), PackedByteArray([1, 2, 3, 4]))
 
 	var pub := DotCloudPublisher.new()
-	pub.content_id = "bundle_arena"
+	pub.content_id = "bundle_fc"
 	pub.version = "1.0.0"
 	pub.entry_scene = "big.bin"
 	pub.signing_key_pem = str(_key_pair["private"])
@@ -126,7 +126,7 @@ func _corrupt_bundle(base: String) -> void:
 	_check("it was requested once", _count("/bundles/") == 1)
 	_check("every object fell back to its own request", _count("/objects/") == SMALL + 1, str(_count("/objects/")))
 	_check("the mounted content is readable",
-		FileAccess.file_exists("res://dot_cloud/bundle_arena/1.0.0/imp/file_000.ctex"))
+		FileAccess.file_exists("res://dot_cloud/bundle_fc/1.0.0/imp/file_000.ctex"))
 	_drop(client)
 	_server.corrupt_paths.clear()
 

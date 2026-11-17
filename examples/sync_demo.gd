@@ -69,10 +69,10 @@ func _run() -> void:
 
 	# 3. publish
 	var pub := DotCloudPublisher.new()
-	pub.content_id = "demo_arena"
+	pub.content_id = "demo_fc"
 	pub.version = "1.0.0"
-	pub.display_name = "Demo Arena"
-	pub.entry_scene = "arena.txt"
+	pub.display_name = "Demo FC"
+	pub.entry_scene = "fc.txt"
 	pub.signing_key_pem = str(key_pair["private"])
 	pub.optional_prefixes = PackedStringArray(["optional/"])
 	pub.group_rules = {"optional/": "extras"}
@@ -173,7 +173,7 @@ func _run() -> void:
 	])
 
 	# 8. read content back out of the mount
-	var mounted_path := manifest.mount_prefix().path_join("arena.txt")
+	var mounted_path := manifest.mount_prefix().path_join("fc.txt")
 	var read_back := DotPaths.read_text(mounted_path)
 
 	_check(
@@ -187,7 +187,7 @@ func _run() -> void:
 	_line("  mount prefix     %s" % manifest.mount_prefix())
 	_check(
 		"namespaced",
-		mounted_path.begins_with("res://dot_cloud/demo_arena/1.0.0/"),
+		mounted_path.begins_with("res://dot_cloud/demo_fc/1.0.0/"),
 		mounted_path
 	)
 
@@ -264,7 +264,7 @@ func _write_source_content(dir: String) -> DotResult:
 	var shared := "the same bytes in two places\n"
 
 	var files := {
-		"arena.txt": "hello from the mounted pack\n",
+		"fc.txt": "hello from the mounted pack\n",
 		"data/config.json": "{\"tickrate\": 64}\n",
 		"data/copy_a.txt": shared,
 		"data/copy_b.txt": shared,

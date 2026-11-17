@@ -83,7 +83,7 @@ const DATA_PROVIDES := {
 	"schema": 1, "title": "Fixture pack", "kinds": ["map", "weapon", "prop"], "games": "*",
 	"categories": [{"id": "fx", "name": "Fixtures"}],
 	"entries": [
-		{"kind": "map", "id": "arena_one", "name": "Arena One", "scene": "maps/one.tscn",
+		{"kind": "map", "id": "fc_one", "name": "FC One", "scene": "maps/one.tscn",
 			"map_kind": "sandbox", "thumbnail": "maps/one_thumb.bin", "category": "fx"},
 		{"kind": "weapon", "id": "blaster", "name": "Blaster", "def": "weapons/blaster.tres", "slot": 2},
 		{"kind": "prop", "id": "crate", "name": "Crate", "scene": "props/crate.tscn", "tags": ["wood"]},
@@ -180,8 +180,8 @@ func _check_mount_and_sessions() -> void:
 	_check(_index.entries(&"map").size() == 1, "the index lists the map")
 	_check(_index.entries(&"weapon").size() == 1, "the weapon")
 	_check(_index.entries(&"prop").size() == 1, "and the prop")
-	var m := _index.entry("ws_data@1.0.0:map/arena_one")
-	_check(m != null and m.name == "Arena One" and m.source == &"subscription", "typed fields, source subscription")
+	var m := _index.entry("ws_data@1.0.0:map/fc_one")
+	_check(m != null and m.name == "FC One" and m.source == &"subscription", "typed fields, source subscription")
 	_check(m != null and ResourceLoader.exists(m.path("scene")), "the map's scene path resolves onto the mount", m.path("scene") if m != null else "")
 	_check(m != null and FileAccess.file_exists(m.path("thumbnail")), "and so does its thumbnail")
 	_check(m != null and m.pack_title == "Fixture pack" and m.category == "fx", "pack title and category carried")
@@ -211,7 +211,7 @@ func _check_mount_and_sessions() -> void:
 	_check(pub.ok and srv.ok, "a server's pack mounts online")
 	_check(_index.entries(&"map").size() == 2, "online lists the server's map and the reused one")
 	_index.set_session(&"solo")
-	_check(_index.entries(&"map").size() == 1 and _index.entry("ws_server@1.0.0:map/arena_one").has_session(&"online"), "solo does not list the server's pack")
+	_check(_index.entries(&"map").size() == 1 and _index.entry("ws_server@1.0.0:map/fc_one").has_session(&"online"), "solo does not list the server's pack")
 
 	# A plain ensure tags with session_tag.
 	var plain_src := WORK.path_join("src_plain_tag")
@@ -221,7 +221,7 @@ func _check_mount_and_sessions() -> void:
 	var plain := await _cloud.ensure(&"ws_plain_tag", "1.0.0", PackedStringArray(), _manifest_url("ws_plain_tag"))
 	_cloud.session_tag = &"online"
 	_check(plain.ok and _index.entries(&"map").size() == 2, "a plain ensure is tagged with session_tag")
-	_check(_index.entry("ws_plain_tag@1.0.0:map/arena_one").source == &"game", "and takes source game when solo")
+	_check(_index.entry("ws_plain_tag@1.0.0:map/fc_one").source == &"game", "and takes source game when solo")
 
 	var lines := _cloud.describe_lines()
 	var joined := "\n".join(lines)

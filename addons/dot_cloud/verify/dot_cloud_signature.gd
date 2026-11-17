@@ -132,8 +132,8 @@ static func verify_ed25519(
 # [b]A key used to be trusted for every content id there is, and with one key that is a
 # distinction without a difference.[/b] The moment a deployment adds a second publisher it
 # is not: nothing checked that the key which verified a manifest was entitled to the id
-# inside it, so a second key could sign a manifest claiming `content_id: arena` and every
-# client that had not already mounted `arena@…` would take it -- the pack's own scripts,
+# inside it, so a second key could sign a manifest claiming `content_id: fc` and every
+# client that had not already mounted `fc@…` would take it -- the pack's own scripts,
 # under the name of somebody else's game.
 #
 # So an entry may name what it covers:
