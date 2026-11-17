@@ -174,7 +174,7 @@ func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_
 			entries.append({"kind": "prop", "id": "p", "name": id + " prop", "scene": "props/p.tscn"})
 		"script":
 			DotPaths.write_text(dir.path_join("hooks/h.gd"), "extends Node\n")
-			entries.append({"kind": "script", "id": "h", "name": id + " hook", "script": "hooks/h.gd", "hook": "playground"})
+			entries.append({"kind": "script", "id": "h", "name": id + " hook", "script": "hooks/h.gd", "hook": "playlot"})
 	if pad > 0:
 		DotPaths.write_text(dir.path_join("pad.bin"), "x".repeat(4096))
 	DotPaths.write_text(dir.path_join("provides.json"), JSON.stringify({

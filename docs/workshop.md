@@ -72,7 +72,7 @@ Every entry has `kind`, `id` (unique within the pack and kind, `[a-z0-9_]+`), `n
 | `entity` | `script` (a path to a script a game spawns as an entity, game-playlot's shape) | the game |
 | `tool` | `script` | the game (game-playlot's tool gun) |
 | `sound` | `stream` | dot-audio, or the game |
-| `script` | `script`, `hook` (the hook name, for example `playground`) | the game's hook loader (game-playlot's `playground_hook.gd` contract) |
+| `script` | `script`, `hook` (the hook name, for example `playlot`) | the game's hook loader (game-playlot's `playlot_hook.gd` contract) |
 | `addon` | `dir` | **not mounted from a subscription** (see [online isolation](#online-isolation)) |
 | `game` | none; uses `accepts` | the site and the shell; never subscribable |
 
