@@ -107,12 +107,12 @@ func _run() -> void:
 ## `packs/<id>-<version>.pck` and reused whenever that path existed, on the stated
 ## assumption that a pack built for one id@version is byte-identical to any other. That
 ## is true of the bytes a publisher has already shipped and false of the loop that
-## produces them: a box republished `g2gfast@0.1.0` from a corrected source, the client
+## produces them: a box republished Airdrift's game pack at `0.1.0` (then under its former id) from a corrected source, the client
 ## downloaded and verified every object of the NEW manifest, and then mounted the OLD
 ## pack —
 ##
 ##     A required file is not readable after mounting.
-##     res://dot_cloud/g2gfast/0.1.0/game/g2g_paths.gd
+##     res://dot_cloud/<id>/0.1.0/game/<its paths script>.gd
 ##
 ## a file that is in the manifest, is in the store, and is not in the pack. Caught by
 ## `_check_prefix`, which is the last thing between that and a game with no behaviour.

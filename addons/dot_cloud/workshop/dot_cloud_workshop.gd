@@ -11,7 +11,7 @@ extends "dot_cloud_workshop_base.gd"
 ## ws.ask_fn = func(summary: Dictionary) -> bool: return await my_dialog.ask(summary)
 ## ws.config.workshop_backbone_url = "https://tmcdev.net"
 ## add_child(ws)                                              # beside the DotCloudClient
-## var res := await ws.sync("gamemann/game-playground")
+## var res := await ws.sync("gamemann/game-playlot")
 ## [/codeblock]
 ##
 ## [b]It never runs for an online session[/b], and says so with [constant DotError.CODE_FORBIDDEN]

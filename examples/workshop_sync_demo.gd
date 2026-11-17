@@ -14,7 +14,7 @@ extends Node
 
 ## Per process: two runs at once (the heavy queue allows two) would otherwise delete each other's files.
 var WORK := "user://dot_cloud_workshop_sync_demo_%d" % OS.get_process_id()
-const GAME := "gamemann/game-playground"
+const GAME := "gamemann/game-playlot"
 const CHECKS := 136
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
