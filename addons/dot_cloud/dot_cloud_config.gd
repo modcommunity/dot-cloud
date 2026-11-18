@@ -12,7 +12,16 @@ extends DotConfig
 
 ## Cache ceiling in bytes; 0 is unlimited. Unreferenced objects are evicted LRU past it.
 ## Defaults to 4 GiB, far too much for a phone (see [member mobile_cache_bytes]).
+## [b]A dedicated server should set 0[/b] (or a size it chose): it mounts every map in its rotation, every
+## mounted object is referenced and cannot be evicted, so past this ceiling the next map is refused with
+## "the content cache is full" on a disk with gigabytes free. Env [code]DOT_CLOUD_CACHE_BYTES[/code],
+## argument [code]--cloud-cache-bytes[/code].
 @export var cache_bytes: int = 4 * 1024 * 1024 * 1024
+
+## Where an operator of this host changes the ceiling, said in a quota refusal beside the dot-cloud
+## keys (a host with its own config file sets it, e.g. "cache_bytes in cfg/server/server.yml").
+## Not layered from JSON or the environment: it describes the host, it is not a setting.
+var limit_hint: String = ""
 
 ## Cache ceiling on mobile, where filling the device's storage gets the app
 ## killed or uninstalled rather than merely inconvenienced.
@@ -248,6 +257,11 @@ func effective_cache_bytes() -> int:
 	if DotPlatform.is_mobile():
 		return mobile_cache_bytes
 	return cache_bytes
+
+
+## The key that sets [method effective_cache_bytes] here, for a message that tells an operator what to change.
+func limit_key() -> String:
+	return "mobile_cache_bytes" if DotPlatform.is_mobile() else "cache_bytes"
 
 
 func objects_dir() -> String:

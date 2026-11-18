@@ -60,5 +60,7 @@ extends RefCounted
 # 30: DotCloudAddonSet.version_of / has_pack: the build's lock is found under the old
 #     (`modcommunity/dot-<name>`) or the new (`gamespice-platform/<name>`) id, and `gamespice-platform/` is a default
 #     namespace. Additive.
-const LEVEL := 30
+# 31: DotCloudConfig.limit_key / limit_hint, DotCloudStore describe() disk_free; a quota refusal names the limit, the
+#     key that sets it, referenced bytes and the disk free. Additive.
+const LEVEL := 31
 const OLDEST := 1

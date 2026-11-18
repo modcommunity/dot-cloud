@@ -36,7 +36,7 @@ const SECTIONS := 6
 ## Every check this suite runs, including the two at the end that compare the counts. The
 ## section counter cannot see a section that aborted after announcing itself — its remaining
 ## checks simply never run — and a total can. See docs/testing.md.
-const CHECKS := 58
+const CHECKS := 62
 
 var _entered := 0
 var _completed := 0
@@ -189,6 +189,22 @@ func _section_pressure() -> void:
 		"%d objects" % store.object_count())
 	_check("says what is in use", str(stuck.error).contains("referenced"),
 		str(stuck.error))
+	# An operator reading the log line must not need the code: the limit and the key that sets it,
+	# what is referenced, and the disk free (a 4 GiB ceiling on a disk with 10 GiB free is a
+	# setting to change, not a disk to clean; a prod server was refused maps exactly so).
+	var said := str(stuck.error)
+	_check("names the limit and its key", said.contains("limit 4.0 KiB (cache_bytes)")
+		and said.contains("DOT_CLOUD_CACHE_BYTES") and said.contains("--cloud-cache-bytes")
+		and said.contains("set it to 0 for unlimited"), said)
+	_check("says referenced bytes and disk free", said.contains("4.0 KiB referenced")
+		and said.contains("disk free ") and not said.contains("disk free unknown"), said)
+	store.config.limit_hint = "cache_bytes in cfg/server/server.yml"
+	var hinted := store.prune(OBJ)
+	_check("adds the host's own hint", not hinted.ok
+		and str(hinted.error).contains("here: cache_bytes in cfg/server/server.yml"), str(hinted.error))
+	store.config.limit_hint = ""
+	_check("status shows disk free", str(store.describe().get("disk_free", "")).ends_with("B"),
+		str(store.describe()))
 
 	# Unmounting makes them candidates again without deleting anything, so a
 	# player who reconnects before the cache fills still has the content.

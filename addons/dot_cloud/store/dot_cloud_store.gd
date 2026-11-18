@@ -393,13 +393,8 @@ func prune(need_bytes: int = 0) -> DotResult:
 	if freed < target:
 		return DotResult.fail(
 			DotError.CODE_QUOTA,
-			"The content cache is full and everything in it is in use.",
-			"freed %s of %s needed; %d object(s) are referenced by mounted content"
-				% [
-					DotPaths.format_bytes(freed),
-					DotPaths.format_bytes(target),
-					_index.size() - candidates.size(),
-				]
+			"The content cache is full (its %s limit) and everything in it is in use." % DotPaths.format_bytes(_limit_bytes),
+			_Report.quota_detail(self, freed, target, _index.size() - candidates.size())
 		)
 
 	return DotResult.success(freed)

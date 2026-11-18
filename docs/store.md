@@ -34,6 +34,9 @@ A partial's bytes are verified by nothing until the whole object commits; see [s
 | **Web CORS** | Every fetch is subject to it and `fetch()` will not say why it failed. A content host must send `Access-Control-Allow-Origin`, `Access-Control-Allow-Headers: Range`, and `Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges, ETag`. Without `Range`, resume is impossible; without the exposed headers, undetectable. Same-origin content avoids all of it. |
 | **No threads on web** | Hashing goes through `DotHashJob` on a `DotScheduler`, sliced against a frame budget when there is no worker. |
 | **Mobile** | `mobile_cache_bytes` (1 GiB) replaces `cache_bytes` (4 GiB). Filling a phone's storage gets the app killed. |
+| **Dedicated server** | Set `cache_bytes` to 0 (unlimited) or a size of its own. A server mounts every map in its rotation and a mounted object is referenced, so it can never be evicted: past the 4 GiB desktop default the next map is refused ("the content cache is full and everything in it is in use") on a disk with gigabytes free. dot-server-deploy does this for you (`cache_bytes` in `cfg/server/server.yml`, default 0). |
+
+**A quota refusal says what to change.** `prune` fails with `CODE_QUOTA` and a detail naming the bytes freed and needed, the referenced objects and bytes, the limit and the key that sets it (`cache_bytes`, or `mobile_cache_bytes` on a phone, with its `DOT_CLOUD_*` variable and `--cloud-*` argument), the disk free at `cache_dir`, and `DotCloudConfig.limit_hint` when the host set one (where its own operators change it). `describe()` (the `client ready` line and `cloud_status`) carries `disk_free` too (API 31).
 
 ## Inventory, pins and deletion
 
