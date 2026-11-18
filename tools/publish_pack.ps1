@@ -74,7 +74,14 @@ try {
     $a = @()
     if ($Id) { $a += '--id', $Id }
     if ($Site) { $a += '--site', $Site }
-    if (-not (Test-Path (Join-Path $here '.godot\global_script_class_cache.cfg'))) {
+    # A cache older than any of this checkout's scripts (a pull that added a class_name) is re-imported too.
+    $cache = Join-Path $here '.godot\global_script_class_cache.cfg'
+    $stale = -not (Test-Path $cache)
+    if (-not $stale) {
+        $t = (Get-Item $cache).LastWriteTime
+        $stale = [bool](Get-ChildItem (Join-Path $here 'addons') -Recurse -Filter *.gd -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt $t } | Select-Object -First 1)
+    }
+    if ($stale) {
         & $Godot --headless --path $here --import *> $null
     }
     $run = @('--headless', '--path', $here, '--script', 'addons/dot_cloud/publish/dot_cloud_cli.gd', '--')

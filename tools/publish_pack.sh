@@ -237,7 +237,12 @@ PY
         echo "publish_pack: note: $P has no addons/dot_core/tools/dot_requires.gd; the pack ships without requires.json" >&2
     fi
 fi
-[ -f "$HERE/.godot/global_script_class_cache.cfg" ] || "$GODOT" --headless --path "$HERE" --import >/dev/null 2>&1 || true
+# The CLI runs from this checkout's own class cache, so a cache older than any of its scripts (a pull that added a
+# class_name) is re-imported, not only a missing one: a stale cache failed every publish with "DotCloudEd25519 not declared".
+CACHE="$HERE/.godot/global_script_class_cache.cfg"
+if [ ! -f "$CACHE" ] || [ -n "$(find "$HERE/addons" -name '*.gd' -newer "$CACHE" -print -quit 2>/dev/null)" ]; then
+    "$GODOT" --headless --path "$HERE" --import >/dev/null 2>&1 || true
+fi
 RUN=("$GODOT" --headless --path "$HERE" --script addons/dot_cloud/publish/dot_cloud_cli.gd --)
 if [ "$CMD" = versions ]; then
     "${RUN[@]}" versions --token-file "$(abs "$TOKEN_FILE")" "${ARGS[@]}"; exit $?

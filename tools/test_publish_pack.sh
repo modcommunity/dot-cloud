@@ -206,6 +206,14 @@ chk "an _orig pack id is refused" "[ $? -ne 0 ] && grep -q '_orig' out"
 GS_VALVE_INDEX=/nonexistent GS_CLI_TOKEN=secret "$HERE/publish_pack.sh" --source "$W/vsrc" --id vtest --version 1.0.0 > "$W/out" 2>&1
 chk "a clean pack still publishes" "[ $? -eq 0 ] && grep -q 'clean' out"
 chk "ps1 runs the Valve guard" "grep -q 'check_valve_files.py' '$HERE/publish_pack.ps1'"
+# a class cache older than one of the checkout's scripts is re-imported before the CLI runs (a stale one failed every publish)
+CC="$HERE/../.godot/global_script_class_cache.cfg"
+if [ -f "$CC" ]; then
+    touch -d '2000-01-01' "$CC"
+    "$HERE/publish_pack.sh" --source "$W/vsrc" --id stale --version 1.0.0 --dry-run --no-import > "$W/out" 2>&1
+    chk "a stale class cache is re-imported" "[ \$(stat -c %Y '$CC') -gt 946771200 ]"
+fi
+chk "ps1 re-imports a stale class cache" "grep -q 'LastWriteTime -gt' '$HERE/publish_pack.ps1'"
 python3 -I "$HERE/test_check_valve_files.py" >/dev/null 2>&1
 chk "check_valve_files unit tests" "[ $? -eq 0 ]"
 echo "publish_pack tests: $PASS passed, $FAIL failed"
