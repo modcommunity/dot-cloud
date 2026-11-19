@@ -313,10 +313,10 @@ func sync(
 		outcome = DotResult.success(payload)
 
 	if outcome.ok:
-		# The last object's save must have landed before the pack counts as cached.
-		var flushed := await DotWeb.flush_filesystem(get_tree())
-		if not flushed.ok:
-			DotLog.warn(CHANNEL, "browser storage did not keep the download; it will be fetched again next visit", {"content": manifest.key()})
+		# Not awaited: the flush settles a fixed second per attempt, which every sync of a web join paid
+		# (six on a first Fatal Contact solo start, the 'Play solo' screen's idle). The objects are already
+		# in user:// and this run reads them from there; only a tab closed within that second loses them.
+		_flush_after_sync(manifest.key())
 
 	DotLog.info(
 		CHANNEL,
@@ -748,3 +748,12 @@ func describe() -> Dictionary:
 		if s != null:
 			d["sources"].append(s.health())
 	return d
+
+
+## Saves user:// to IndexedDB after a finished sync, behind the caller; warns when the browser did not keep it.
+func _flush_after_sync(key: String) -> void:
+	if not is_inside_tree():
+		return
+	var flushed := await DotWeb.flush_filesystem(get_tree())
+	if not flushed.ok:
+		DotLog.warn(CHANNEL, "browser storage did not keep the download; it will be fetched again next visit", {"content": key})
