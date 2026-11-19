@@ -145,3 +145,30 @@ static func _script_policy_allows(policy: String, runs_code: bool, approved: boo
 		"approved":
 			return approved
 	return false
+
+
+## The ids of [param keyring] (a [member DotCloudConfig.trusted_keys]) a subscription may be signed
+## with: all of them, or only those [param narrow] names when it names any. Never wider than the keyring.
+static func keyring_ids(keyring: Dictionary, narrow: PackedStringArray) -> PackedStringArray:
+	var out := PackedStringArray()
+	for k in keyring:
+		var key_id := str(k)
+		if narrow.is_empty() or narrow.has(key_id):
+			out.append(key_id)
+	return out
+
+
+## The manifest's key id, once that key itself (not merely some key in the keyring) has verified
+## it. The id in a manifest is the publisher's unsigned hint; checking it against the one keyring
+## entry of that name is what makes a subscription's key id mean the key that signed it.
+static func subscription_signer(manifest: DotCloudManifest, trusted: PackedStringArray, keyring: Dictionary) -> DotResult:
+	var key_id := manifest.signature_key_id
+	if not trusted.has(key_id) or not keyring.has(key_id):
+		return DotResult.fail(
+			DotError.CODE_FORBIDDEN, "The manifest is signed with a key a subscription does not trust.", key_id
+		)
+	var one := {key_id: keyring[key_id]}
+	var verified := DotCloudSignature.verify_for(manifest.raw_bytes, manifest.signature, one, manifest.content_id, key_id)
+	if not verified.ok:
+		return DotResult.fail(DotError.CODE_FORBIDDEN, "The manifest is not signed by the key it names.", key_id)
+	return DotResult.success(key_id)

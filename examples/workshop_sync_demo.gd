@@ -15,7 +15,7 @@ extends Node
 ## Per process: two runs at once (the heavy queue allows two) would otherwise delete each other's files.
 var WORK := "user://dot_cloud_workshop_sync_demo_%d" % OS.get_process_id()
 const GAME := "gamemann/game-playlot"
-const CHECKS := 136
+const CHECKS := 147
 const ACCEPTS := {"kinds": ["map", "prop", "script"], "map_kinds": ["sandbox"]}
 
 var _failures := 0
@@ -98,6 +98,7 @@ func _ready() -> void:
 	await _check_removal()
 	await _check_offline()
 	await _check_broken_pack()
+	await _check_environment_keyring()
 	await _check_device_and_policy()
 	await _check_addons()
 	await _check_metered_and_quota()
@@ -156,7 +157,7 @@ func _site(method: String, path: String, query: Dictionary, headers: Dictionary,
 	}}}
 
 
-func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_id: String = "tmc", addon_dir: String = "") -> void:
+func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_id: String = "tmc", addon_dir: String = "", pem: String = "") -> void:
 	var dir := WORK.path_join("src_" + id)
 	var entries: Array = []
 	match kind:
@@ -182,7 +183,7 @@ func _make_pack(id: String, kind: String, code: bool = false, pad: int = 0, key_
 	var pub := DotCloudPublisher.new()
 	pub.content_id = id
 	pub.version = "1.0.0"
-	pub.signing_key_pem = _key_pem
+	pub.signing_key_pem = pem if pem != "" else _key_pem
 	pub.signing_key_id = key_id
 	var out: String = str(_content.root).path_join(id)
 	var res := pub.publish(dir, out)
@@ -354,10 +355,60 @@ func _check_broken_pack() -> void:
 	_check(s["failed"].size() == 1 and s["failed"][0]["content_id"] == "ws_missing", "the broken one is reported", str(s["failed"]))
 	_check(_failed_signals == ["ws_missing"], "pack_failed fired once for it")
 
+	# "other" is in the client's keyring; naming only "tmc" keeps it out of subscriptions.
+	_ws.config.workshop_key_ids = PackedStringArray(["tmc"])
 	_world["items"] = [_item("ws_wrongkey")]
 	_world["revision"] = "w1:four"
 	var wrong := await _ws.sync(GAME)
 	_check(wrong.value["failed"].size() == 1 and wrong.value["failed"][0]["code"] == DotError.CODE_FORBIDDEN and wrong.value["mounted"].is_empty(), "a pack signed with a key outside workshop_key_ids is refused", str(wrong.value["failed"]))
+	_ws.config.workshop_key_ids = PackedStringArray()
+
+
+## The Workshop trusts the content client's own keyring: a production config (tmc alone) refuses a
+## tmc-dev pack, a dev config (tmc + tmc-dev) mounts it, and a manifest naming tmc-dev but signed
+## by another key is refused even where both are trusted.
+func _check_environment_keyring() -> void:
+	_line("")
+	_line("[b]the client's keyring decides, per environment[/b]")
+	var dev := DotCloudSignature.generate_keypair(2048)
+	_check(dev.ok, "a second (dev) key pair is generated")
+	if not dev.ok:
+		return
+	var prod_keys: Dictionary = _cloud.config.trusted_keys.duplicate(true)
+	var dev_entry := {"key": str((dev.value as Dictionary)["public"]), "content_ids": ["ws_*"]}
+	_make_pack("ws_dev", "map", false, 0, "tmc-dev", "", str((dev.value as Dictionary)["private"]))
+	_make_pack("ws_forged", "map", false, 0, "tmc-dev")
+
+	_cloud.config.trusted_keys = {"tmc": prod_keys["tmc"]}
+	_check(_ws.trusted_key_ids() == PackedStringArray(["tmc"]), "a production keyring trusts tmc alone", str(_ws.trusted_key_ids()))
+	_ws.config.workshop_key_ids = PackedStringArray(["tmc", "tmc-dev"])
+	_check(_ws.trusted_key_ids() == PackedStringArray(["tmc"]), "armed: naming tmc-dev does not widen a production keyring", str(_ws.trusted_key_ids()))
+	_world["items"] = [_item("ws_dev")]
+	_world["revision"] = "w1:keys-prod"
+	var prod: Dictionary = (await _ws.sync(GAME)).value
+	_check(prod["failed"].size() == 1 and prod["failed"][0]["code"] == DotError.CODE_FORBIDDEN and prod["mounted"].is_empty(), "a production config refuses a tmc-dev pack", str(prod["failed"]))
+	_check(not _cloud.is_mounted(&"ws_dev", "1.0.0"), "and nothing of it is mounted")
+	_ws.config.workshop_key_ids = PackedStringArray()
+
+	_cloud.config.trusted_keys = {"tmc": prod_keys["tmc"], "tmc-dev": dev_entry}
+	_ws.config.workshop_key_ids = PackedStringArray(["tmc"])
+	_world["revision"] = "w1:keys-narrow"
+	var narrow: Dictionary = (await _ws.sync(GAME)).value
+	_check(narrow["failed"].size() == 1 and narrow["mounted"].is_empty(), "workshop_key_ids still narrows a dev keyring", str(narrow["failed"]))
+	_ws.config.workshop_key_ids = PackedStringArray()
+
+	_world["items"] = [_item("ws_forged")]
+	_world["revision"] = "w1:keys-forged"
+	var forged: Dictionary = (await _ws.sync(GAME)).value
+	_check(forged["failed"].size() == 1 and forged["failed"][0]["code"] == DotError.CODE_FORBIDDEN and forged["mounted"].is_empty(), "a manifest naming tmc-dev but signed with tmc is refused", str(forged["failed"]))
+
+	_world["items"] = [_item("ws_dev")]
+	_world["revision"] = "w1:keys-dev"
+	var dev_sync: Dictionary = (await _ws.sync(GAME)).value
+	_check(_ws.trusted_key_ids() == PackedStringArray(["tmc", "tmc-dev"]), "a dev keyring trusts tmc and tmc-dev", str(_ws.trusted_key_ids()))
+	_check(_ids(dev_sync["mounted"]) == PackedStringArray(["ws_dev"]) and dev_sync["failed"].is_empty(), "a dev config mounts the tmc-dev pack", str(dev_sync["failed"]))
+
+	_cloud.config.trusted_keys = prod_keys
 
 
 func _check_device_and_policy() -> void:

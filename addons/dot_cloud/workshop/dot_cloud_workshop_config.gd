@@ -21,9 +21,13 @@ extends DotConfig
 ## [code]any[/code] (site-signed, unreviewed) is for a developer testing their own pack.
 @export var workshop_script_packs: String = "approved"
 
-## The [code]key_id[/code]s a subscription manifest must be signed with. A key trusted for a
-## server's content is not thereby trusted for a stranger's subscription.
-@export var workshop_key_ids: PackedStringArray = PackedStringArray(["tmc"])
+## Narrows the [code]key_id[/code]s a subscription manifest may be signed with. The keys are the
+## content client's own [member DotCloudConfig.trusted_keys] ([method DotCloudWorkshop.trusted_key_ids]):
+## empty takes that whole keyring, and an id named here that the keyring lacks trusts nothing. So
+## a subscription is never trusted beyond the build's own pack verification: a dev shell's keyring
+## holds [code]tmc-dev[/code], a production one does not. Name ids here to keep a key trusted for
+## a server's content (a box's own [code]local[/code] key) out of a stranger's subscriptions.
+@export var workshop_key_ids: PackedStringArray = PackedStringArray()
 
 ## [code]ask[/code], [code]allow[/code] or [code]never[/code]: what to do on a metered connection.
 ## A device override (see [DotCloudWorkshopDevice]) wins over this.

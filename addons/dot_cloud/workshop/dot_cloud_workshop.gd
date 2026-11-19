@@ -343,7 +343,8 @@ func _post_scope(body: Dictionary) -> DotResult:
 func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summary: Dictionary) -> void:
 	var skipped: Array = summary["skipped"]
 	var failed: Array = summary["failed"]
-	var candidates := _candidates(list, skipped, failed)
+	var trusted := trusted_key_ids()
+	var candidates := _candidates(list, skipped, failed, trusted)
 
 	await _add_suggested(candidates, skipped)
 
@@ -365,11 +366,9 @@ func _mount_all(list: DotCloudWorkshopList, cloud_client: DotCloudClient, summar
 				_fail_pack(failed, id, version, resolved.error)
 				continue
 			var manifest: DotCloudManifest = resolved.value
-			if not bool(c.get("suggested", false)) and not config.workshop_key_ids.has(manifest.signature_key_id):
-				_fail_pack(failed, id, version, DotError.make(
-					DotError.CODE_FORBIDDEN, "The manifest is signed with a key a subscription does not trust.",
-					manifest.signature_key_id
-				))
+			var signer := DotResult.success(null) if bool(c.get("suggested", false)) else subscription_signer(manifest, trusted, cloud_client.config.trusted_keys)
+			if not signer.ok:
+				_fail_pack(failed, id, version, signer.error)
 				continue
 			if bool(c.get("addon", false)):
 				_take_addon(c, manifest, summary)
@@ -474,7 +473,7 @@ func _mount_planned(cloud_client: DotCloudClient, to_mount: Array[Dictionary], s
 ## The subscribed packs worth planning: each one the list names, minus those the device, the key, the script policy, the accepted kinds or the pack caps rule out
 ## (recorded in [param skipped] or [param failed]). An addon pack is a candidate only for a game whose [code]accepts.kinds[/code] names [code]addon[/code], and only
 ## when its version is approved.
-func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> Array[Dictionary]:
+func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array, trusted: PackedStringArray) -> Array[Dictionary]:
 	var accepts := list.accepts() if list != null else {}
 	var accepted_kinds: Array = accepts.get("kinds", []) if accepts.get("kinds", []) is Array else []
 	var candidates: Array[Dictionary] = []
@@ -499,7 +498,7 @@ func _candidates(list: DotCloudWorkshopList, skipped: Array, failed: Array) -> A
 			skipped.append(_skip(id, version, REASON_DEVICE_OFF))
 			continue
 		var key_id: String = str(pack.get("keyId", ""))
-		if not config.workshop_key_ids.has(key_id):
+		if not trusted.has(key_id):
 			_fail_pack(failed, id, version, DotError.make(
 				DotError.CODE_FORBIDDEN, "The pack is signed with a key a subscription does not trust.", key_id
 			))
@@ -711,6 +710,15 @@ func _prepare() -> DotResult:
 	add_child(_http)
 	_prepared = true
 	return DotResult.success(null)
+
+
+## The key ids a subscription may be signed with: the content client's own [member DotCloudConfig.trusted_keys]
+## (see [method keyring_ids]), so never wider than the keyring this build verifies every pack against.
+func trusted_key_ids() -> PackedStringArray:
+	var cloud_client := _cloud()
+	if cloud_client == null or cloud_client.config == null:
+		return PackedStringArray()
+	return keyring_ids(cloud_client.config.trusted_keys, config.workshop_key_ids if config != null else PackedStringArray())
 
 
 func _cloud() -> DotCloudClient:
