@@ -73,6 +73,7 @@ Every entry has `kind`, `id` (unique within the pack and kind, `[a-z0-9_]+`), `n
 | `tool` | `script` | the game (game-playlot's tool gun) |
 | `sound` | `stream` | dot-audio, or the game |
 | `script` | `script`, `hook` (the hook name, for example `playlot`) | the game's hook loader (game-playlot's `playlot_hook.gd` contract) |
+| `trail` | `def` (the pack's `trails.json`; every trail entry of a pack names the same one), `thumbnail` (the trail's image). Data only: the pack ships no code and is published with `--no-import`, so the images stay bytes | dot-trail `DotTrailStore.load_dir` on the def's directory (game-playlot wears it on the local player) |
 | `addon` | `dir` | **not mounted from a subscription** (see [online isolation](#online-isolation)) |
 | `game` | none; uses `accepts` | the site and the shell; never subscribable |
 

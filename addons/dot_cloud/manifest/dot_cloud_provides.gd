@@ -16,7 +16,7 @@ extends RefCounted
 const SCHEMA := 1
 
 const KINDS: Array[String] = [
-	"map", "weapon", "prop", "npc", "entity", "tool", "sound", "script", "addon", "game",
+	"map", "weapon", "prop", "npc", "entity", "tool", "sound", "script", "trail", "addon", "game",
 ]
 
 ## Kinds whose entries are code by definition, whatever the files look like.
