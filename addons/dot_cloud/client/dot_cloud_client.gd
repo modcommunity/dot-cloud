@@ -1134,6 +1134,13 @@ func warm_content(tree: SceneTree, keys: PackedStringArray, force: bool = false,
 	return await _Warm.warm_content(self, tree, keys, force, on_progress)
 
 
+## The scripts under [param root] (default res://) loaded so far, as paths relative to it, for a pack's warm list
+## (setting `dot_cloud/warm/list_file`, default `warm.txt` at the pack's root). Call it the moment the scene is
+## playable, in a native run (one with threads, where nothing is warmed ahead), and write one path per line.
+static func record_warm_list(root: String = "res://") -> PackedStringArray:
+	return _Warm.record_list(root)
+
+
 func _ready_result(manifest: DotCloudManifest) -> DotResult:
 	var entry := manifest.entry_scene_path()
 	if entry != "":

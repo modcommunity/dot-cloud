@@ -62,5 +62,7 @@ extends RefCounted
 #     namespace. Additive.
 # 31: DotCloudConfig.limit_key / limit_hint, DotCloudStore describe() disk_free; a quota refusal names the limit, the
 #     key that sets it, referenced bytes and the disk free. Additive.
-const LEVEL := 31
+# 32: DotCloudClient.record_warm_list and setting dot_cloud/warm/list_file: a pack's `warm.txt` names the scripts its
+#     scene needs, the cover waits for those only and the rest compile behind it. Mount lines carry phase msec. Additive.
+const LEVEL := 32
 const OLDEST := 1

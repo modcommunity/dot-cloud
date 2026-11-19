@@ -46,7 +46,7 @@ static func register(
 		# engine follows the marker to the imported bytes. Registering the `.scn` would return it where a texture was asked for.
 		var source := marker.trim_suffix(".import")
 
-		if not ResourceLoader.exists(source) and not FileAccess.file_exists(source):
+		if not FileAccess.file_exists(source) and not ResourceLoader.exists(source):
 			continue
 
 		# `set_id` when the host knows the id, `add_id` when not: the wrong one is an error, not an update.

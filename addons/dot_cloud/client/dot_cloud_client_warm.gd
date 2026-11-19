@@ -11,6 +11,11 @@ const SET_BUDGET := "dot_cloud/warm/budget_msec"
 const SET_BLOCKING := "dot_cloud/warm/blocking_msec"
 const SET_TAIL_BUDGET := "dot_cloud/warm/background_budget_msec"
 const SET_SKIP := "dot_cloud/warm/skip_dirs"
+## The pack file (path inside the pack) listing the scripts its scene needs before it opens, written by
+## [method DotCloudClient.record_warm_list]: the cover waits for those only, the rest compile after it.
+## Empty, or a pack without the file = every script under the cover, as before.
+const SET_LIST := "dot_cloud/warm/list_file"
+const DEFAULT_LIST := "warm.txt"
 ## Top-level pack folders whose scripts are not warmed ([constant DotCloudClient.WARM_SKIP_DIRS]).
 const SKIP_DIRS := ["tools", "examples", "tests", "ci"]
 
@@ -84,16 +89,26 @@ static func warm_content(c: Node, tree: SceneTree, keys: PackedStringArray, forc
 	var t0 := Time.get_ticks_msec()
 	var named := DotCloudSliceLoader.named_class_scripts(scripts)
 	var scan_ms := Time.get_ticks_msec() - t0
+	var order := named + scripts
+	var unlisted := PackedStringArray()
+	var listed := listed_scripts(c, keys)
+	var listed_count := -1
+	if not listed.is_empty():
+		order = _listed_first(named, scripts, listed, unlisted)
+		listed_count = order.size()
 	# Under the cover the frame can be long (it only animates a bar); the default 16 ms yields twice as often for nothing.
 	loader.budget_msec = int(ProjectSettings.get_setting(SET_BUDGET, 40))
 	loader.deadline_msec = int(ProjectSettings.get_setting(SET_BLOCKING, 0))
-	var res := await loader.load_all(tree, named + scripts, false)
+	var res := await loader.load_all(tree, order, false)
+	if res.ok:
+		loader.remaining.append_array(unlisted)
 	var deferred := loader.remaining.size()
 	if deferred > 0:
 		loader.load_rest(tree, int(ProjectSettings.get_setting(SET_TAIL_BUDGET, 3)))
 
 	DotLog.info(CHANNEL, "scripts warmed", {
 		"content": ",".join(keys), "pack_scripts": scripts.size(), "addon_classes": named.size(),
+		"listed": listed_count, "unlisted": unlisted.size(),
 		"scan_ms": scan_ms, "ms": Time.get_ticks_msec() - t0, "frames": loader.frames_yielded,
 		"deferred": deferred, "ok": res.ok, "why": "" if res.ok else str(res.error),
 	})
@@ -101,3 +116,80 @@ static func warm_content(c: Node, tree: SceneTree, keys: PackedStringArray, forc
 	for entry in loader.slowest:
 		DotLog.debug(CHANNEL, "slow script", {"ms": entry[0], "path": entry[1]})
 	return loader
+
+
+## The listed scripts of [param named] + [param scripts], in that order, so the cover waits for what the scene needs
+## (~83% of FC's 771) with the addon classes still compiled first; the others go to [param unlisted]. A listed script
+## no scan found (a class reached only through a preload) blocks too, after the addon classes.
+static func _listed_first(named: PackedStringArray, scripts: PackedStringArray, listed: Dictionary, unlisted: PackedStringArray) -> PackedStringArray:
+	var first := PackedStringArray()
+	var found := {}
+	for path in named + scripts:
+		if listed.has(path):
+			first.append(path)
+			found[path] = true
+		else:
+			unlisted.append(path)
+	var at := 0
+	for path in named:
+		if found.has(path):
+			at += 1
+	for path: String in listed:
+		if not found.has(path) and not ResourceLoader.has_cached(path) and ResourceLoader.exists(path):
+			first.insert(at, path)
+			at += 1
+	return first
+
+
+## The scripts the warm lists of the mounted packs [param keys] name, as resource paths (an ordered set).
+## A line is a path inside the pack, or, when the pack has no such file, under res:// (an addon the host ships).
+## Only `.gd` lines count; `#` starts a comment. Empty when no pack ships a list or [constant SET_LIST] is "".
+static func listed_scripts(c: Node, keys: PackedStringArray) -> Dictionary:
+	var out := {}
+	var list_name := str(ProjectSettings.get_setting(SET_LIST, DEFAULT_LIST))
+	if list_name == "":
+		return out
+	for key in keys:
+		var manifest: DotCloudManifest = c.manifest_for(key)
+		if manifest == null:
+			continue
+		for file in manifest.files:
+			if file.path != list_name:
+				continue
+			var prefix := manifest.mount_prefix()
+			for line in FileAccess.get_file_as_string(manifest.resource_path(file)).split("\n"):
+				var rel := line.split("#", true, 1)[0].strip_edges().simplify_path()
+				if rel.get_extension() != "gd" or rel.begins_with("..") or rel.contains("://"):
+					continue
+				var path := prefix.path_join(rel)
+				out[path if ResourceLoader.exists(path) else "res://" + rel] = true
+	return out
+
+
+## See [method DotCloudClient.record_warm_list].
+static func record_list(root: String) -> PackedStringArray:
+	var base := root.trim_suffix("/") + "/"
+	var cached := {}
+	_walk_cached(base, "", cached)
+	var out := PackedStringArray()
+	# Global classes first, in class-list order (how warm_content compiles them), then the rest by path.
+	for entry in ProjectSettings.get_global_class_list():
+		var path := str(entry["path"])
+		if path.begins_with(base) and cached.has(path):
+			out.append(path.trim_prefix(base))
+			cached.erase(path)
+	var rest: Array = cached.keys()
+	rest.sort()
+	for path: String in rest:
+		out.append(path.trim_prefix(base))
+	return out
+
+
+static func _walk_cached(base: String, rel: String, cached: Dictionary) -> void:
+	var dir := base + rel
+	for f in DirAccess.get_files_at(dir):
+		if f.get_extension() == "gd" and ResourceLoader.has_cached(dir + f):
+			cached[dir + f] = true
+	for d in DirAccess.get_directories_at(dir):
+		if not d.begins_with(".") and not _skipped(rel + d + "/x"):
+			_walk_cached(base, rel + d + "/", cached)

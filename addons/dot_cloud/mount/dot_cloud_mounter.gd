@@ -103,11 +103,14 @@ func mount(
 		if not verified.ok:
 			return verified
 
+	# Where a mount's time goes (msec), in its "mounted" line: a web join can be diagnosed from its log alone.
+	var t_build := Time.get_ticks_msec()
 	var built := _build_pack(manifest, store, wanted, pack_path)
 	if not built.ok:
 		return built
 
 	var prefix := manifest.mount_prefix()
+	var t_load := Time.get_ticks_msec()
 
 	# replace_files stays false. With version-namespaced prefixes nothing needs
 	# replacing, and enabling it would let downloaded content shadow files the
@@ -123,6 +126,7 @@ func mount(
 			pack_path
 		)
 
+	var t_check := Time.get_ticks_msec()
 	if config.enforce_mount_prefix:
 		var escaped := _check_prefix(manifest, wanted)
 		if not escaped.ok:
@@ -137,10 +141,12 @@ func mount(
 			return escaped
 
 	var uid_skips := [0]
+	var t_uids := Time.get_ticks_msec()
 	var uids := _Uids.register(
 		wanted, prefix, manifest.mount_root,
 		str(options.get("uid_policy", "")) == UID_ADD_ONLY, manifest.content_id, uid_skips
 	)
+	var t_index := Time.get_ticks_msec()
 
 	var paths := {}
 	for f in wanted:
@@ -167,7 +173,8 @@ func mount(
 		"mounted",
 		{
 			"content": key, "prefix": prefix, "files": wanted.size(), "uids": uids,
-			"uids_skipped": int(uid_skips[0]),
+			"uids_skipped": int(uid_skips[0]), "build_ms": t_load - t_build, "load_ms": t_check - t_load,
+			"check_ms": t_uids - t_check, "uids_ms": t_index - t_uids, "index_ms": Time.get_ticks_msec() - t_index,
 		}
 	)
 
@@ -460,7 +467,8 @@ func _check_prefix(
 				"%s is outside %s" % [path, prefix]
 			)
 
-		if f.required and not ResourceLoader.exists(path) and not FileAccess.file_exists(path):
+		# file_exists first: it answers from the pack's table, where exists() asks every format loader (733 files a join).
+		if f.required and not FileAccess.file_exists(path) and not ResourceLoader.exists(path):
 			return DotResult.fail(
 				DotError.CODE_IO,
 				"A required file is not readable after mounting.",
