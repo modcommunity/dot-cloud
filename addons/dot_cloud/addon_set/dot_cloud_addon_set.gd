@@ -734,10 +734,8 @@ func _assemble(manifests: Dictionary, fingerprint: String) -> DotResult:
 			if ext == "gd" and target.begins_with(root + "/"):
 				scripts[target] = FileAccess.get_file_as_string(source)
 				_Overlay.note_probe(probes, dir, manifest, at, target)
-			elif ext == "uid":
-				var uid := FileAccess.get_file_as_string(source).strip_edges()
-				if uid.begins_with("uid://"):
-					uids.append([uid, target.trim_suffix(".uid")])
+			else:
+				_Overlay.note_uid(uids, ext, source, target)
 
 	if reuse:
 		DotPaths.remove_tree(scratch)

@@ -24,7 +24,7 @@ const WORK := "user://dot_cloud_addon_set_demo"
 const LOCK := "res://addons.lock"
 
 ## Every check, including the one that compares against it. See docs/testing.md.
-const CHECKS := 85
+const CHECKS := 86
 
 var _failures := 0
 var _checks := 0
@@ -427,7 +427,7 @@ func _nested(cloud: DotCloudClient) -> void:
 	_write(a.path_join("dot_nested_thing.gd"), "class_name DotNestedThing\nextends Node\n\nfunc _init() -> void:\n\tset_meta(\"v\", \"nested\")\n")
 	# What the site writes: the pack's own references moved onto its mount prefix.
 	_write(a.path_join("thing.tscn"), "[gd_scene format=3]\n\n[ext_resource type=\"Script\" path=\"%saddons/dot_nested/dot_nested_thing.gd\" id=\"1\"]\n\n[node name=\"T\" type=\"Node\"]\nscript = ExtResource(\"1\")\n" % P)
-	_write(a.path_join("beep.wav.import"), "[remap]\n\nimporter=\"wav\"\ntype=\"AudioStreamWAV\"\npath=\"%s_imported/beep.wav-0.sample\"\n\n[deps]\n\nsource_file=\"%saddons/dot_nested/beep.wav\"\n" % [P, P])
+	_write(a.path_join("beep.wav.import"), "[remap]\n\nimporter=\"wav\"\ntype=\"AudioStreamWAV\"\nuid=\"uid://b7n3st3dbeep\"\npath=\"%s_imported/beep.wav-0.sample\"\n\n[deps]\n\nsource_file=\"%saddons/dot_nested/beep.wav\"\n" % [P, P])
 	_write(src.path_join("_imported/beep.wav-0.sample"), "imported")
 	_write(src.path_join("tools/dot_nested_tool.gd"), "class_name DotNestedTool\nextends RefCounted\n")
 
@@ -454,6 +454,8 @@ func _nested(cloud: DotCloudClient) -> void:
 
 	var plan: Dictionary = built.value
 	_check(DotCloudAddonSet.plan_packs(plan).size() == 1, "a small overlay is one file", str(plan.get("packs", [])))
+	_check((plan.get("uids", []) as Array).has(["uid://b7n3st3dbeep", "res://addons/dot_nested/beep.wav"]),
+		"an import marker's uid is listed, pointing at its source", str(plan.get("uids", [])))
 	_check(str((plan["probes"] as Dictionary).get("dot_nested", "")) == "res://addons/dot_nested/dot_nested_api.gd",
 		"the probe is the addon's API file at its own depth", str(plan["probes"]))
 	_check(ProjectSettings.load_resource_pack(str(plan["pack"]), true), "the overlay mounts in this process, for the checks below")

@@ -1,5 +1,7 @@
 extends RefCounted
 
+const _Uids := preload("../mount/dot_cloud_mounter_uids.gd")
+
 ## Pieces of [method DotCloudAddonSet._assemble], in a file of their own so the addon set stays inside the
 ## size budget. Nothing here is used on its own.
 
@@ -160,3 +162,17 @@ static func has_file(manifest: DotCloudManifest, path: String) -> bool:
 		if f.path == path:
 			return true
 	return false
+
+
+## Lists the uid of a `.uid` file or an imported file's `.import` marker in [param uids] against its path. A
+## model's scene names its extracted textures by the marker's uid; unregistered, every load warns "invalid UID"
+## and falls back to the text path.
+static func note_uid(uids: Array, ext: String, source: String, target: String) -> void:
+	if ext == "uid":
+		var uid := FileAccess.get_file_as_string(source).strip_edges()
+		if uid.begins_with("uid://"):
+			uids.append([uid, target.trim_suffix(".uid")])
+	elif ext == "import":
+		var marked := _Uids.uid_in(FileAccess.get_file_as_string(source))
+		if marked.begins_with("uid://"):
+			uids.append([marked, target.trim_suffix(".import")])
