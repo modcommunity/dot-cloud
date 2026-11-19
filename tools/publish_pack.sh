@@ -70,7 +70,7 @@ host_names() {
 # host_level LOCK PROJECT ADDON: the API level the host's lock pins for ADDON, or nothing when the lock does not carry it.
 # The addon's repository is where PROJECT/addons/ADDON links to, else LOCK's sibling checkout; its level is LEVEL in
 # addons/ADDON/ADDON_api.gd at the locked ref (1 when the file is absent there, the BASELINE). A ref the repository
-# lacks fails: fetch its tags, or pass --host-level ADDON=N.
+# lacks fails: fetch its tags, or pass --host-level ADDON=N. So does a ref without addons/ADDON at all (pinned before a rename).
 host_level() {
     local lock=$1 proj=$2 a=$3 root="" repo="" ref="" line
     if [ -e "$proj/addons/$a" ]; then
@@ -85,6 +85,8 @@ host_level() {
     git -C "$root" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || root="$(dirname "$lock")/../$repo"
     git -C "$root" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || {
         echo "publish_pack: cannot find $repo at $ref (the host lock's) to read its level; fetch its tags or pass --host-level $a=N" >&2; return 1; }
+    [ -n "$(git -C "$root" ls-tree "$ref" "addons/$a" 2>/dev/null)" ] || {
+        echo "publish_pack: the host lock pins $repo $ref, which has no addons/$a (pinned before a rename?); the shell lacks it. Bump the lock: $(dirname "$lock")/tools/pack_ready.sh $proj --prepare (or --host-level $a=N)" >&2; return 1; }
     line="$(git -C "$root" show "$ref:addons/$a/${a}_api.gd" 2>/dev/null | sed -n 's/^const LEVEL *:= *\([0-9][0-9]*\).*/\1/p' | head -1)"
     printf '%s\n' "${line:-1}"
 }
@@ -201,7 +203,9 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ]; then
                 done
             fi
             "$GODOT" --headless --path "$P" --script res://addons/dot_core/tools/dot_requires.gd -- --out "$REQ" "${PINS[@]}" >"$TMP/req.log" 2>&1 \
-                && [ -s "$REQ" ] || { tail -20 "$TMP/req.log" >&2; echo "publish_pack: could not derive requires.json for $P" >&2; exit 1; }
+                && [ -s "$REQ" ] || { tail -20 "$TMP/req.log" >&2; echo "publish_pack: could not derive requires.json for $P" >&2
+                    for h in "${HOST[@]}"; do [ -d "$h" ] || h="$(dirname "$h")"; grep -q 'pinned shell has' "$TMP/req.log" && [ -x "$h/tools/pack_ready.sh" ] \
+                        && echo "publish_pack: a floor is above the lock; $h/tools/pack_ready.sh $P --prepare names the tags and pushes the lock bump branch" >&2; done; exit 1; }
             ARGS+=(--extra-file "requires.json=$REQ")
         fi
         CAPS=("${HOSTLV[@]}")

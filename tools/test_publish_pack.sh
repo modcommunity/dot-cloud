@@ -175,6 +175,11 @@ if [ -f "$DC/tools/dot_requires.gd" ]; then
     printf '{"format": 1, "addons": {"zz_lv": 4}}\n' > "$W/rq/requires.floor.json"
     rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
     chk "a floor above the lock's level is refused" "[ $? -ne 0 ] && grep -q 'above the 3 the pinned shell has' out"
+    # A lock ref older than the addon's directory (pinned before a rename) fails naming the rename, not a level of 1.
+    git -C "$W/zz-lv" tag v0 "$(git -C "$W/zz-lv" -c user.name=t -c user.email=t@t commit-tree "$(git -C "$W/zz-lv" mktree </dev/null)" -m empty)"
+    printf '{"format": 1, "addons": {"zz_lv": 3}}\n' > "$W/rq/requires.floor.json"; printf 'zz-lv\tv0\n' > "$W/rq.lock"
+    rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
+    chk "a lock ref without the addon's directory names the rename and pack_ready" "[ $? -ne 0 ] && grep -q 'no addons/zz_lv (pinned before a rename' out && grep -q 'pack_ready.sh' out && ! grep -q 'above the 1' out"
     rm -f "$W/rq/requires.floor.json"; printf 'zz-lv\tnosuchref\n' > "$W/rq.lock"
     rm -rf "$W/ro"; rq --host-addons "$W/rq.lock"
     chk "an unresolvable lock ref fails and names --host-level" "[ $? -ne 0 ] && grep -q -- '--host-level zz_lv=N' out"
