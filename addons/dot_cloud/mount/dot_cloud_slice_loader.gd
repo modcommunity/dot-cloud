@@ -183,3 +183,34 @@ static func named_class_scripts(paths: PackedStringArray, read_from: PackedStrin
 		if named.has(script_path) and not ResourceLoader.has_cached(script_path):
 			out.append(script_path)
 	return out
+
+
+## The scripts under [param root] loaded so far, relative to it: global classes first in class-list order (how
+## [method DotCloudClient.warm_content] compiles them), then by path. A pack's warm list (setting
+## `dot_cloud/warm/list_file`, default `warm.txt` at its root): call it when the scene is playable in a native run
+## (threads, so nothing was warmed ahead) and write one path per line. Directories named in [param skip_dirs]
+## ([constant DotCloudClient.WARM_SKIP_DIRS]) and hidden ones are not walked.
+static func cached_scripts(root: String = "res://", skip_dirs: Array = []) -> PackedStringArray:
+	var base := root.trim_suffix("/") + "/"
+	var cached := {}
+	_walk_cached(base, cached, skip_dirs)
+	var out := PackedStringArray()
+	for entry in ProjectSettings.get_global_class_list():
+		var path := str(entry["path"])
+		if cached.has(path):
+			out.append(path.trim_prefix(base))
+			cached.erase(path)
+	var rest: Array = cached.keys()
+	rest.sort()
+	for path: String in rest:
+		out.append(path.trim_prefix(base))
+	return out
+
+
+static func _walk_cached(dir: String, cached: Dictionary, skip_dirs: Array) -> void:
+	for f in DirAccess.get_files_at(dir):
+		if f.get_extension() == "gd" and ResourceLoader.has_cached(dir + f):
+			cached[dir + f] = true
+	for d in DirAccess.get_directories_at(dir):
+		if not d.begins_with(".") and not skip_dirs.has(d):
+			_walk_cached(dir + d + "/", cached, skip_dirs)

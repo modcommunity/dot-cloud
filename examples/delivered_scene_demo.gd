@@ -21,6 +21,7 @@ extends Node
 ## [/codeblock]
 
 const WORK := "user://dot_cloud_delivered_scene"
+const _Warm := preload("res://addons/dot_cloud/client/dot_cloud_client_warm.gd")
 
 var _failures := 0
 var _checks := 0
@@ -28,7 +29,7 @@ var _checks := 0
 ## Every check this suite runs, including the one that compares against it. A suite that is
 ## one long function has no sections to count, but a check skipped by a branch that should
 ## not have been taken is still one only a total can see. See docs/testing.md.
-const CHECKS := 46
+const CHECKS := 51
 
 
 func _ready() -> void:
@@ -49,6 +50,10 @@ func _ready() -> void:
 func who() -> String:
 	return "DELIVERED"
 """)
+
+	# One the scene does not need, and the warm list that says so: the cover waits for thing.gd only.
+	DotPaths.write_text(src.path_join("game/extra.gd"), "extends RefCounted\n")
+	DotPaths.write_text(src.path_join("warm.txt"), "game/thing.gd\n# a comment\nnot_a_script.tscn\n../escape.gd\n")
 
 	# Written the way Godot writes one: the script named by absolute res:// path.
 	DotPaths.write_text(src.path_join("scenes/world.tscn"), """[gd_scene load_steps=2 format=3]
@@ -158,6 +163,26 @@ script = ExtResource("1")
 	var scripts := warmed.loaded.filter(func(r: Resource) -> bool: return r is Script)
 	_check(scripts.any(func(s: Script) -> bool: return s.resource_path.begins_with("res://dot_cloud/delivered_scene/")),
 		"warm_content compiles the pack's script and holds it", str(warm_keys))
+	var prefix := "res://dot_cloud/delivered_scene/1.0.0/"
+	var listed := _Warm.listed_scripts(cloud, warm_keys)
+	_check(listed.keys() == [prefix + "game/thing.gd"],
+		"a pack's warm.txt lists its .gd lines inside the pack, skipping comments, other files and escapes", str(listed.keys()))
+	var unlisted := PackedStringArray()
+	var first := _Warm._listed_first(PackedStringArray(["res://a.gd"]), PackedStringArray([prefix + "game/thing.gd", prefix + "game/extra.gd"]),
+		{prefix + "game/thing.gd": true, "res://a.gd": true}, unlisted)
+	_check(first == PackedStringArray(["res://a.gd", prefix + "game/thing.gd"]) and unlisted == PackedStringArray([prefix + "game/extra.gd"]),
+		"listed scripts block in the usual order, the unlisted are left for after the cover", "%s / %s" % [first, unlisted])
+	for i in 30:
+		await get_tree().process_frame
+	_check(warmed.loaded.any(func(r: Resource) -> bool: return r.resource_path == prefix + "game/extra.gd"),
+		"and an unlisted script still compiles behind the cover")
+	var recorded := DotCloudSliceLoader.cached_scripts(prefix, DotCloudClient.WARM_SKIP_DIRS)
+	_check(recorded.has("game/thing.gd") and recorded.has("game/extra.gd"),
+		"cached_scripts lists the loaded scripts relative to the root it was given", str(recorded))
+	ProjectSettings.set_setting(_Warm.SET_LIST, "")
+	_check(_Warm.listed_scripts(cloud, warm_keys).is_empty(), "an empty dot_cloud/warm/list_file turns the list off")
+	ProjectSettings.set_setting(_Warm.SET_LIST, null)
+
 	var stopped := DotCloudSliceLoader.new()
 	stopped.stop_requested = true
 	var paths := PackedStringArray([scene_path, scene_path])
