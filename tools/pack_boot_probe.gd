@@ -57,6 +57,10 @@ func _run(out: String) -> int:
 	# Then the client's view (both + client): its client-only scripts and scenes, and game.yml's client_scene.
 	var cv := _mount(out, prefix, client_files, "client") if not client_files.is_empty() else {"scripts": [], "resources": []}
 	if cv.is_empty():
+		# The client view could not be mounted: a failure the server view already found is still the verdict.
+		if _bad > 0:
+			print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
+			return 1
 		return 2
 	_check_scripts(cv["scripts"], prefix)
 	_check_builtins(cv["resources"], prefix)
