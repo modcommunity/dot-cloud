@@ -40,6 +40,33 @@ GODOT=/nonexistent/godot bash "$HERE/tools/pack_boot_test.sh" "$TMP/good" "$LOCK
 rc=$?
 [ $rc -eq 2 ] && ok "no engine is exit 2, not a refusal" || fail "no engine gave exit $rc (want 2)"
 
+# A game without netcode (no _net_config) keeps the inherited null bridge, and the host boots it: so must the gate.
+python3 -I - "$TMP/good" "$TMP/nonet" <<'PY'
+import hashlib, json, os, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+shutil.copytree(src, dst)
+m = json.load(open(os.path.join(dst, "manifest.json")))
+def put(path, text):
+    b = text.encode(); sha = hashlib.sha256(b).hexdigest()
+    os.makedirs(os.path.join(dst, "objects", sha[:2]), exist_ok=True)
+    open(os.path.join(dst, "objects", sha[:2], sha), "wb").write(b)
+    m["files"] = [f for f in m["files"] if f["path"] != path] + [{"path": path, "sha256": sha, "size": len(b)}]
+put("game/no_net_module.gd", "extends DotGameModule\n")
+yml = next(f for f in m["files"] if f["path"] == "game.yml")
+text = open(os.path.join(dst, "objects", yml["sha256"][:2], yml["sha256"])).read()
+put("game.yml", "\n".join("module: game/no_net_module.gd" if l.startswith("module:") else l for l in text.split("\n")))
+json.dump(m, open(os.path.join(dst, "manifest.json"), "w"))
+PY
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/nonet" "$LOCK" >"$TMP/nonet.log" 2>&1
+rc=$?
+[ $rc -eq 0 ] && ok "a module without netcode boots (no bridge asked for)" || { fail "a module without netcode was refused (exit $rc)"; grep '^pack_boot' "$TMP/nonet.log"; }
+
+# A probe that cannot judge (here: an unreadable manifest, the probe's own exit 2) is exit 2, not a refusal.
+mkdir -p "$TMP/junk"; echo '[]' >"$TMP/junk/manifest.json"
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/junk" "$LOCK" >"$TMP/junk.log" 2>&1
+rc=$?
+[ $rc -eq 2 ] && ok "a probe that cannot judge is exit 2" || fail "an unreadable manifest gave exit $rc (want 2)"
+
 [ $fails -gt 0 ] && { echo "--- 0.1.19 log"; cat "$TMP/bad.log"; }
 echo "test_pack_boot: $fails failed"
 exit $(( fails > 0 ))

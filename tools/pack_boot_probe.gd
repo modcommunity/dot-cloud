@@ -46,8 +46,10 @@ func _run(out: String) -> int:
 		var at := prefix.path_join(str(f["path"]))
 		packer.add_file(at, obj)
 		by_path[str(f["path"])] = obj
-		if at.ends_with(".gd"):
-			scripts.append(at)
+		# An export ships x.gd.remap + x.gdc for x.gd (dot_module_host.gd module_script_of): loaded as x.gd, once.
+		var gd := _script_of(at)
+		if gd != "" and not scripts.has(gd):
+			scripts.append(gd)
 	packer.flush()
 	if not ProjectSettings.load_resource_pack(pck, false):
 		printerr("pack_boot: the engine would not mount %s" % pck)
@@ -55,6 +57,8 @@ func _run(out: String) -> int:
 	print("pack_boot: mounted %d files at %s" % [by_path.size(), prefix])
 
 	_check_requires(by_path)
+	if by_path.has("game.yml") and scripts.is_empty():
+		_fail("a game pack with no script to compile (no .gd, .gd.remap or .gdc): nothing would run")
 
 	for path in scripts:
 		var s := load(path) as GDScript
@@ -86,7 +90,17 @@ func _check_module(script: GDScript, rel: String) -> void:
 	if module == null:
 		_fail("game.yml module (%s) does not instantiate" % rel)
 		return
-	if module.has_method("_make_bridge"):
+	# The host asks for a bridge only when the game declares netcode (dot_game_module.gd: _net_config() not null, then
+	# _make_bridge()); a game without netcode keeps the inherited null bridge and boots. Off the tree a game's
+	# _net_config() may error (it reads `game`, unset here) and so return null: an error counts as netcode declared.
+	var wants_net := false
+	if module.has_method("_net_config"):
+		var capture := _ScriptErrorCapture.new()
+		OS.add_logger(capture)
+		var config: Variant = module.call("_net_config")
+		OS.remove_logger(capture)
+		wants_net = config != null or capture.first_for("") != ""
+	if wants_net and module.has_method("_make_bridge"):
 		var bridge: Variant = module.call("_make_bridge")
 		if not (bridge is Node):
 			_fail("game.yml module (%s): _make_bridge() hands back no bridge; the host would refuse the game" % rel)
@@ -164,6 +178,15 @@ class _ScriptErrorCapture extends Logger:
 				break
 		_lock.unlock()
 		return e
+
+
+## The .gd path [param file] stands for: itself, or the source an exported x.gd.remap / x.gdc replaces; "" otherwise.
+static func _script_of(file: String) -> String:
+	if file.ends_with(".gd.remap"):
+		return file.trim_suffix(".remap")
+	if file.ends_with(".gdc"):
+		return file.trim_suffix(".gdc") + ".gd"
+	return file if file.ends_with(".gd") else ""
 
 
 static func _yml_value(text: String, key: String) -> String:

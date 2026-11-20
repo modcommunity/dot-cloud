@@ -276,11 +276,20 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
         if [ -n "$skip" ]; then skip=""; continue; fi
         case "$a" in --version|--bump|--site) skip=1 ;; *) DARGS+=("$a") ;; esac
     done
+    touch "$TMP/boot.stamp"
     "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
         || { echo "publish_pack: the boot gate's dry run failed. Nothing was sent." >&2; exit 1; }
     GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" \
         || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
     rm -rf "$TMP/boot"
+    # The upload builds the pack again from $SRC: a file changed since the booted build would go up unbooted.
+    changed="$(find "$SRC" -path "$SRC/.godot" -prune -o -type f -newer "$TMP/boot.stamp" -print -quit)"
+    [ -z "$changed" ] || { echo "publish_pack: refusing to upload: $changed changed after the boot gate built the pack. Nothing was sent; re-run." >&2; exit 1; }
 fi
 if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
-"${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}"
+"${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}" || exit $?
+# The bytes that went up are in $OUT: boot them too, so a change during the upload's own build cannot ship unseen.
+if [ -n "${BOOTLOCK:-}" ]; then
+    GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$OUT" "$BOOTLOCK" \
+        || { echo "publish_pack: THE UPLOADED VERSION DOES NOT BOOT (above), though the pre-upload build did: its source changed during the publish. Do not point servers at it; publish a fixed version." >&2; exit 1; }
+fi

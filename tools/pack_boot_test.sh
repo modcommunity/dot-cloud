@@ -11,12 +11,20 @@
 # The host is built once per lock and dot-server-deploy commit under ${GS_PACK_BOOT_CACHE:-~/.cache/pack-boot}.
 # GODOT names the engine (as for publish_pack.sh). Exit 0 boots, 1 does not boot, 2 could not judge (no engine, host or mount).
 set -euo pipefail
+# Anything that stops the script before the probe's verdict is "could not judge", never a refusal of the pack.
+trap 'echo "pack_boot: the host could not be prepared (line $LINENO); the pack was not judged" >&2; exit 2' ERR
+[ $# -eq 2 ] || { echo "usage: tools/pack_boot_test.sh OUT_DIR HOST_LOCK" >&2; exit 2; }
+[ -f "$1/manifest.json" ] || { echo "pack_boot: no manifest.json in $1" >&2; exit 2; }
+[ -f "$2" ] || { echo "pack_boot: no lock at $2" >&2; exit 2; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$(cd "${1:?usage: tools/pack_boot_test.sh OUT_DIR HOST_LOCK}" && pwd)"
-LOCK="$(cd "$(dirname "${2:?usage: tools/pack_boot_test.sh OUT_DIR HOST_LOCK}")" && pwd -P)/$(basename "$2")"
-GODOT="${GODOT:-godot}"
-command -v "$GODOT" >/dev/null 2>&1 || ! [ -x "$HOME/.local/bin/godot" ] || GODOT="$HOME/.local/bin/godot"
-# Exit 2 is "could not judge" (no engine, no host); 1 is only ever a verdict on the pack.
+OUT="$(cd "$1" && pwd)"
+LOCK="$(cd "$(dirname "$2")" && pwd -P)/$(basename "$2")"
+# An explicit GODOT is used as given (a missing one is exit 2); only an unset one falls back to ~/.local/bin/godot.
+if [ -z "${GODOT+x}" ]; then
+    GODOT=godot
+    command -v godot >/dev/null 2>&1 || ! [ -x "$HOME/.local/bin/godot" ] || GODOT="$HOME/.local/bin/godot"
+fi
+# Exit 2 is "could not judge" (no engine, no host, the probe did not finish); 1 is only ever the probe's verdict on the pack.
 command -v "$GODOT" >/dev/null 2>&1 || { echo "pack_boot: no engine at GODOT=$GODOT" >&2; exit 2; }
 DEPLOY="$(dirname "$LOCK")"
 SIB="$(cd "$DEPLOY/.." && pwd)"
@@ -25,39 +33,47 @@ KEY="$( { git -C "$DEPLOY" rev-parse HEAD; sha256sum < "$LOCK"; } | sha256sum | 
 CACHE="${GS_PACK_BOOT_CACHE:-$HOME/.cache/pack-boot}"
 HOST="$CACHE/$KEY"
 if [ ! -f "$HOST/.ready" ]; then
-    echo "pack_boot: building the host at the addons.lock tags in $HOST" >&2
     mkdir -p "$CACHE"
-    # A private build dir: two publishes may build the same host at once.
-    PART="$(mktemp -d "$HOST.part.XXXXXX")"
-    git -C "$DEPLOY" archive HEAD | tar -x -C "$PART"
-    cp "$LOCK" "$PART/addons.lock"
-    rm -rf "$PART/addons"
-    TMC_SIBLINGS="$SIB" bash "$PART/tools/check-pinned.sh" "$PART/addons" >&2 \
-        || { rm -rf "$PART"; echo "pack_boot: could not build addons/ at the lock's tags (fetch the sibling repos' tags)" >&2; exit 2; }
-    timeout 1800 "$GODOT" --headless --path "$PART" --import >"$PART/import.log" 2>&1 || true
-    [ -f "$PART/.godot/global_script_class_cache.cfg" ] \
-        || { tail -20 "$PART/import.log" >&2; rm -rf "$PART"; echo "pack_boot: the host did not import" >&2; exit 2; }
-    touch "$PART/.ready"
-    # The first finished build wins; a later one is dropped.
-    [ -f "$HOST/.ready" ] || rm -rf "$HOST"
-    mv -T "$PART" "$HOST" 2>/dev/null || rm -rf "$PART"
+    # One build per host at a time: a second publish waits, then finds .ready. Only a host with .ready is ever probed,
+    # so under the lock a host dir without it is a dead build and can go.
+    exec 9>"$CACHE/$KEY.lock"
+    flock 9
+    if [ ! -f "$HOST/.ready" ]; then
+        echo "pack_boot: building the host at the addons.lock tags in $HOST" >&2
+        rm -rf "$HOST"
+        PART="$(mktemp -d "$HOST.part.XXXXXX")"
+        trap 'rm -rf "$PART"; echo "pack_boot: the host could not be built (line $LINENO); the pack was not judged" >&2; exit 2' ERR
+        git -C "$DEPLOY" archive HEAD | tar -x -C "$PART"
+        cp "$LOCK" "$PART/addons.lock"
+        rm -rf "$PART/addons"
+        TMC_SIBLINGS="$SIB" bash "$PART/tools/check-pinned.sh" "$PART/addons" >&2 \
+            || { rm -rf "$PART"; echo "pack_boot: could not build addons/ at the lock's tags (fetch the sibling repos' tags)" >&2; exit 2; }
+        timeout 1800 "$GODOT" --headless --path "$PART" --import >"$PART/import.log" 2>&1 || true
+        [ -f "$PART/.godot/global_script_class_cache.cfg" ] \
+            || { tail -20 "$PART/import.log" >&2; rm -rf "$PART"; echo "pack_boot: the host did not import" >&2; exit 2; }
+        touch "$PART/.ready"
+        mv -T "$PART" "$HOST"
+        trap 'echo "pack_boot: the host could not be prepared (line $LINENO); the pack was not judged" >&2; exit 2' ERR
+    fi
+    flock -u 9
 fi
 mkdir -p "$HOST/pack_boot"
 cp "$HERE/tools/pack_boot_probe.gd" "$HOST/pack_boot/probe.gd"
 printf '[gd_scene format=3]\n\n[ext_resource type="Script" path="res://pack_boot/probe.gd" id="1"]\n\n[node name="PackBoot" type="Node"]\nscript = ExtResource("1")\n' > "$HOST/pack_boot/probe.tscn"
 LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
-set +e
-timeout 1200 "$GODOT" --headless --path "$HOST" res://pack_boot/probe.tscn -- "$OUT" >"$LOG" 2>&1
-rc=$?
-set -e
-if [ $rc -eq 2 ] || [ $rc -eq 126 ] || [ $rc -eq 127 ]; then
-    grep -E "^pack_boot:" "$LOG" >&2 || tail -5 "$LOG" >&2
-    echo "pack_boot: the probe could not run (exit $rc); the pack was not judged" >&2
-    exit 2
-fi
+# `|| rc=$?`: a non-zero probe is a result to read, not a setup error for the ERR trap (which set +e would not stop).
+rc=0
+timeout 1200 "$GODOT" --headless --path "$HOST" res://pack_boot/probe.tscn -- "$OUT" >"$LOG" 2>&1 || rc=$?
 grep -E "^pack_boot:|SCRIPT ERROR|Parse Error|Compile Error|Failed to load|^ +at: " "$LOG" | grep -v "^pack_boot: game.yml .* loads" >&2 || true
-if [ $rc -ne 0 ] || ! grep -q "^pack_boot: .* 0 failure(s)" "$LOG"; then
-    echo "pack_boot: the pack does not boot mounted on the pinned host (exit $rc); not publishing" >&2
+if [ $rc -eq 0 ] && grep -qE "^pack_boot: [0-9]+ script\(s\) compiled, 0 failure\(s\)$" "$LOG"; then
+    echo "pack_boot: the pack boots mounted on the pinned host" >&2
+    exit 0
+fi
+# A refusal needs the probe's own verdict: it exited 1 after its summary line named the failures.
+if [ $rc -eq 1 ] && grep -qE "^pack_boot: [0-9]+ script\(s\) compiled, [1-9][0-9]* failure\(s\)$" "$LOG"; then
+    echo "pack_boot: the pack does not boot mounted on the pinned host; not publishing" >&2
     exit 1
 fi
-echo "pack_boot: the pack boots mounted on the pinned host" >&2
+[ -s "$LOG" ] && tail -5 "$LOG" >&2
+echo "pack_boot: the probe did not finish (exit $rc: a timeout, a crash, or the probe itself did not load); the pack was not judged" >&2
+exit 2
