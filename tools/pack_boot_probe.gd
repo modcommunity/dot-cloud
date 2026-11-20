@@ -65,12 +65,27 @@ func _run(out: String) -> int:
 	_check_requires(by_path)
 	if by_path.has("game.yml") and scripts.is_empty():
 		_fail("a game pack with no script to compile (no .gd, .gd.remap or .gdc): nothing would run")
+	_check_scripts(scripts, prefix)
+	_check_builtins(resources, prefix)
+	_check_game_yml(by_path, prefix)
 
+	DirAccess.remove_absolute(pck)
+	print("pack_boot: %d scene(s)/resource(s) loaded" % resources.size())
+	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
+	if _bad == 0 and _unjudged > 0:
+		printerr("pack_boot: %d check(s) could not be judged off the tree; the pack was not judged" % _unjudged)
+		return 2
+	return 1 if _bad > 0 else 0
+
+
+func _check_scripts(scripts: PackedStringArray, prefix: String) -> void:
 	for path in scripts:
 		var s := load(path) as GDScript
 		if s == null or not s.can_instantiate():
 			_fail("%s does not compile against the host's addons: %s" % [path, _first_error(path, prefix)])
 
+
+func _check_builtins(resources: PackedStringArray, prefix: String) -> void:
 	# A script built into a scene or resource (a .tscn's [sub_resource type="GDScript"]) is no file of its own: each
 	# scene and resource the pack ships is loaded and every built-in script in it must compile too.
 	# Imported assets (_imported/, .godot/: the .glb/.png outputs an import remap points at) hold no scripts and are skipped.
@@ -88,6 +103,8 @@ func _run(out: String) -> int:
 				_fail("%s does not compile against the host's addons (a script built into %s)" % [
 					s.resource_path.replace(prefix + "/", ""), path.replace(prefix + "/", "")])
 
+
+func _check_game_yml(by_path: Dictionary, prefix: String) -> void:
 	var yml := FileAccess.get_file_as_string(str(by_path.get("game.yml", "")))
 	for key in ["module", "scene", "client_scene"]:
 		var rel := _yml_value(yml, key)
@@ -100,14 +117,6 @@ func _run(out: String) -> int:
 		print("pack_boot: game.yml %s loads: %s" % [key, rel])
 		if key == "module" and res is GDScript:
 			_check_module(res as GDScript, rel)
-
-	DirAccess.remove_absolute(pck)
-	print("pack_boot: %d scene(s)/resource(s) loaded" % resources.size())
-	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
-	if _bad == 0 and _unjudged > 0:
-		printerr("pack_boot: %d check(s) could not be judged off the tree; the pack was not judged" % _unjudged)
-		return 2
-	return 1 if _bad > 0 else 0
 
 
 ## What the host does first with a module (dot_module_host.gd _instantiate_module, then DotGameModule's
