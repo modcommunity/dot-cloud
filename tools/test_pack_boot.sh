@@ -119,6 +119,33 @@ rc=$?
 [ $rc -eq 2 ] && grep -q 'NOT JUDGED' "$TMP/stateful.log" && ok "a bridge that needs the running game is exit 2, not a refusal" \
     || { fail "a stateful bridge gave exit $rc (want 2)"; grep '^pack_boot' "$TMP/stateful.log"; }
 
+# A server fetches no client-side file: a server module that preloads one is refused (the server would not load it),
+# while the same file shipped for both sides boots. game.yml read as the host reads it: a trailing comment is no path.
+python3 -I - "$TMP/nonet" "$TMP/sided" <<'PY2'
+import hashlib, json, os, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+for d, side in ((dst + "_client", "client"), (dst + "_both", None)):
+    shutil.copytree(src, d)
+    m = json.load(open(os.path.join(d, "manifest.json")))
+    def put(path, text, side=None):
+        b = text.encode(); sha = hashlib.sha256(b).hexdigest()
+        os.makedirs(os.path.join(d, "objects", sha[:2]), exist_ok=True)
+        open(os.path.join(d, "objects", sha[:2], sha), "wb").write(b)
+        e = {"path": path, "sha256": sha, "size": len(b)}
+        if side: e["side"] = side
+        m["files"] = [f for f in m["files"] if f["path"] != path] + [e]
+    put("game/client_only.gd", "extends Node\n", side)
+    put("game/no_net_module.gd", "extends DotGameModule\n\nconst C := preload(\"res://dot_cloud/%s/%s/game/client_only.gd\")\n" % (m["content_id"], m["version"]))
+    yml = next(f for f in m["files"] if f["path"] == "game.yml")
+    text = open(os.path.join(d, "objects", yml["sha256"][:2], yml["sha256"])).read()
+    put("game.yml", "\n".join(l + "  # the server module" if l.startswith("module:") else l for l in text.split("\n")))
+    json.dump(m, open(os.path.join(d, "manifest.json"), "w"))
+PY2
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/sided_client" "$LOCK" >"$TMP/sc.log" 2>&1; r1=$?
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/sided_both" "$LOCK" >"$TMP/sb.log" 2>&1; r2=$?
+[ $r1 -eq 1 ] && ok "a server module preloading a client-only file is refused" || { fail "client-only preload gave exit $r1 (want 1)"; grep '^pack_boot' "$TMP/sc.log"; }
+[ $r2 -eq 0 ] && ok "the same file for both sides boots, with a commented game.yml module" || { fail "both-sides preload gave exit $r2 (want 0)"; grep '^pack_boot' "$TMP/sb.log"; }
+
 # A probe that cannot judge (here: an unreadable manifest, the probe's own exit 2) is exit 2, not a refusal.
 mkdir -p "$TMP/junk"; echo '[]' >"$TMP/junk/manifest.json"
 bash "$HERE/tools/pack_boot_test.sh" "$TMP/junk" "$LOCK" >"$TMP/junk.log" 2>&1

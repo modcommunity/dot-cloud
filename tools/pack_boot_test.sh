@@ -29,7 +29,10 @@ command -v "$GODOT" >/dev/null 2>&1 || { echo "pack_boot: no engine at GODOT=$GO
 DEPLOY="$(dirname "$LOCK")"
 SIB="$(cd "$DEPLOY/.." && pwd)"
 [ -f "$DEPLOY/project.godot" ] || { echo "pack_boot: $DEPLOY is not a dot-server-deploy checkout" >&2; exit 2; }
-KEY="$( { git -C "$DEPLOY" rev-parse HEAD; sha256sum < "$LOCK"; } | sha256sum | cut -c1-16)"
+# The engine is part of the key: a host imported by another Godot build is not reused.
+ENGINE="$("$GODOT" --headless --version 2>/dev/null | tail -1)"
+[ -n "$ENGINE" ] || { echo "pack_boot: $GODOT --version printed nothing" >&2; exit 2; }
+KEY="$( { git -C "$DEPLOY" rev-parse HEAD; sha256sum < "$LOCK"; echo "$ENGINE"; } | sha256sum | cut -c1-16)"
 CACHE="${GS_PACK_BOOT_CACHE:-$HOME/.cache/pack-boot}"
 HOST="$CACHE/$KEY"
 if [ ! -f "$HOST/.ready" ]; then
@@ -48,7 +51,11 @@ if [ ! -f "$HOST/.ready" ]; then
         rm -rf "$PART/addons"
         TMC_SIBLINGS="$SIB" bash "$PART/tools/check-pinned.sh" "$PART/addons" >&2 \
             || { rm -rf "$PART"; echo "pack_boot: could not build addons/ at the lock's tags (fetch the sibling repos' tags)" >&2; exit 2; }
-        timeout 1800 "$GODOT" --headless --path "$PART" --import >"$PART/import.log" 2>&1 || true
+        irc=0; timeout 1800 "$GODOT" --headless --path "$PART" --import >"$PART/import.log" 2>&1 || irc=$?
+        # A timeout (124) or a crash/kill (signal, >= 128) leaves a half-imported host: never marked ready or cached.
+        if [ $irc -eq 124 ] || [ $irc -ge 128 ]; then
+            tail -20 "$PART/import.log" >&2; rm -rf "$PART"; echo "pack_boot: the host import did not finish (exit $irc); the pack was not judged" >&2; exit 2
+        fi
         [ -f "$PART/.godot/global_script_class_cache.cfg" ] \
             || { tail -20 "$PART/import.log" >&2; rm -rf "$PART"; echo "pack_boot: the host did not import" >&2; exit 2; }
         touch "$PART/.ready"

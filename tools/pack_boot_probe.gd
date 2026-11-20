@@ -14,6 +14,7 @@ extends Node
 var _bad := 0
 ## Checks the probe could not decide off the tree (exit 2 when nothing failed).
 var _unjudged := 0
+var _pcks: PackedStringArray = []
 
 
 func _ready() -> void:
@@ -22,7 +23,10 @@ func _ready() -> void:
 		printerr("pack_boot: usage: -- OUT_DIR")
 		get_tree().quit(2)
 		return
-	get_tree().quit(_run(args[0]))
+	var rc := _run(args[0])
+	for pck in _pcks:
+		DirAccess.remove_absolute(pck)
+	get_tree().quit(rc)
 
 
 func _run(out: String) -> int:
@@ -32,15 +36,50 @@ func _run(out: String) -> int:
 		return 2
 	var m := manifest as Dictionary
 	var prefix := "res://%s/%s/%s" % [str(m.get("mount_root", "dot_cloud")), str(m["content_id"]), str(m["version"])]
-	var pck := OS.get_temp_dir().path_join("pack_boot_%d.pck" % OS.get_process_id())
+	# A server fetches the server and both files only (DotCloudFile.side; an unknown side is both): it is judged on
+	# that view first, so a server script reaching a client-only file fails here as it would on the server.
+	var server_files: Array = []
+	var client_files: Array = []
+	for f: Dictionary in m["files"]:
+		(client_files if str(f.get("side", "both")) == "client" else server_files).append(f)
+	var sv := _mount(out, prefix, server_files, "server")
+	if sv.is_empty():
+		return 2
+	var by_path: Dictionary = sv["by_path"]
+	var scripts: PackedStringArray = sv["scripts"]
+	_check_requires(by_path)
+	if by_path.has("game.yml") and scripts.is_empty() and client_files.is_empty():
+		_fail("a game pack with no script to compile (no .gd, .gd.remap or .gdc): nothing would run")
+	_check_scripts(sv["scripts"], prefix)
+	_check_builtins(sv["resources"], prefix)
+	var yml: Dictionary = _game_yml(str(by_path.get("game.yml", "")))
+	_check_game_yml(yml, prefix, ["module", "scene"])
+	# Then the client's view (both + client): its client-only scripts and scenes, and game.yml's client_scene.
+	var cv := _mount(out, prefix, client_files, "client") if not client_files.is_empty() else {"scripts": [], "resources": []}
+	if cv.is_empty():
+		return 2
+	_check_scripts(cv["scripts"], prefix)
+	_check_builtins(cv["resources"], prefix)
+	_check_game_yml(yml, prefix, ["client_scene"])
+	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size() + (cv["scripts"] as Array).size(), _bad])
+	if _bad == 0 and _unjudged > 0:
+		printerr("pack_boot: %d check(s) could not be judged off the tree; the pack was not judged" % _unjudged)
+		return 2
+	return 1 if _bad > 0 else 0
+
+
+## Packs [param files] into a .pck at [param prefix] and mounts it, as dot-cloud's mounter does. Returns
+## {by_path, scripts, resources}, or {} when the pack could not be written or mounted (not a verdict).
+func _mount(out: String, prefix: String, files: Array, view: String) -> Dictionary:
+	var pck := OS.get_temp_dir().path_join("pack_boot_%d_%s.pck" % [OS.get_process_id(), view])
 	var packer := PCKPacker.new()
 	if packer.pck_start(pck) != OK:
 		printerr("pack_boot: cannot write %s" % pck)
-		return 2
+		return {}
 	var scripts: PackedStringArray = []
 	var resources: PackedStringArray = []
 	var by_path := {}
-	for f: Dictionary in m["files"]:
+	for f: Dictionary in files:
 		var sha := str(f["sha256"])
 		var obj := out.path_join("objects").path_join(sha.substr(0, 2)).path_join(sha)
 		if not FileAccess.file_exists(obj):
@@ -57,25 +96,12 @@ func _run(out: String) -> int:
 		if res_at != "" and not resources.has(res_at):
 			resources.append(res_at)
 	packer.flush()
+	_pcks.append(pck)  # the engine reads a mounted .pck lazily: removed when the probe exits
 	if not ProjectSettings.load_resource_pack(pck, false):
-		printerr("pack_boot: the engine would not mount %s" % pck)
-		return 2
-	print("pack_boot: mounted %d files at %s" % [by_path.size(), prefix])
-
-	_check_requires(by_path)
-	if by_path.has("game.yml") and scripts.is_empty():
-		_fail("a game pack with no script to compile (no .gd, .gd.remap or .gdc): nothing would run")
-	_check_scripts(scripts, prefix)
-	_check_builtins(resources, prefix)
-	_check_game_yml(by_path, prefix)
-
-	DirAccess.remove_absolute(pck)
-	print("pack_boot: %d scene(s)/resource(s) loaded" % resources.size())
-	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
-	if _bad == 0 and _unjudged > 0:
-		printerr("pack_boot: %d check(s) could not be judged off the tree; the pack was not judged" % _unjudged)
-		return 2
-	return 1 if _bad > 0 else 0
+		printerr("pack_boot: the engine would not mount the %s view" % view)
+		return {}
+	print("pack_boot: mounted %d %s-view files at %s" % [by_path.size(), view, prefix])
+	return {"by_path": by_path, "scripts": scripts, "resources": resources}
 
 
 func _check_scripts(scripts: PackedStringArray, prefix: String) -> void:
@@ -104,13 +130,12 @@ func _check_builtins(resources: PackedStringArray, prefix: String) -> void:
 					s.resource_path.replace(prefix + "/", ""), path.replace(prefix + "/", "")])
 
 
-func _check_game_yml(by_path: Dictionary, prefix: String) -> void:
-	var yml := FileAccess.get_file_as_string(str(by_path.get("game.yml", "")))
-	for key in ["module", "scene", "client_scene"]:
-		var rel := _yml_value(yml, key)
+func _check_game_yml(yml: Dictionary, prefix: String, keys: Array) -> void:
+	for key: String in keys:
+		var rel := str(DotYaml.at(yml, key, "")).strip_edges()
 		if rel == "":
 			continue
-		var res: Resource = load(prefix.path_join(rel))
+		var res: Resource = load(rel if rel.contains("://") else prefix.path_join(rel))
 		if res == null or (res is GDScript and not (res as GDScript).can_instantiate()):
 			_fail("game.yml %s (%s) does not load mounted" % [key, rel])
 			continue
@@ -287,11 +312,16 @@ static func _builtin_scripts(root: Resource) -> Array[GDScript]:
 	return found
 
 
-static func _yml_value(text: String, key: String) -> String:
-	for line in text.split("\n"):
-		if line.begins_with(key + ":"):
-			return line.substr(key.length() + 1).strip_edges().trim_prefix("\"").trim_suffix("\"")
-	return ""
+## game.yml parsed as the host parses it (DotYaml, as tmc_content.gd's TmcYaml): comments, quoting and nesting
+## read the same. A game.yml that does not parse is one the host would refuse: a failure.
+func _game_yml(path: String) -> Dictionary:
+	if path == "":
+		return {}
+	var parsed: DotResult = DotYaml.parse(FileAccess.get_file_as_string(path), "game.yml")
+	if not parsed.ok or not (parsed.value is Dictionary):
+		_fail("game.yml does not parse: %s" % str(parsed.error))
+		return {}
+	return parsed.value as Dictionary
 
 
 func _fail(text: String) -> void:
