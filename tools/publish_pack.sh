@@ -295,11 +295,13 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     # The upload builds the pack again from $SRC: a file changed since the booted build would go up unbooted.
     # The source must not change between the judged build and the uploaded one. Git's own files, .godot and ignored files are
     # never packed, so a concurrent git status/fetch or a log write does not count. A change is not a verdict: exit 2.
+    # --exclude-dir paths never go into the pack, so a report or screenshot written there meanwhile is not a change either.
+    GATE_X=(); for ((i=0; i<${#ARGS[@]}; i++)); do [ "${ARGS[i]}" = --exclude-dir ] && GATE_X+=(-o -path "$SRC/${ARGS[i+1]}"); done
     changed=""
     while IFS= read -r -d '' f; do
         if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1 && git -C "$SRC" check-ignore -q -- "$f" 2>/dev/null; then continue; fi
         changed="$f"; break
-    done < <(find "$SRC" \( -path "$SRC/.godot" -o -name .git \) -prune -o -type f -newer "$TMP/boot.stamp" -print0)
+    done < <(find "$SRC" \( -path "$SRC/.godot" -o -name .git "${GATE_X[@]}" \) -prune -o -type f -newer "$TMP/boot.stamp" -print0)
     [ -z "$changed" ] || { echo "publish_pack: refusing to upload: $changed changed after the boot gate built the pack; the uploaded build would not be the one judged. Nothing was sent; re-run." >&2; exit 2; }
 fi
 if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
