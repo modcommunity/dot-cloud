@@ -99,6 +99,26 @@ bash "$HERE/tools/pack_boot_test.sh" "$TMP/bad" "$LOCK" >"$TMP/c2.log" 2>&1; r2=
 wait $c1; r1=$?
 [ $r1 -eq 0 ] && [ $r2 -eq 1 ] && ok "concurrent runs keep their own verdicts" || fail "concurrent runs gave $r1/$r2 (want 0/1)"
 
+# A bridge that needs the running game (reads `game`, null off the tree) cannot be judged by the probe: exit 2, never 1.
+python3 -I - "$TMP/nonet" "$TMP/stateful" <<'PY'
+import hashlib, json, os, shutil, sys
+src, dst = sys.argv[1], sys.argv[2]
+shutil.copytree(src, dst)
+m = json.load(open(os.path.join(dst, "manifest.json")))
+def put(path, text):
+    b = text.encode(); sha = hashlib.sha256(b).hexdigest()
+    os.makedirs(os.path.join(dst, "objects", sha[:2]), exist_ok=True)
+    open(os.path.join(dst, "objects", sha[:2], sha), "wb").write(b)
+    m["files"] = [f for f in m["files"] if f["path"] != path] + [{"path": path, "sha256": sha, "size": len(b)}]
+put("game/no_net_module.gd", "extends DotGameModule\n\nfunc _net_config() -> DotNetConfig:\n\treturn DotNetConfig.new()\n\n"
+    "func _make_bridge() -> Node:\n\treturn Node.new() if game.get_meta(\"ready\", false) else null\n")
+json.dump(m, open(os.path.join(dst, "manifest.json"), "w"))
+PY
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/stateful" "$LOCK" >"$TMP/stateful.log" 2>&1
+rc=$?
+[ $rc -eq 2 ] && grep -q 'NOT JUDGED' "$TMP/stateful.log" && ok "a bridge that needs the running game is exit 2, not a refusal" \
+    || { fail "a stateful bridge gave exit $rc (want 2)"; grep '^pack_boot' "$TMP/stateful.log"; }
+
 # A probe that cannot judge (here: an unreadable manifest, the probe's own exit 2) is exit 2, not a refusal.
 mkdir -p "$TMP/junk"; echo '[]' >"$TMP/junk/manifest.json"
 bash "$HERE/tools/pack_boot_test.sh" "$TMP/junk" "$LOCK" >"$TMP/junk.log" 2>&1

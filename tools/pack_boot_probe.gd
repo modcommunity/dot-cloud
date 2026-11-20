@@ -9,9 +9,11 @@ extends Node
 ##     "A game has to supply the bridge between itself and the netcode" and the server hibernates);
 ##   - requires.json names an addon the host lacks, or a level above the one it carries.
 ## User args: OUT_DIR (manifest.json and objects/<2>/<sha>: a publish dry-run's --out, or tools/pack_fetch.py's).
-## Exit 0 clean, 1 failures (each printed), 2 usage.
+## Exit 0 clean, 1 failures (each printed), 2 usage or a check that could not be judged off the tree.
 
 var _bad := 0
+## Checks the probe could not decide off the tree (exit 2 when nothing failed).
+var _unjudged := 0
 
 
 func _ready() -> void:
@@ -71,10 +73,15 @@ func _run(out: String) -> int:
 
 	# A script built into a scene or resource (a .tscn's [sub_resource type="GDScript"]) is no file of its own: each
 	# scene and resource the pack ships is loaded and every built-in script in it must compile too.
+	# Imported assets (_imported/, .godot/: the .glb/.png outputs an import remap points at) hold no scripts and are skipped.
+	# A scene that will not load here is only noted: what the server loads (game.yml's module and scenes) is judged below.
 	for path in resources:
+		var rel_res := path.replace(prefix + "/", "")
+		if rel_res.begins_with("_imported/") or rel_res.begins_with(".godot/"):
+			continue
 		var res := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REUSE)
 		if res == null:
-			_fail("%s does not load mounted" % path.replace(prefix + "/", ""))
+			print("pack_boot: note: %s does not load off the tree; its built-in scripts were not checked" % rel_res)
 			continue
 		for s: GDScript in _builtin_scripts(res):
 			if not s.can_instantiate():
@@ -97,6 +104,9 @@ func _run(out: String) -> int:
 	DirAccess.remove_absolute(pck)
 	print("pack_boot: %d scene(s)/resource(s) loaded" % resources.size())
 	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
+	if _bad == 0 and _unjudged > 0:
+		printerr("pack_boot: %d check(s) could not be judged off the tree; the pack was not judged" % _unjudged)
+		return 2
 	return 1 if _bad > 0 else 0
 
 
@@ -118,8 +128,17 @@ func _check_module(script: GDScript, rel: String) -> void:
 		OS.remove_logger(capture)
 		wants_net = config != null or capture.first_for("") != ""
 	if wants_net and module.has_method("_make_bridge"):
+		# The host calls _make_bridge() inside _module_load, with `game` and the server set; off the tree a bridge that
+		# reads them errors at run time. That is not a verdict on the pack (exit 2), unless a script already failed to compile.
+		var bcap := _ScriptErrorCapture.new()
+		OS.add_logger(bcap)
 		var bridge: Variant = module.call("_make_bridge")
-		if not (bridge is Node):
+		OS.remove_logger(bcap)
+		var runtime := bcap.first_for("")
+		if not (bridge is Node) and runtime != "" and _bad == 0:
+			_unjudged += 1
+			printerr("pack_boot: NOT JUDGED game.yml module (%s): _make_bridge() errored off the tree (%s); it needs the running game" % [rel, runtime])
+		elif not (bridge is Node):
 			_fail("game.yml module (%s): _make_bridge() hands back no bridge; the host would refuse the game" % rel)
 		else:
 			print("pack_boot: the module makes its bridge: %s" % (bridge as Node).get_class())

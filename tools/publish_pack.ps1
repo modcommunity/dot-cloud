@@ -95,6 +95,12 @@ try {
         exit $LASTEXITCODE
     }
     if (-not $Source) { Write-Error 'publish_pack: -Source is required'; exit 1 }
+    # A game pack (game.yml) only goes up through publish_pack.sh's boot gate (tools/pack_boot_test.sh: mounted on a host at
+    # the addons.lock, every script compiled, the module asked for its bridge). Hungario 0.1.19 went up unbooted and every
+    # server refused it. This script has no gate, so it never uploads one; run publish_pack.sh (WSL or Git Bash) instead.
+    if (-not $DryRun -and (Test-Path (Join-Path (Full $Source) 'game.yml') -PathType Leaf)) {
+        Write-Error "publish_pack: refusing: $Source is a game pack (game.yml); upload it with tools/publish_pack.sh, which boot-gates it. Nothing was sent."; exit 1
+    }
     # Valve guard (same as publish_pack.sh): stock Valve assets never ship in a pack; lists every offending path, no bypass.
     $ga = @('-I', (Join-Path $PSScriptRoot 'check_valve_files.py'), (Full $Source)); if ($Id) { $ga += '--id', $Id }
     foreach ($d in $ExcludeDir) { $ga += '--exclude-dir', $d }
