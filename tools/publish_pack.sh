@@ -277,13 +277,15 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
         done
     done
     [ -n "$BOOTLOCK" ] || { echo "publish_pack: refusing: $SRC is a game pack (game.yml) and no dot-server-deploy addons.lock was found to boot it against (--host-addons, or ../dot-server-deploy beside dot-cloud). The pack was not judged and nothing was sent." >&2; exit 2; }
-    DARGS=(); skip=""
+    # The judged build mounts at the version being published when it is given (a pack may read its own res:// path);
+    # with --bump the server picks it, so 0.0.0 stands in and the post-upload boot of the uploaded build covers the rest.
+    DARGS=(); skip=""; GATEV=0.0.0
     for a in "${ARGS[@]}"; do
-        if [ -n "$skip" ]; then skip=""; continue; fi
-        case "$a" in --version|--bump|--site) skip=1 ;; *) DARGS+=("$a") ;; esac
+        if [ -n "$skip" ]; then [ "$skip" = --version ] && GATEV="$a"; skip=""; continue; fi
+        case "$a" in --version|--bump|--site) skip="$a" ;; *) DARGS+=("$a") ;; esac
     done
     touch "$TMP/boot.stamp"
-    "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
+    "${RUN[@]}" publish --out "$TMP/boot" --version "$GATEV" "${DARGS[@]}" >&2 \
         || { echo "publish_pack: the boot gate's dry run (the pack build) failed, above; the pack was not booted or judged. Nothing was sent." >&2; exit 2; }
     brc=0; GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" || brc=$?
     # 1 is the probe's verdict on the pack; anything else is the gate failing to judge it (no engine, host, mount: exit 2).

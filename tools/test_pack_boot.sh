@@ -119,6 +119,23 @@ rc=$?
 [ $rc -eq 2 ] && grep -q 'NOT JUDGED' "$TMP/stateful.log" && ok "a bridge that needs the running game is exit 2, not a refusal" \
     || { fail "a stateful bridge gave exit $rc (want 2)"; grep '^pack_boot' "$TMP/stateful.log"; }
 
+# The same bridge returning null quietly while `game` is unset (no error logged) is not judged either.
+mkdir -p "$TMP/quiet" && cp -r "$TMP/stateful/." "$TMP/quiet/"
+python3 -I - "$TMP/quiet" <<'PY'
+import hashlib, json, os, sys
+dst = sys.argv[1]; m = json.load(open(os.path.join(dst, "manifest.json")))
+b = ("extends DotGameModule\n\nfunc _net_config() -> DotNetConfig:\n\treturn DotNetConfig.new()\n\n"
+     "func _make_bridge() -> Node:\n\tif game == null:\n\t\treturn null\n\treturn Node.new()\n").encode()
+sha = hashlib.sha256(b).hexdigest(); os.makedirs(os.path.join(dst, "objects", sha[:2]), exist_ok=True)
+open(os.path.join(dst, "objects", sha[:2], sha), "wb").write(b)
+m["files"] = [f for f in m["files"] if f["path"] != "game/no_net_module.gd"] + [{"path": "game/no_net_module.gd", "sha256": sha, "size": len(b)}]
+json.dump(m, open(os.path.join(dst, "manifest.json"), "w"))
+PY
+bash "$HERE/tools/pack_boot_test.sh" "$TMP/quiet" "$LOCK" >"$TMP/quiet.log" 2>&1
+rc=$?
+[ $rc -eq 2 ] && grep -q 'NOT JUDGED' "$TMP/quiet.log" && ok "a bridge that returns null quietly off the tree is exit 2, not a refusal" \
+    || { fail "a quiet null bridge gave exit $rc (want 2)"; grep '^pack_boot' "$TMP/quiet.log"; }
+
 # A server fetches no client-side file: a server module that preloads one is refused (the server would not load it),
 # while the same file shipped for both sides boots. game.yml read as the host reads it: a trailing comment is no path.
 python3 -I - "$TMP/nonet" "$TMP/sided" <<'PY2'

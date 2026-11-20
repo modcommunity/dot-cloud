@@ -169,11 +169,14 @@ func _check_module(script: GDScript, rel: String) -> void:
 		var bridge: Variant = module.call("_make_bridge")
 		OS.remove_logger(bcap)
 		var runtime := bcap.first_for("")
-		if not (bridge is Node) and runtime != "" and _bad == 0:
+		# A null bridge is a verdict only when a script of the pack failed to compile (the Hungario 0.1.19 case); a
+		# module may also return null quietly when `game` is unset, which a real server sets, so that is not judged.
+		if not (bridge is Node) and _bad == 0:
 			_unjudged += 1
-			printerr("pack_boot: NOT JUDGED game.yml module (%s): _make_bridge() errored off the tree (%s); it needs the running game" % [rel, runtime])
+			var why := "errored off the tree (%s)" % runtime if runtime != "" else "returned no bridge with no error off the tree"
+			printerr("pack_boot: NOT JUDGED game.yml module (%s): _make_bridge() %s; it needs the running game" % [rel, why])
 		elif not (bridge is Node):
-			_fail("game.yml module (%s): _make_bridge() hands back no bridge; the host would refuse the game" % rel)
+			_fail("game.yml module (%s): _make_bridge() hands back no bridge and the pack has scripts that do not compile (above); the host would refuse the game" % rel)
 		else:
 			print("pack_boot: the module makes its bridge: %s" % (bridge as Node).get_class())
 			(bridge as Node).free()
