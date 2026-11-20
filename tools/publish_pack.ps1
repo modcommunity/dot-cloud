@@ -2,7 +2,7 @@
 #   .\tools\publish_pack.ps1 [publish] -Source DIR -Id NAME [-Version V | -Bump patch|minor|major] [-Lock content.lock.json]
 #       [-Into DIR] [-Kind pack|store] [-LockOptional] [-Asset ID] [-Name TEXT] [-Meta k=v,...] [-ExcludeDir a,b] [-Site URL] [-TokenFile FILE]
 #       [-Out DIR] [-Godot BIN] [-DryRun] [-NoImport] [-HostAddons LOCK,...] [-HostLevel name=N,...]
-#   publish derives requires.json like publish_pack.sh (dot-core's dot_requires.gd) and caps each level at the -HostAddons lock's
+#   publish derives requires.json like publish_pack.sh (GameSpice Core's dot_requires.gd) and caps each level at the -HostAddons lock's
 #   (addon repo at the locked ref, LEVEL in <addon>_api.gd) or -HostLevel name=N; a committed requires.json above the host is refused.
 #   A requires.floor.json is judged against those same levels (dot_requires.gd --pin NAME=N), not the linked heads.
 #   -HostAddons leaves out the addons/<name> folders the host owns, matched by folder name or by the repository a linked addon points into.

@@ -6,15 +6,15 @@ The pieces and where they live:
 
 | Piece | Where | Names |
 | --- | --- | --- |
-| What a pack provides | the pack source's `provides.json`, signed into the manifest as `provides` | `DotCloudProvides` (dot-cloud `manifest/`) |
-| The runtime index | dot-core `core/` | `DotContentIndex`, `DotContentEntry`, registry name `dot_content_index` |
-| Registering on mount, session tags, the code scan | dot-cloud `client/`, `mount/` | `DotCloudClient.ensure_for_session`, `DotCloudScriptScan` |
-| The sync client | dot-cloud `workshop/` | `DotCloudWorkshop` (registry name `dot_workshop`), `DotCloudWorkshopList`, `DotCloudWorkshopDevice` |
+| What a pack provides | the pack source's `provides.json`, signed into the manifest as `provides` | `DotCloudProvides` (GameSpice Cloud `manifest/`) |
+| The runtime index | GameSpice Core `core/` | `DotContentIndex`, `DotContentEntry`, registry name `dot_content_index` |
+| Registering on mount, session tags, the code scan | GameSpice Cloud `client/`, `mount/` | `DotCloudClient.ensure_for_session`, `DotCloudScriptScan` |
+| The sync client | GameSpice Cloud `workshop/` | `DotCloudWorkshop` (registry name `dot_workshop`), `DotCloudWorkshopList`, `DotCloudWorkshopDevice` |
 | The site API | website-city | `GET /api/app/v1/workshop`, `POST /api/app/v1/workshop/scope` |
-| Solo launch and the panel | dot-server-deploy `client/` | `TmcSoloSession`, `TmcWorkshopPanel` |
-| Consumers | dot-map, dot-weapon, dot-props, dot-npc, game-playlot | `follow_content(index)` on each catalogue |
+| Solo launch and the panel | GameSpice Server Deploy `client/` | `TmcSoloSession`, `TmcWorkshopPanel` |
+| Consumers | GameSpice Map, GameSpice Weapon, GameSpice Props, GameSpice NPC, game-playlot | `follow_content(index)` on each catalogue |
 
-## Why the sync client is in dot-cloud and not a new addon
+## Why the sync client is in GameSpice Cloud and not a new addon
 
 A `dot-workshop` addon on dot-cloud and dot-auth was the alternative. It would be a second repository, a `projects.tsv` row, a family entry, an `addons.lock` line and a new shell build for about four files, and it would be the third addon in the family that needs two others. dot-cloud already speaks to the site (`DotCloudRegistry` is the publishing half of the same backbone), and everything the client does after the list arrives is dot-cloud's own `ensure`. The one thing it needs from dot-auth is a bearer token, and that arrives as a `Callable` (`token_fn`) the host sets, so dot-cloud still imports nothing but dot-core. If the Workshop grows a UI of its own or a second backbone (a server-side subscription list for a community server), that is the point to split it out.
 
@@ -65,13 +65,13 @@ Every entry has `kind`, `id` (unique within the pack and kind, `[a-z0-9_]+`), `n
 
 | Kind | Fields | Consumer |
 | --- | --- | --- |
-| `map` | `scene`, `map_kind` (a `DotMapDef.kind`), optional `zones`, `min_players`, `max_players`, `tier` | dot-map `DotMapCatalogue` |
-| `weapon` | `def` (a `DotWeaponDef` `.tres`), optional `slot` | dot-weapon `DotWeaponCatalogue` |
-| `prop` | `def` (a `DotPropDef` `.tres`) or `scene` | dot-props `DotPropCatalogue` |
-| `npc` | `def` (a dot-npc definition `.tres`) or `scene` | dot-npc `DotNpcCatalogue` |
+| `map` | `scene`, `map_kind` (a `DotMapDef.kind`), optional `zones`, `min_players`, `max_players`, `tier` | GameSpice Map `DotMapCatalogue` |
+| `weapon` | `def` (a `DotWeaponDef` `.tres`), optional `slot` | GameSpice Weapon `DotWeaponCatalogue` |
+| `prop` | `def` (a `DotPropDef` `.tres`) or `scene` | GameSpice Props `DotPropCatalogue` |
+| `npc` | `def` (a GameSpice NPC definition `.tres`) or `scene` | GameSpice NPC `DotNpcCatalogue` |
 | `entity` | `script` (a path to a script a game spawns as an entity, game-playlot's shape) | the game |
 | `tool` | `script` | the game (game-playlot's tool gun) |
-| `sound` | `stream` | dot-audio, or the game |
+| `sound` | `stream` | GameSpice Audio, or the game |
 | `script` | `script`, `hook` (the hook name, for example `playlot`) | the game's hook loader (game-playlot's `playlot_hook.gd` contract) |
 | `trail` | `def` (the pack's `trails.json`; every trail entry of a pack names the same one), `thumbnail` (the trail's image). Data only: the pack ships no code and is published with `--no-import`, so the images stay bytes | dot-trail `DotTrailStore.load_dir` on the def's directory (game-playlot wears it on the local player) |
 | `addon` | `dir` | **not mounted from a subscription** (see [online isolation](#online-isolation)) |
@@ -110,7 +110,7 @@ The publisher adds `runs_code` (bool) to the manifest's `provides`, computed by 
 
 ### `DotContentIndex`
 
-dot-core, `core/dot_content_index.gd`, beside `DotContent`. It is the answer to "what has been mounted that I could offer?" for every consumer, so no game, map menu or spawn menu ever names a pack path. It is an instance, not a static class, because it needs signals (the reason `DotLogBus` and `DotRegistryBus` exist), and it lives in `DotRegistry` under `dot_content_index` (`DotContentIndex.SERVICE`).
+GameSpice Core, `core/dot_content_index.gd`, beside `DotContent`. It is the answer to "what has been mounted that I could offer?" for every consumer, so no game, map menu or spawn menu ever names a pack path. It is an instance, not a static class, because it needs signals (the reason `DotLogBus` and `DotRegistryBus` exist), and it lives in `DotRegistry` under `dot_content_index` (`DotContentIndex.SERVICE`).
 
 ```gdscript
 static func shared() -> DotContentIndex      # the registered one, created and registered on first call
@@ -127,7 +127,7 @@ func packs(session: StringName = &"") -> Array[Dictionary]
 func describe_lines() -> PackedStringArray
 ```
 
-`shared()` creating on demand is what makes order irrelevant: a catalogue built before the first mount and a cloud client that mounts before any catalogue exists find the same object. A test replaces it with `DotRegistry.register(DotContentIndex.SERVICE, its_own)`. A deployment without dot-cloud has an empty index, which is the same "content ships in the build" answer `DotContent` gives.
+`shared()` creating on demand is what makes order irrelevant: a catalogue built before the first mount and a cloud client that mounts before any catalogue exists find the same object. A test replaces it with `DotRegistry.register(DotContentIndex.SERVICE, its_own)`. A deployment without GameSpice Cloud has an empty index, which is the same "content ships in the build" answer `DotContent` gives.
 
 `DotContentEntry` (`RefCounted`) carries `kind`, `id`, `key` (`<content_id>@<version>:<kind>/<id>`, unique in the process), `content_id`, `version`, `pack_title`, `name`, `category`, `tags`, `meta`, `source` (`&"subscription"`, `&"server"`, `&"game"`), `sessions` (a set), `path(field) -> String` (the field resolved onto the mount prefix, `""` when absent) and `raw` (the entry dictionary as published). Consumers read typed fields and `path("scene")`; nobody joins a prefix by hand.
 
@@ -203,7 +203,7 @@ On the web, the cached list and the device file are written through `DotPaths` a
 
 A game can suggest packs it never requires, such as its separate map packs: `workshop.suggested = DotCloudSuggested.from_ids("maps", ids)`. A `sync()` whose mode allows them mounts them whether or not the player is signed in, newest published version (`<base>/<id>/latest.json`), through the client's own trusted keys. Players still pick maps one by one with the per-pack device switch.
 
-The shell (dot-server-deploy `client/shell.gd`, `docs/web-client.md`) does **not** mount them on a solo start by default: once the game is on screen it only declares them (the Subscriptions page lists them) and fetches nothing, so a game with many map packs never bulk-downloads ~1 GB or asks about it over play. A game that lists the suggested packs in its own map menu fetches one when that map is picked (game-fatal-contact `_fetch_picked`, game-airdrift); a game without such a fetch plays solo on its built-in and already-mounted maps only. Only a device set to "Download all in the background" or `--suggested=all` (or groups) makes that late sync fetch them, in the background and without a dialog unless metered; a server join never runs it. The library's own `workshop_suggested` default is still `all`: a caller that runs `sync()` itself gets the full mount unless it sets a mode. The mode is `all`, `none`, `ask` (like `all`, but the player is asked once through `ask_fn` before any suggested pack downloads; a refusal, or no `ask_fn` as on a headless client, skips only those with reason `suggested_declined`) or a comma list of groups, and the strongest source wins: the command line (`--no-suggested`, `--no-suggested-<group>`, `--suggested=<mode>`), then the device (`DotCloudWorkshopDevice.set_suggested_mode`, saved in `device.json`), then `workshop_suggested` (defaults, JSON, `GS_CLOUD_WORKSHOP_SUGGESTED`, `--cloud-workshop-suggested`). The server side reads the same list from the game's `game.yml` (dot-server-deploy). The Subscriptions page (dot-server-deploy `TmcWorkshopPanel`) shows the device choice as "When a map is picked" / "Download all in the background" (`DotCloudWorkshop.set_device_suggested_mode`). `describe()` reports `suggested: {mode, declared, kept}`.
+The shell (GameSpice Server Deploy `client/shell.gd`, `docs/web-client.md`) does **not** mount them on a solo start by default: once the game is on screen it only declares them (the Subscriptions page lists them) and fetches nothing, so a game with many map packs never bulk-downloads ~1 GB or asks about it over play. A game that lists the suggested packs in its own map menu fetches one when that map is picked (game-fatal-contact `_fetch_picked`, game-airdrift); a game without such a fetch plays solo on its built-in and already-mounted maps only. Only a device set to "Download all in the background" or `--suggested=all` (or groups) makes that late sync fetch them, in the background and without a dialog unless metered; a server join never runs it. The library's own `workshop_suggested` default is still `all`: a caller that runs `sync()` itself gets the full mount unless it sets a mode. The mode is `all`, `none`, `ask` (like `all`, but the player is asked once through `ask_fn` before any suggested pack downloads; a refusal, or no `ask_fn` as on a headless client, skips only those with reason `suggested_declined`) or a comma list of groups, and the strongest source wins: the command line (`--no-suggested`, `--no-suggested-<group>`, `--suggested=<mode>`), then the device (`DotCloudWorkshopDevice.set_suggested_mode`, saved in `device.json`), then `workshop_suggested` (defaults, JSON, `GS_CLOUD_WORKSHOP_SUGGESTED`, `--cloud-workshop-suggested`). The server side reads the same list from the game's `game.yml` (GameSpice Server Deploy). The Subscriptions page (GameSpice Server Deploy `TmcWorkshopPanel`) shows the device choice as "When a map is picked" / "Download all in the background" (`DotCloudWorkshop.set_device_suggested_mode`). `describe()` reports `suggested: {mode, declared, kept}`.
 
 ### Metered connections
 
@@ -211,7 +211,7 @@ There is no engine API for it. `DotCloudWorkshop.is_metered()` is true when the 
 
 ## The solo launch flow
 
-The shell (dot-server-deploy's `TmcSoloSession`), for every solo start: web `--solo`, desktop, and the app's Play solo.
+The shell (GameSpice Server Deploy's `TmcSoloSession`), for every solo start: web `--solo`, desktop, and the app's Play solo.
 
 1. Sign in (`try_web_handoff()` on the web, the native sign-in on desktop). The web handoff yields a game-bound token, which is enough to read and toggle this game's list.
 2. `DotContentIndex.shared().set_session(&"solo")`, `cloud.session_tag = &"solo"`.
@@ -248,6 +248,6 @@ Changing the default is one value here (`workshop_script_packs`) and one rule on
 
 ## Testing
 
-- **dot-core**: a selftest for `DotContentIndex`: two packs, two sessions, `tag_pack` reuse, `session_changed`, unknown kinds kept and offered to nobody.
-- **dot-cloud**: `examples/workshop_demo.tscn` publishes a fixture pack with a map, a weapon and a prop, mounts it as `solo`, and checks the index; switches to `online` and checks nothing is visible; mounts a pack whose files carry a script its manifest did not declare and requires the refusal; mounts a pack whose resource reuses a host UID and requires it skipped. A fake backbone (`examples/workshop_backbone.gd`, a local HTTP server like `http_test_server.gd`) serves first sync, an unchanged delta, a `removed` entry, a timeout (cached list used), a 401 (guest), and one broken pack among three (the other two mount).
-- **dot-server-deploy**: a solo launch with a subscribed fixture map pack shows it in the game's map menu, then an online join of the same game in the same process shows none of it. Rendered and looked at.
+- **GameSpice Core**: a selftest for `DotContentIndex`: two packs, two sessions, `tag_pack` reuse, `session_changed`, unknown kinds kept and offered to nobody.
+- **GameSpice Cloud**: `examples/workshop_demo.tscn` publishes a fixture pack with a map, a weapon and a prop, mounts it as `solo`, and checks the index; switches to `online` and checks nothing is visible; mounts a pack whose files carry a script its manifest did not declare and requires the refusal; mounts a pack whose resource reuses a host UID and requires it skipped. A fake backbone (`examples/workshop_backbone.gd`, a local HTTP server like `http_test_server.gd`) serves first sync, an unchanged delta, a `removed` entry, a timeout (cached list used), a 401 (guest), and one broken pack among three (the other two mount).
+- **GameSpice Server Deploy**: a solo launch with a subscribed fixture map pack shows it in the game's map menu, then an online join of the same game in the same process shows none of it. Rendered and looked at.

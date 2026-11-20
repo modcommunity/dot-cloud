@@ -1,8 +1,8 @@
-# dot-cloud
+# GameSpice Cloud
 
 Runtime content delivery for Godot 4: a game server hands a client a manifest, the client works out what it is missing, downloads it, verifies it, and mounts it, on desktop, mobile and in the browser. It also lays newer addon releases over a client build at its next start (`DotCloudAddonSet`), so an addon release does not need a new build.
 
-**The distributable is `addons/dot_cloud/`.** It requires [dot-core](../dot-core), which is a separate repository.
+**The distributable is `addons/dot_cloud/`.** It requires [GameSpice Core](../dot-core), which is a separate repository.
 
 ```bash
 # Local development setup — the symlink is gitignored on purpose.
@@ -51,7 +51,7 @@ Read the family [CLAUDE.md](../../CLAUDE.md) first; this file is only what is sp
 
 - The family's two steps ([family CLAUDE.md](../../CLAUDE.md#validating-anything)), then every demo: `dependency_demo`, `sync_demo`, `http_demo`, `netchan_demo`, `delivered_scene_demo`, `store_demo`, `mount_demo`, `addon_set_demo`, `workshop_demo`, `workshop_sync_demo`, `sides_demo`, `groups_demo` (`groups.json`), `bundle_demo`, `tokens_demo`, `auto_update_demo`, `mirror_demo` (signed list, bad mirrors, resume, opt-out, prefetch), `lock_demo` (`ensure_locked`), `inventory_demo` (inventory, pin, delete, quota report, bridge messages). Each exits non-zero on a failed check. [testing](docs/testing.md)
 - `sync_demo` alone proves nothing about the source every game uses: run `http_demo` too. `delivered_scene_demo` is the only one that publishes a scene with a script.
-- A delivery change is not done until a real client has joined a delivered pack (dot-server-deploy's `examples/*_client.tscn`).
+- A delivery change is not done until a real client has joined a delivered pack (GameSpice Server Deploy's `examples/*_client.tscn`).
 
 ## Rules that bite
 

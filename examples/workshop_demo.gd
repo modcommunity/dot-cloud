@@ -1,6 +1,6 @@
 extends Node
 
-## The Workshop's half of dot-cloud: a pack that says what it provides, and a mount that
+## The Workshop's half of GameSpice Cloud: a pack that says what it provides, and a mount that
 ## puts it in the index for the right session.
 ##
 ## Publishes fixture packs (a map, a weapon and a prop; a pack carrying a script; an addon

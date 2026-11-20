@@ -11,8 +11,8 @@ extends Control
 ## nothing enforced.
 ##
 ## The delegate is [code]examples/netchan_chunk_server.gd[/code], the shape
-## dot-server supplies, reduced to reading published objects off disk. dot-cloud
-## must not depend on dot-server, so the real one lives in another repository and
+## GameSpice Server supplies, reduced to reading published objects off disk. GameSpice Cloud
+## must not depend on GameSpice Server, so the real one lives in another repository and
 ## cannot be reached from here.
 ##
 ## 1. Publishes a content set, then acquires it with netchan as the only source.

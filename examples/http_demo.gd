@@ -51,7 +51,7 @@ var _server: Node = null
 
 ## Sections that suspend, and the ones that reported reaching their end.
 ##
-## The bug this guards against cost dot-net a check that never ran once: a
+## The bug this guards against cost GameSpice Net a check that never ran once: a
 ## section called without [code]await[/code] stops at its first suspension and
 ## the summary still says everything passed. Counting arrivals makes a dropped
 ## section visible.
@@ -455,7 +455,7 @@ func _test_resume(
 ## A partial full of bytes that were never valid. It must not become content,
 ## and it must not make the content permanently unacquirable either.
 ##
-## This is the dot-cloud contract on its own, independent of how the HTTP layer
+## This is the GameSpice Cloud contract on its own, independent of how the HTTP layer
 ## resumes: bytes on disk from an interrupted attempt have been verified by
 ## nothing, so a hash failure after a resume has to be blamed on them and
 ## retried from zero before the mirror is written off. With a single mirror —

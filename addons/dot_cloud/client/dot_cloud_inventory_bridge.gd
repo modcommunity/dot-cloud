@@ -2,7 +2,7 @@ class_name DotCloudInventoryBridge
 extends RefCounted
 
 ## Answers an embedding page's requests about downloaded content. Transport-free: [method handle] takes a decoded message and the sender's origin, so the web shell feeds it postMessage events and tests feed it dictionaries.
-## Schema: dot-server-deploy docs/web-inventory-bridge.md.
+## Schema: GameSpice Server Deploy docs/web-inventory-bridge.md.
 
 const CHANNEL := "cloud.inventory"
 const PROTOCOL := "dot-inventory"

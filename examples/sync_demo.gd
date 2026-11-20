@@ -133,8 +133,8 @@ func _run() -> void:
 	add_child(_client)
 
 	# Three other addons find this client through DotRegistry and none of them imports
-	# dot-cloud: dot-server downloads a game's content with it, releases the previous
-	# game's with it and reports on it from the console, and dot-user-avatar turns a
+	# GameSpice Cloud: GameSpice Server downloads a game's content with it, releases the previous
+	# game's with it and reports on it from the console, and GameSpice User Avatar turns a
 	# cosmetic's content id into a path with it. All four call sites treat an absent
 	# cloud as "this deployment ships its content in the build" — a legitimate
 	# configuration, and therefore indistinguishable from a client that simply never

@@ -76,7 +76,7 @@ var _first_required_failure: DotResult = null
 
 ## One entry per required file this sync could not produce, latest sync only.
 ## `[{ "path": String, "code": String, "message": String, "detail": String }]`.
-## A failed [DotResult] carries only a code and a string (a payload would be a dot-core change), so the
+## A failed [DotResult] carries only a code and a string (a payload would be a GameSpice Core change), so the
 ## per-file shape lives here, on [member DotCloudClient.downloader]; callers branch on codes, not message text.
 ## See [method failure_codes]. Empty after a success or a cancel (a cancel says nothing about any file).
 var last_failure_causes: Array[Dictionary] = []

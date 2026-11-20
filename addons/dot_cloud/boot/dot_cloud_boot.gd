@@ -2,7 +2,7 @@ extends Node
 
 ## A main scene that mounts the addon overlay before anything else loads, then hands over.
 ##
-## [b]This file may name NOTHING from any addon -- not even dot-cloud's own classes.[/b]
+## [b]This file may name NOTHING from any addon -- not even GameSpice Cloud's own classes.[/b]
 ## Measured on an exported build: once a script is compiled, a newer copy mounted over it is
 ## never read, in this process. So the overlay [DotCloudAddonSet] prepares has to be mounted
 ## before the first addon script is touched, and the only code that can run before that is

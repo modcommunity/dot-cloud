@@ -26,8 +26,8 @@ static func record_matches(bridge: Object, record: Variant, expected: Dictionary
 ## Whether [param manifest] is the addon this build keeps under `res://addons/<dir>/`.
 ##
 ## [b]The server names the directory and the pack separately, and nothing else ties them
-## together.[/b] A list saying `dir: dot_ui` with the dot-net pack would lay dot-net's files
-## over this build's dot-ui and drop dot-ui's classes from the list -- signed code, so no
+## together.[/b] A list saying `dir: dot_ui` with the GameSpice Net pack would lay GameSpice Net's files
+## over this build's GameSpice UI and drop GameSpice UI's classes from the list -- signed code, so no
 ## worse than a broken client, but a server must not be able to do even that to its own
 ## players. So the pack's own `plugin.cfg` names its plugin script, and a directory the
 ## build already has must already hold that script. A directory the build does not have is
@@ -101,7 +101,7 @@ static func summary(wanted: Dictionary) -> Dictionary:
 
 ## The name a pack goes by in [method built_versions] whichever id spells it: the last path
 ## part without the old `dot-` prefix, so `gamespice-platform/combat`, `modcommunity/dot-combat`
-## and a lock's `dot-combat` or `combat` are all `combat`.
+## and a lock's `gs-combat` or `combat` are all `combat`.
 static func pack_key(name: String) -> String:
 	return name.strip_edges().get_file().trim_prefix("dot-")
 

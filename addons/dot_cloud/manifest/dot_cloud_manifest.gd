@@ -36,7 +36,7 @@ const FORMAT_VERSION := 1
 ## Files in this content set.
 @export var files: Array[DotCloudFile] = []
 
-## Entry scene, relative to the mount prefix; what dot-server tells clients to load. Empty for pure assets.
+## Entry scene, relative to the mount prefix; what GameSpice Server tells clients to load. Empty for pure assets.
 @export var entry_scene: String = ""
 
 ## Minimum Godot version this content needs, checked before mounting: a newer-engine pack can fail

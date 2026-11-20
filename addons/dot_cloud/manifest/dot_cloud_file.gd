@@ -51,7 +51,7 @@ const SIDE_CLIENT := "client"
 const SIDE_SERVER := "server"
 
 ## The side that fetches this file: [constant SIDE_BOTH] (the default, and what every entry
-## published before dot-cloud API 8 is), [constant SIDE_CLIENT] or [constant SIDE_SERVER].
+## published before GameSpice Cloud API 8 is), [constant SIDE_CLIENT] or [constant SIDE_SERVER].
 ##
 ## A dedicated server never draws, so a game's baked light is megabytes it downloads,
 ## verifies and caches for nothing; a client never runs the server's own tables. The tag

@@ -7,7 +7,7 @@ extends DotConfig
 
 @export_group("Cache")
 
-## Root of the content cache; everything dot-cloud writes lives under here. On web it is inside IndexedDB.
+## Root of the content cache; everything GameSpice Cloud writes lives under here. On web it is inside IndexedDB.
 @export var cache_dir: String = "user://dot_cloud"
 
 ## Cache ceiling in bytes; 0 is unlimited. Unreferenced objects are evicted LRU past it.
@@ -18,7 +18,7 @@ extends DotConfig
 ## argument [code]--cloud-cache-bytes[/code].
 @export var cache_bytes: int = 4 * 1024 * 1024 * 1024
 
-## Where an operator of this host changes the ceiling, said in a quota refusal beside the dot-cloud
+## Where an operator of this host changes the ceiling, said in a quota refusal beside the GameSpice Cloud
 ## keys (a host with its own config file sets it, e.g. "cache_bytes in cfg/server/server.yml").
 ## Not layered from JSON or the environment: it describes the host, it is not a setting.
 var limit_hint: String = ""

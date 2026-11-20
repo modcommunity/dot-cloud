@@ -365,7 +365,7 @@ const CVARS := {
 
 
 ## Registers the `sv_autoupdate_*` cvars on a console with `cvar(name, default, help)`
-## (dot-server's [code]DotConsole[/code]); each change applies to [member config] at once.
+## (GameSpice Server's [code]DotConsole[/code]); each change applies to [member config] at once.
 func bind_console(console: Object) -> void:
 	if console == null or not console.has_method("cvar"):
 		return

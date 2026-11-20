@@ -1,6 +1,6 @@
 extends Node
 
-## Client-only and server-only files in one signed pack (dot-cloud API 8).
+## Client-only and server-only files in one signed pack (GameSpice Cloud API 8).
 ##
 ## A source declares sides in `sides.json`; the publisher writes each entry's
 ## [member DotCloudFile.side] into the signed payload; a client fetches and mounts as the
@@ -47,7 +47,7 @@ func _run() -> void:
 		_finish(1)
 		return
 	_keys = keys.value
-	# Kept, so a build of an older dot-cloud can be pointed at this run's packs by hand and
+	# Kept, so a build of an older GameSpice Cloud can be pointed at this run's packs by hand and
 	# shown to mount a tagged pack (docs/mounting.md, "An older build mounts a tagged pack").
 	DotPaths.write_text(WORK.path_join("public.pem"), str(_keys["public"]))
 

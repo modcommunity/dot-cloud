@@ -12,9 +12,9 @@ extends DotCloudSource
 ## Use it as the last source in the list. A server with a CDN never touches it; a
 ## server on someone's home connection can still be played.
 ##
-## [b]Decoupling.[/b] dot-cloud must not depend on dot-server, so this class does
+## [b]Decoupling.[/b] GameSpice Cloud must not depend on GameSpice Server, so this class does
 ## not know how to send a packet. It calls a delegate — any object with the two
-## methods below — and dot-server supplies one backed by its own RPCs:
+## methods below — and GameSpice Server supplies one backed by its own RPCs:
 ##
 ## [codeblock]
 ## # The delegate contract
@@ -258,7 +258,7 @@ func fetch(
 ## pattern, and it is required here for the same reason: a delegate that answers
 ## from a cache without suspending finishes [i]before[/i] this function reaches
 ## the wait, so a wait entered unconditionally would block on a chunk that has
-## already arrived. dot-server's own delegate does exactly that for a file it is
+## already arrived. GameSpice Server's own delegate does exactly that for a file it is
 ## already holding.
 ##
 ## [param budget_sec] is the whole file's remaining time, or [code]INF[/code]

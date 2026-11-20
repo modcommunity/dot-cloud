@@ -1,4 +1,4 @@
-# dot-cloud docs
+# GameSpice Cloud docs
 
 The reasoning behind content delivery, one subject per file. [CLAUDE.md](../CLAUDE.md) has the short rules; these say why.
 

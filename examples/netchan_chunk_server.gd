@@ -1,8 +1,8 @@
 extends RefCounted
 
-## A stand-in for dot-server's in-band content delegate, for [code]netchan_demo[/code].
+## A stand-in for GameSpice Server's in-band content delegate, for [code]netchan_demo[/code].
 ##
-## dot-cloud must not depend on dot-server, so [DotCloudSourceNetchan] talks to
+## GameSpice Cloud must not depend on GameSpice Server, so [DotCloudSourceNetchan] talks to
 ## whatever object implements two methods. That decoupling is also why the source
 ## had no executable coverage: the only real implementation lives in another
 ## repository, so nothing here could drive it. This is that implementation's

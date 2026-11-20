@@ -2,7 +2,7 @@
 
 `DotCloudAutoUpdate` (`addons/dot_cloud/server/`) keeps a dedicated server on the newest published version of the packs it runs. It is on by default. Clients are never touched, and in a browser (`DotPlatform.is_web()`, or any build that cannot listen) it does nothing.
 
-Every game gets it without code of its own: dot-game's `DotGameModule` starts one per headless server process the first time a game module loads (`DotGameModule.start_auto_update`), loads this script by path (dot-cloud stays optional), parents it to the `DotServer` so a game change keeps it, and registers it as `dot_cloud_autoupdate`. A host that builds its own sets the callables below and adds the node itself; `start_auto_update` then finds it in the registry and adds no second one.
+Every game gets it without code of its own: GameSpice Game's `DotGameModule` starts one per headless server process the first time a game module loads (`DotGameModule.start_auto_update`), loads this script by path (GameSpice Cloud stays optional), parents it to the `DotServer` so a game change keeps it, and registers it as `dot_cloud_autoupdate`. A host that builds its own sets the callables below and adds the node itself; `start_auto_update` then finds it in the registry and adds no second one.
 
 ## What it checks
 
@@ -18,7 +18,7 @@ A mounted resource pack can never be unmounted, and packs mount at `res://dot_cl
 
 | Supervisor | Honours 75 |
 | --- | --- |
-| systemd (dot-server-deploy's `deploy/install-systemd.sh`) | `Restart=on-failure` plus `RestartForceExitStatus=75` |
+| systemd (GameSpice Server Deploy's `deploy/install-systemd.sh`) | `Restart=on-failure` plus `RestartForceExitStatus=75` |
 | docker compose | `restart: unless-stopped`; the entrypoint returns the server's status. A bare `docker run` needs `--restart unless-stopped` |
 | the Pterodactyl egg | `./server` restarts the engine itself on 75 when wings sets `P_SERVER_UUID` (`TMC_SUPERVISE=0` disables); wings' own crash detection is not relied on, and it is off on some panels |
 | a terminal | nothing restarts it; run under a supervisor or set `enabled: false` |
@@ -31,10 +31,10 @@ A mounted resource pack can never be unmounted, and packs mount at `res://dot_cl
 
 Once an update is found (INFO `update found`):
 
-1. **Nobody connected** (`players_fn` returns 0; dot-game counts every session, including players still loading): restart at once, with no warning.
+1. **Nobody connected** (`players_fn` returns 0; GameSpice Game counts every session, including players still loading): restart at once, with no warning.
 2. **Players present, `when_empty` on** (the default): keep waiting, re-reading the player count every frame, and restart the moment it is empty. With `max_wait` above 0, once that many seconds have passed since the update was found, start the warning countdown anyway. `max_wait: 0` never forces: the server restarts only when empty.
 3. **Players present, `when_empty` off**: start the countdown at once.
-4. **The countdown**: one warning at `warn_seconds`, then one at each `warn_steps` value below it, sent through `warn_fn` (dot-game: `DotServer.broadcast_message`, a system chat line) and logged at INFO. At 0 it restarts. If the server empties during the countdown it restarts then. `warn_seconds: 0` restarts without a countdown.
+4. **The countdown**: one warning at `warn_seconds`, then one at each `warn_steps` value below it, sent through `warn_fn` (GameSpice Game: `DotServer.broadcast_message`, a system chat line) and logged at INFO. At 0 it restarts. If the server empties during the countdown it restarts then. `warn_seconds: 0` restarts without a countdown.
 
 Turning `enabled` off drops a pending update.
 

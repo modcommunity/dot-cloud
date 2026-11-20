@@ -383,7 +383,7 @@ static func _digest(bytes: PackedByteArray) -> PackedByteArray:
 	# empty string has a well-defined SHA-256, so skipping the update yields the
 	# right digest and the caller gets "signature does not match" rather than an
 	# engine error with a DotResult that claims success. Same trap
-	# DotHash.sha256_bytes fixed in dot-core; it cannot be reused here because it
+	# DotHash.sha256_bytes fixed in GameSpice Core; it cannot be reused here because it
 	# returns hex and Crypto.verify wants the raw digest.
 	if not bytes.is_empty():
 		ctx.update(bytes)

@@ -6,9 +6,9 @@
 # whose --host-addons is an addons.lock; dot-server-deploy's tools/published_packs_boot.sh runs it over every game's
 # published versions against a candidate lock.
 # Why: Airdrift and Playlot 0.1.33 and Zombie Zone 0.1.40 (stale trees, a renamed addon) booted nothing on servers, and
-# Hungario 0.1.19, published without this gate, stopped compiling once the lock moved to dot-net v0.1.36 (identity typed Node).
+# Hungario 0.1.19, published without this gate, stopped compiling once the lock moved to GameSpice Net v0.1.36 (identity typed Node).
 #   tools/pack_boot_test.sh OUT_DIR HOST_LOCK     (HOST_LOCK: a dot-server-deploy checkout's addons.lock, or a candidate lock beside it)
-# The host is built once per lock and dot-server-deploy commit under ${GS_PACK_BOOT_CACHE:-~/.cache/pack-boot}.
+# The host is built once per lock and GameSpice Server Deploy commit under ${GS_PACK_BOOT_CACHE:-~/.cache/pack-boot}.
 # GODOT names the engine (as for publish_pack.sh). Exit 0 boots, 1 does not boot, 2 could not judge (no engine, host or mount).
 set -euo pipefail
 # Anything that stops the script before the probe's verdict is "could not judge", never a refusal of the pack.

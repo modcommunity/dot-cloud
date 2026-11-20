@@ -7,7 +7,7 @@ GODOT="${1:-${GODOT:-godot}}"
 # Resolve to an absolute path: the --dry-run check runs with HOME overridden, which hides $HOME/.local/bin from publish_pack's fallback.
 [ -x "$GODOT" ] || GODOT="$(command -v "$GODOT" 2>/dev/null || true)"; [ -n "$GODOT" ] || GODOT="$HOME/.local/bin/godot"; export GODOT
 [ -x "$GODOT" ] || { echo "test_publish_pack: no godot binary (pass one, set GODOT, or put godot on PATH)" >&2; exit 2; }
-# The publish CLI needs dot-core's classes; without the link every check below fails with an unrelated parse error.
+# The publish CLI needs GameSpice Core's classes; without the link every check below fails with an unrelated parse error.
 [ -d "$HERE/../addons/dot_core" ] || { echo "test_publish_pack: addons/dot_core missing; run: ln -s ../../dot-core/addons/dot_core addons/dot_core (then rm -rf .godot if a run already cached without it)" >&2; exit 2; }
 W="$(mktemp -d)"; PASS=0; FAIL=0
 chk() { if eval "$2"; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); echo "FAIL: $1"; fi; }
@@ -139,7 +139,7 @@ printf '[remap]\nimported_formats=["s3tc_bptc","etc2_astc"]\n' > "$W/h/vr/d.png.
 rm -rf ho; hp
 chk "both-format import is silent" "[ $? -eq 0 ] && ! grep -q 'desktop-only' out"
 rm -rf "$W/h/vr"
-# (e) requires.json: derived (dot-core's dot_requires.gd) and capped at the host lock's level; a committed one above it is refused
+# (e) requires.json: derived (GameSpice Core's dot_requires.gd) and capped at the host lock's level; a committed one above it is refused
 DC="$(readlink -f "$HERE/../addons/dot_core" 2>/dev/null || true)"; [ -d "$DC" ] || DC="$(readlink -f "$HERE/../../dot-core/addons/dot_core" 2>/dev/null || true)"
 if [ -f "$DC/tools/dot_requires.gd" ]; then
     mkdir -p "$W/zz-lv/addons/zz_lv" "$W/rq/addons"

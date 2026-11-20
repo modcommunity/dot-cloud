@@ -22,7 +22,7 @@ The file-table entries linger: a few kilobytes per mount, against content measur
 
 ## A pack says which addon API it needs
 
-A delivered pack carries none of the dot-* addons (the client shell and the server that mount it do), so its scripts compile against this build's addons. A pack written against a newer dot-net than the host has fails to **parse**, mid-load, with "Identifier not declared in the current scope", which reads as a broken pack.
+A delivered pack carries none of the gs-* addons (the client shell and the server that mount it do), so its scripts compile against this build's addons. A pack written against a newer GameSpice Net than the host has fails to **parse**, mid-load, with "Identifier not declared in the current scope", which reads as a broken pack.
 
 dot-cloud reads the pack's `requires.json` (dot-core's `DotAddonApi`: `{"addons": {"dot_net": 3}}`, written by dot-ci's `package.sh --pack`) **out of the store; since API level 3 it fetches just that file first and refuses before the pack is downloaded**, and checks again between download and mount, and refuses with "This game needs dot-net API level 3 or newer; this client has level 2." as `CODE_VERSION`. Between download and mount, not after: the file is verified like every other object by then, so nothing has to be mounted to read it, and a refusal after a mount would leave the pack's files in the tree for good.
 

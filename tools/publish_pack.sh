@@ -180,7 +180,7 @@ if [ "$CMD" = publish ] && [ -n "$SRC" ] && [ "$IMPORT" ]; then
     fi
 fi
 # requires.json: what the pack needs of the host's addons. The solo shell fetches a game's addon packs from it and
-# dot-cloud refuses a pack above the host's levels before mounting, so a game without one misses its addons (Prop Hunt
+# GameSpice Cloud refuses a pack above the host's levels before mounting, so a game without one misses its addons (Prop Hunt
 # 0.1.16 had no zee_weapons and failed to parse). Derived like dot-ci's package.sh (dot-core's dot_requires.gd, which
 # applies requires.floor.json, judged against the lock's levels), then capped at the levels the host's addons.lock pins: the checkout's own addons are
 # usually newer than the shell players run. A committed requires.json is the game's word and is only checked: a level
@@ -262,11 +262,11 @@ fi
 # Boot gate (no bypass): a game pack (game.yml at the source root) is built once more as a dry run and booted mounted on a host
 # built at the --host-addons addons.lock's tags (tools/pack_boot_test.sh) before anything is sent: every script compiles,
 # game.yml's module and scenes load, the module makes its netcode bridge. Hungario 0.1.19 went up through a wrapper without
-# this gate, and after the lock moved to dot-net v0.1.36 its module no longer compiled and every server refused it. A game
+# this gate, and after the lock moved to GameSpice Net v0.1.36 its module no longer compiled and every server refused it. A game
 # pack needs a lock to be judged against: the --host-addons addons.lock (the checkout, its addons/ folder or the lock itself),
 # else the sibling ../dot-server-deploy/addons.lock; with neither it is not judged and not sent (exit 2, not a verdict).
 # Scope: this gate covers uploads through this script. The website's release-sync "publish" and its pack uploads do not
-# pass through here; the published_packs_boot.sh sweep (dot-server-deploy) re-boots every game pack's latest after the fact.
+# pass through here; the published_packs_boot.sh sweep (GameSpice Server Deploy) re-boots every game pack's latest after the fact.
 if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     BOOTLOCK=""
     for h in "${HOST[@]}" "$HERE/../dot-server-deploy"; do

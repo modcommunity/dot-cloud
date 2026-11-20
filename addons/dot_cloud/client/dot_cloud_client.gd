@@ -65,7 +65,7 @@ signal _acquire_finished(content_key: String, result: DotResult)
 
 ## Allow content to arrive over the game connection when no HTTP source works.
 ##
-## Needs a delegate; dot-server supplies one. See [DotCloudSourceNetchan].
+## Needs a delegate; GameSpice Server supplies one. See [DotCloudSourceNetchan].
 @export var allow_netchan_fallback: bool = true
 
 @export_group("Service")
@@ -81,7 +81,7 @@ signal _acquire_finished(content_key: String, result: DotResult)
 @export_group("Requirements")
 
 ## Who this build is in the refusal a player reads ("this [b]client[/b] has level 2"); `"build"` by default.
-## dot-cloud cannot tell a server from a client, and the reader needs to know which to update.
+## GameSpice Cloud cannot tell a server from a client, and the reader needs to know which to update.
 @export var host_role: String = "build"
 
 @export_group("Wiring")
@@ -95,7 +95,7 @@ var mounter: DotCloudMounter = null
 var downloader: DotCloudDownloader = null
 var scheduler: DotScheduler = null
 
-## Sources in preference order. Mutable at runtime — dot-server appends a netchan
+## Sources in preference order. Mutable at runtime — GameSpice Server appends a netchan
 ## source once a session exists.
 var sources: Array[DotCloudSource] = []
 
@@ -290,7 +290,7 @@ func _build_sources() -> void:
 		sources.append(netchan)
 
 
-## Gives the netchan source its transport delegate; called by dot-server once a session exists.
+## Gives the netchan source its transport delegate; called by GameSpice Server once a session exists.
 ## Until then the source reports itself unsupported and is skipped.
 func set_netchan_delegate(delegate: Object) -> void:
 	for s in sources:
@@ -368,7 +368,7 @@ func _await_inflight(key: String) -> DotResult:
 	)
 
 
-## [method acquire] for a manifest already in hand; dot-server pushes manifests down the game connection.
+## [method acquire] for a manifest already in hand; GameSpice Server pushes manifests down the game connection.
 func acquire_manifest(
 	manifest: DotCloudManifest,
 	groups: PackedStringArray = PackedStringArray(),

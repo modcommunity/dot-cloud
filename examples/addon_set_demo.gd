@@ -281,7 +281,7 @@ func _published_client() -> DotCloudClient:
 	# the overlay puts it; a rewrite onto a mount prefix would be wrong here.
 	pub.rewrite_resource_paths = false
 	# Published the way the site publishes an addon release, which keeps each script's
-	# `.uid`; dot-cloud's own default leaves them out.
+	# `.uid`; GameSpice Cloud's own default leaves them out.
 	pub.exclude_suffixes = PackedStringArray([".import", ".tmp"])
 
 	var origin := WORK.path_join("origin")

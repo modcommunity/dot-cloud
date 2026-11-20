@@ -116,7 +116,7 @@ func _locate(file: DotCloudFile) -> String:
 		if allow_path_lookup:
 			# [b]Confirmed by hash HERE, and the search continues when it does not
 			# match.[/b] A path lookup matches on NAME, and a search directory is not
-			# always a published pack: dot-server searches `content/` as well as `dist/`,
+			# always a published pack: GameSpice Server searches `content/` as well as `dist/`,
 			# and `content/README.md` is a different document from the `README.md` in a
 			# game's pack. The first name-match won, `fetch` hashed it, and the whole
 			# acquisition failed with

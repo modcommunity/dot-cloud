@@ -17,7 +17,7 @@ extends "dot_cloud_workshop_base.gd"
 ## [b]It never runs for an online session[/b], and says so with [constant DotError.CODE_FORBIDDEN]
 ## rather than trusting its caller. It never fails for anything a player can cause: a dead
 ## network, a broken pack, a guest and a declined download are all a successful summary, because
-## one pack must never stop a game from starting. No dot-auth dependency: the bearer arrives as a
+## one pack must never stop a game from starting. No GameSpice Auth dependency: the bearer arrives as a
 ## [Callable].
 
 @export var register_service: bool = true
@@ -38,7 +38,7 @@ var token_fn: Callable = Callable()
 ## Unset means no.
 var ask_fn: Callable = Callable()
 
-## The dot-cloud client to mount through; found through [constant DotCloudClient.SERVICE] when null.
+## The GameSpice Cloud client to mount through; found through [constant DotCloudClient.SERVICE] when null.
 var cloud: DotCloudClient = null
 
 ## The signed-in account's id when the host knows it, so a cached list that belongs to another

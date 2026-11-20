@@ -14,7 +14,7 @@ Sources are tried in priority order, with per-source circuit breaking (`failure_
 
 ## The in-band source
 
-**`DotCloudSourceNetchan` does not know how to send a packet.** dot-cloud must not depend on dot-server, so it calls a duck-typed delegate:
+**`DotCloudSourceNetchan` does not know how to send a packet.** GameSpice Cloud must not depend on GameSpice Server, so it calls a duck-typed delegate:
 
 ```gdscript
 func cloud_chunk_size() -> int

@@ -11,7 +11,7 @@ extends RefCounted
 ## formatting and escaping all differ between writers, and each of them turns a
 ## perfectly valid signature into a rejection.
 ##
-## [b]This was not a hypothetical.[/b] The first version of dot-cloud signed a
+## [b]This was not a hypothetical.[/b] The first version of GameSpice Cloud signed a
 ## canonical re-serialisation and wrote a pretty-printed file. Every signature it
 ## produced failed to verify, and the end-to-end test caught it. Canonical JSON is
 ## a whole specification (JCS, RFC 8785) and implementing it here to work around a
