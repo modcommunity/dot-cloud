@@ -263,14 +263,20 @@ fi
 # built at the --host-addons addons.lock's tags (tools/pack_boot_test.sh) before anything is sent: every script compiles,
 # game.yml's module and scenes load, the module makes its netcode bridge. Hungario 0.1.19 went up through a wrapper without
 # this gate, and after the lock moved to dot-net v0.1.36 its module no longer compiled and every server refused it. A game
-# pack needs a lock to be judged against, so one without an addons.lock in --host-addons is refused.
+# pack needs a lock to be judged against: the --host-addons addons.lock (the checkout, its addons/ folder or the lock itself),
+# else the sibling ../dot-server-deploy/addons.lock; with neither it is not judged and not sent (exit 2, not a verdict).
+# Scope: this gate covers uploads through this script. The website's release-sync "publish" and its pack uploads do not
+# pass through here; the published_packs_boot.sh sweep (dot-server-deploy) re-boots every game pack's latest after the fact.
 if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     BOOTLOCK=""
-    for h in "${HOST[@]}"; do
-        [ -d "$h" ] && h="$h/addons.lock"
-        if [ -f "$h" ] && grep -q $'\t' "$h" && [ -f "$(dirname "$h")/project.godot" ]; then BOOTLOCK="$h"; break; fi
+    for h in "${HOST[@]}" "$HERE/../dot-server-deploy"; do
+        for c in "$h" "$h/addons.lock" "$(dirname "$h")/addons.lock"; do
+            if [ -f "$c" ] && [ "$(basename "$c")" = addons.lock ] && grep -q $'\t' "$c" && [ -f "$(dirname "$c")/project.godot" ]; then
+                BOOTLOCK="$c"; break 2
+            fi
+        done
     done
-    [ -n "$BOOTLOCK" ] || { echo "publish_pack: refusing: $SRC is a game pack (game.yml) and no --host-addons names a dot-server-deploy addons.lock to boot it against. Nothing was sent." >&2; exit 1; }
+    [ -n "$BOOTLOCK" ] || { echo "publish_pack: refusing: $SRC is a game pack (game.yml) and no dot-server-deploy addons.lock was found to boot it against (--host-addons, or ../dot-server-deploy beside dot-cloud). The pack was not judged and nothing was sent." >&2; exit 2; }
     DARGS=(); skip=""
     for a in "${ARGS[@]}"; do
         if [ -n "$skip" ]; then skip=""; continue; fi
@@ -278,7 +284,7 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     done
     touch "$TMP/boot.stamp"
     "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
-        || { echo "publish_pack: the boot gate's dry run failed. Nothing was sent." >&2; exit 1; }
+        || { echo "publish_pack: the boot gate's dry run (the pack build) failed, above; the pack was not booted or judged. Nothing was sent." >&2; exit 2; }
     brc=0; GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" || brc=$?
     # 1 is the probe's verdict on the pack; anything else is the gate failing to judge it (no engine, host, mount: exit 2).
     [ $brc -ne 1 ] || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
