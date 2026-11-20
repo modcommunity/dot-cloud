@@ -953,6 +953,14 @@ func verify_manifest(manifest: DotCloudManifest) -> DotResult:
 	return _Manifests.verify(self, manifest)
 
 
+## Evicts other content nothing in this process holds until the browser has [param incoming] bytes free, whatever the ceiling says (API 33).
+## `{fits, free, freed}`; `fits` is true when the space cannot be measured. A caller that knows a download's whole size asks before starting. Await it.
+func make_room(incoming: int) -> Dictionary:
+	if store == null:
+		return {"fits": true, "free": -1, "freed": 0}
+	return await store.make_room(incoming)
+
+
 ## What acquiring this manifest would cost, without doing it (cache lookups only).
 ## For a "this map needs 240 MB, continue?" prompt on mobile and metered connections.
 func plan_for(

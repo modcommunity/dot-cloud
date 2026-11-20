@@ -36,6 +36,8 @@ A partial's bytes are verified by nothing until the whole object commits; see [s
 | **Mobile** | `mobile_cache_bytes` (1 GiB) replaces `cache_bytes` (4 GiB). Filling a phone's storage gets the app killed. |
 | **Dedicated server** | Set `cache_bytes` to 0 (unlimited) or a size of its own. A server mounts every map in its rotation and a mounted object is referenced, so it can never be evicted: past the 4 GiB desktop default the next map is refused ("the content cache is full and everything in it is in use") on a disk with gigabytes free. GameSpice Server Deploy does this for you (`cache_bytes` in `cfg/server/server.yml`, default 0). |
 
+**Eviction order and stale refs.** `add_refs` records the keys this session mounted; the index also persists refs from earlier sessions that nothing has mounted now. `_evict` takes unreferenced objects first (LRU), then objects held only by stale refs (LRU), and never a pinned pack or one held by this session. `make_room(incoming)` runs it before a whole download and returns `{fits, free, freed}`; the downloader and `DotMapStore.ensure` ask it first, so an over-quota map is refused up front instead of failing after gigabytes (API 33).
+
 **A quota refusal says what to change.** `prune` fails with `CODE_QUOTA` and a detail naming the bytes freed and needed, the referenced objects and bytes, the limit and the key that sets it (`cache_bytes`, or `mobile_cache_bytes` on a phone, with its `DOT_CLOUD_*` variable and `--cloud-*` argument), the disk free at `cache_dir`, and `DotCloudConfig.limit_hint` when the host set one (where its own operators change it). `describe()` (the `client ready` line and `cloud_status`) carries `disk_free` too (API 31).
 
 ## Inventory, pins and deletion

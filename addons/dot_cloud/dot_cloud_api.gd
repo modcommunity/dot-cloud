@@ -64,5 +64,7 @@ extends RefCounted
 #     key that sets it, referenced bytes and the disk free. Additive.
 # 32: DotCloudSliceLoader.cached_scripts and setting dot_cloud/warm/list_file: a pack's `warm.txt` names the scripts its
 #     scene needs, the cover waits for those only and the rest compile behind it. Mount lines carry phase msec. Additive.
-const LEVEL := 32
+# 33: DotCloudStore.make_room / DotCloudClient.make_room (evict what this process does not hold until the browser's measured
+#     free space covers a download) and prune treats refs left by an earlier session as evictable, after unreferenced objects. Additive.
+const LEVEL := 33
 const OLDEST := 1

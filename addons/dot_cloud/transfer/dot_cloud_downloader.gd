@@ -194,8 +194,10 @@ func sync(
 	if not pruned.ok and pruned.error.code == DotError.CODE_QUOTA and store.has_measured_free():
 		# The ceiling is a share of the quota counted against everything already stored, so it
 		# refuses downloads the browser would accept. Only the measured free space may refuse.
-		var free := await store.free_bytes()
-		if free < 0 or free >= _total_bytes:
+		# Other maps' content nothing here has mounted is evicted before the browser is asked to refuse.
+		var made: Dictionary = await store.make_room(_total_bytes)
+		var free: int = made["free"]
+		if bool(made["fits"]):
 			DotLog.info(CHANNEL, "over the cache ceiling but the browser has room; going on",
 				{"needed": _total_bytes, "free": free})
 			pruned = DotResult.success(0)
