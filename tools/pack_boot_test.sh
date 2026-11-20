@@ -9,13 +9,15 @@
 # Hungario 0.1.19, published without this gate, stopped compiling once the lock moved to dot-net v0.1.36 (identity typed Node).
 #   tools/pack_boot_test.sh OUT_DIR HOST_LOCK     (HOST_LOCK: a dot-server-deploy checkout's addons.lock, or a candidate lock beside it)
 # The host is built once per lock and dot-server-deploy commit under ${GS_PACK_BOOT_CACHE:-~/.cache/pack-boot}.
-# GODOT names the engine (as for publish_pack.sh).
+# GODOT names the engine (as for publish_pack.sh). Exit 0 boots, 1 does not boot, 2 could not judge (no engine, host or mount).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$(cd "${1:?usage: tools/pack_boot_test.sh OUT_DIR HOST_LOCK}" && pwd)"
 LOCK="$(cd "$(dirname "${2:?usage: tools/pack_boot_test.sh OUT_DIR HOST_LOCK}")" && pwd -P)/$(basename "$2")"
 GODOT="${GODOT:-godot}"
 command -v "$GODOT" >/dev/null 2>&1 || ! [ -x "$HOME/.local/bin/godot" ] || GODOT="$HOME/.local/bin/godot"
+# Exit 2 is "could not judge" (no engine, no host); 1 is only ever a verdict on the pack.
+command -v "$GODOT" >/dev/null 2>&1 || { echo "pack_boot: no engine at GODOT=$GODOT" >&2; exit 2; }
 DEPLOY="$(dirname "$LOCK")"
 SIB="$(cd "$DEPLOY/.." && pwd)"
 [ -f "$DEPLOY/project.godot" ] || { echo "pack_boot: $DEPLOY is not a dot-server-deploy checkout" >&2; exit 2; }
@@ -48,6 +50,11 @@ set +e
 timeout 1200 "$GODOT" --headless --path "$HOST" res://pack_boot/probe.tscn -- "$OUT" >"$LOG" 2>&1
 rc=$?
 set -e
+if [ $rc -eq 2 ] || [ $rc -eq 126 ] || [ $rc -eq 127 ]; then
+    grep -E "^pack_boot:" "$LOG" >&2 || tail -5 "$LOG" >&2
+    echo "pack_boot: the probe could not run (exit $rc); the pack was not judged" >&2
+    exit 2
+fi
 grep -E "^pack_boot:|SCRIPT ERROR|Parse Error|Compile Error|Failed to load|^ +at: " "$LOG" | grep -v "^pack_boot: game.yml .* loads" >&2 || true
 if [ $rc -ne 0 ] || ! grep -q "^pack_boot: .* 0 failure(s)" "$LOG"; then
     echo "pack_boot: the pack does not boot mounted on the pinned host (exit $rc); not publishing" >&2

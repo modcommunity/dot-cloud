@@ -127,13 +127,21 @@ static func _first_error(path: String, prefix: String) -> String:
 	OS.add_logger(capture)
 	ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
 	OS.remove_logger(capture)
-	var first := capture.first()
-	return first.replace(prefix + "/", "") if first != "" else "no error of its own (a script it uses does not compile)"
+	var first := capture.first_for(path)
+	if first != "":
+		return first.replace(prefix + "/", "")
+	# The logger is process-wide: an error about another file (another thread, a dependency) is not this script's own.
+	var other := capture.first_for("")
+	if other != "":
+		return "no error of its own; the engine reported %s" % other.replace(prefix + "/", "")
+	return "no error of its own (a script it uses does not compile)"
 
 
+## Collects the script errors the engine reports while it is installed, each with its file. Called from any thread.
 class _ScriptErrorCapture extends Logger:
 	var _lock := Mutex.new()
 	var _errors: PackedStringArray = []
+	var _files: PackedStringArray = []
 
 	func _log_error(
 		_function: String, file: String, line: int, code: String, rationale: String,
@@ -143,11 +151,17 @@ class _ScriptErrorCapture extends Logger:
 			return
 		_lock.lock()
 		_errors.append("%s:%d: %s" % [file, line, (code if rationale == "" else "%s %s" % [code, rationale]).strip_edges()])
+		_files.append(file)
 		_lock.unlock()
 
-	func first() -> String:
+	## The first error reported against [param file]; with "", the first about any file.
+	func first_for(file: String) -> String:
 		_lock.lock()
-		var e := "" if _errors.is_empty() else _errors[0]
+		var e := ""
+		for i in _errors.size():
+			if file == "" or _files[i] == file:
+				e = _errors[i]
+				break
 		_lock.unlock()
 		return e
 

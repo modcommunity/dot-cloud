@@ -278,7 +278,7 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     done
     "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
         || { echo "publish_pack: the boot gate's dry run failed. Nothing was sent." >&2; exit 1; }
-    "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" \
+    GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" \
         || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
     rm -rf "$TMP/boot"
 fi
