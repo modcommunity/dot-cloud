@@ -291,8 +291,14 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     [ $brc -eq 0 ] || { echo "publish_pack: refusing to upload: the boot gate could not judge the pack (exit $brc: engine, host or mount, above); this is not a verdict on the pack. Nothing was sent." >&2; exit 2; }
     rm -rf "$TMP/boot"
     # The upload builds the pack again from $SRC: a file changed since the booted build would go up unbooted.
-    changed="$(find "$SRC" -path "$SRC/.godot" -prune -o -type f -newer "$TMP/boot.stamp" -print -quit)"
-    [ -z "$changed" ] || { echo "publish_pack: refusing to upload: $changed changed after the boot gate built the pack. Nothing was sent; re-run." >&2; exit 1; }
+    # The source must not change between the judged build and the uploaded one. Git's own files, .godot and ignored files are
+    # never packed, so a concurrent git status/fetch or a log write does not count. A change is not a verdict: exit 2.
+    changed=""
+    while IFS= read -r -d '' f; do
+        if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1 && git -C "$SRC" check-ignore -q -- "$f" 2>/dev/null; then continue; fi
+        changed="$f"; break
+    done < <(find "$SRC" \( -path "$SRC/.godot" -o -name .git \) -prune -o -type f -newer "$TMP/boot.stamp" -print0)
+    [ -z "$changed" ] || { echo "publish_pack: refusing to upload: $changed changed after the boot gate built the pack; the uploaded build would not be the one judged. Nothing was sent; re-run." >&2; exit 2; }
 fi
 if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
 "${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}" || exit $?
