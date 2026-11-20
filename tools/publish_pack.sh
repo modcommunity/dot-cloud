@@ -20,6 +20,7 @@
 # Token: GS_CLI_TOKEN (a creator token), else the file in --token-file / GS_CLI_TOKEN_FILE / ~/.config/dot/cli-token. Never an argument;
 # an env token is copied to a mode-600 temp file that is removed on exit. Site: --site, GS_SITE, else https://tmcdev.net (dev.dotgames.org is the dev CDN and answers no API).
 # The source's project is imported first (--no-import skips it): a fresh clone has .import markers but no .godot/imported outputs.
+# A game pack (game.yml) is boot-tested on the lock's host before upload (tools/pack_boot_test.sh; see the boot gate below).
 # Everything else is dot_cloud_cli.gd's `publish --upload` (docs/cdn-publish.md). A re-run resumes: only missing objects are sent.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -258,5 +259,28 @@ if [ "$CMD" = relock ]; then
     "${RUN[@]}" relock --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" "${ARGS[@]}"; exit $?
 fi
 [ -n "$OUT" ] || OUT="$TMP/out"
+# Boot gate (no bypass): a game pack (game.yml at the source root) is built once more as a dry run and booted mounted on a host
+# built at the --host-addons addons.lock's tags (tools/pack_boot_test.sh) before anything is sent: every script compiles,
+# game.yml's module and scenes load, the module makes its netcode bridge. Hungario 0.1.19 went up through a wrapper without
+# this gate, and after the lock moved to dot-net v0.1.36 its module no longer compiled and every server refused it. A game
+# pack needs a lock to be judged against, so one without an addons.lock in --host-addons is refused.
+if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
+    BOOTLOCK=""
+    for h in "${HOST[@]}"; do
+        [ -d "$h" ] && h="$h/addons.lock"
+        if [ -f "$h" ] && grep -q $'\t' "$h" && [ -f "$(dirname "$h")/project.godot" ]; then BOOTLOCK="$h"; break; fi
+    done
+    [ -n "$BOOTLOCK" ] || { echo "publish_pack: refusing: $SRC is a game pack (game.yml) and no --host-addons names a dot-server-deploy addons.lock to boot it against. Nothing was sent." >&2; exit 1; }
+    DARGS=(); skip=""
+    for a in "${ARGS[@]}"; do
+        if [ -n "$skip" ]; then skip=""; continue; fi
+        case "$a" in --version|--bump|--site) skip=1 ;; *) DARGS+=("$a") ;; esac
+    done
+    "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
+        || { echo "publish_pack: the boot gate's dry run failed. Nothing was sent." >&2; exit 1; }
+    "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" \
+        || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
+    rm -rf "$TMP/boot"
+fi
 if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
 "${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}"
