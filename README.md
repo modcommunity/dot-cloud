@@ -1,3 +1,5 @@
+[![dot-cloud - GameSpice addon](docs/banner.png)](https://moddingcommunity.com/a/205-dot-cloud)
+
 Runtime content delivery for Godot 4.7+. A server hands a client a manifest. The client downloads what it is missing, verifies it and mounts it, so a game does not have to bake all its content into the download. It works on Windows, macOS, Linux, Android, iOS and in the browser. Part of the [Gamespice](https://gamespice.net) platform: a family of Godot addons, alongside [dot-core](https://github.com/gamespice-platform/core), [dot-server](https://github.com/gamespice-platform/server) and [dot-auth](https://github.com/gamespice-platform/auth).
 
 ## Install
