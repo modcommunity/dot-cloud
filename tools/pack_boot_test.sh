@@ -57,13 +57,14 @@ if [ ! -f "$HOST/.ready" ]; then
     fi
     flock -u 9
 fi
-mkdir -p "$HOST/pack_boot"
-cp "$HERE/tools/pack_boot_probe.gd" "$HOST/pack_boot/probe.gd"
-printf '[gd_scene format=3]\n\n[ext_resource type="Script" path="res://pack_boot/probe.gd" id="1"]\n\n[node name="PackBoot" type="Node"]\nscript = ExtResource("1")\n' > "$HOST/pack_boot/probe.tscn"
-LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
+# Each run has its own probe dir in the shared host: two publishes or a sweep at once never run each other's probe.
+PD="$(mktemp -d "$HOST/pack_boot.XXXXXX")"; PR="res://$(basename "$PD")"
+LOG="$(mktemp)"; trap 'rm -rf "$LOG" "$PD"' EXIT
+cp "$HERE/tools/pack_boot_probe.gd" "$PD/probe.gd"
+printf '[gd_scene format=3]\n\n[ext_resource type="Script" path="%s/probe.gd" id="1"]\n\n[node name="PackBoot" type="Node"]\nscript = ExtResource("1")\n' "$PR" > "$PD/probe.tscn"
 # `|| rc=$?`: a non-zero probe is a result to read, not a setup error for the ERR trap (which set +e would not stop).
 rc=0
-timeout 1200 "$GODOT" --headless --path "$HOST" res://pack_boot/probe.tscn -- "$OUT" >"$LOG" 2>&1 || rc=$?
+timeout 1200 "$GODOT" --headless --path "$HOST" "$PR/probe.tscn" -- "$OUT" >"$LOG" 2>&1 || rc=$?
 grep -E "^pack_boot:|SCRIPT ERROR|Parse Error|Compile Error|Failed to load|^ +at: " "$LOG" | grep -v "^pack_boot: game.yml .* loads" >&2 || true
 if [ $rc -eq 0 ] && grep -qE "^pack_boot: [0-9]+ script\(s\) compiled, 0 failure\(s\)$" "$LOG"; then
     echo "pack_boot: the pack boots mounted on the pinned host" >&2

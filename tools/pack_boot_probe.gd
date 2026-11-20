@@ -24,7 +24,7 @@ func _ready() -> void:
 
 
 func _run(out: String) -> int:
-	var manifest: Variant = JSON.parse_string(FileAccess.get_file_as_string(out.path_join("manifest.json")))
+	var manifest: Variant = _unwrap(JSON.parse_string(FileAccess.get_file_as_string(out.path_join("manifest.json"))))
 	if not (manifest is Dictionary) or not (manifest as Dictionary).has("files"):
 		printerr("pack_boot: no readable manifest.json in %s" % out)
 		return 2
@@ -36,6 +36,7 @@ func _run(out: String) -> int:
 		printerr("pack_boot: cannot write %s" % pck)
 		return 2
 	var scripts: PackedStringArray = []
+	var resources: PackedStringArray = []
 	var by_path := {}
 	for f: Dictionary in m["files"]:
 		var sha := str(f["sha256"])
@@ -50,6 +51,9 @@ func _run(out: String) -> int:
 		var gd := _script_of(at)
 		if gd != "" and not scripts.has(gd):
 			scripts.append(gd)
+		var res_at := _resource_of(at)
+		if res_at != "" and not resources.has(res_at):
+			resources.append(res_at)
 	packer.flush()
 	if not ProjectSettings.load_resource_pack(pck, false):
 		printerr("pack_boot: the engine would not mount %s" % pck)
@@ -65,6 +69,18 @@ func _run(out: String) -> int:
 		if s == null or not s.can_instantiate():
 			_fail("%s does not compile against the host's addons: %s" % [path, _first_error(path, prefix)])
 
+	# A script built into a scene or resource (a .tscn's [sub_resource type="GDScript"]) is no file of its own: each
+	# scene and resource the pack ships is loaded and every built-in script in it must compile too.
+	for path in resources:
+		var res := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REUSE)
+		if res == null:
+			_fail("%s does not load mounted" % path.replace(prefix + "/", ""))
+			continue
+		for s: GDScript in _builtin_scripts(res):
+			if not s.can_instantiate():
+				_fail("%s does not compile against the host's addons (a script built into %s)" % [
+					s.resource_path.replace(prefix + "/", ""), path.replace(prefix + "/", "")])
+
 	var yml := FileAccess.get_file_as_string(str(by_path.get("game.yml", "")))
 	for key in ["module", "scene", "client_scene"]:
 		var rel := _yml_value(yml, key)
@@ -79,6 +95,7 @@ func _run(out: String) -> int:
 			_check_module(res as GDScript, rel)
 
 	DirAccess.remove_absolute(pck)
+	print("pack_boot: %d scene(s)/resource(s) loaded" % resources.size())
 	print("pack_boot: %d script(s) compiled, %d failure(s)" % [scripts.size(), _bad])
 	return 1 if _bad > 0 else 0
 
@@ -187,6 +204,59 @@ static func _script_of(file: String) -> String:
 	if file.ends_with(".gdc"):
 		return file.trim_suffix(".gdc") + ".gd"
 	return file if file.ends_with(".gd") else ""
+
+
+## The manifest inside a signed envelope ({"payload": base64url of the manifest JSON, "signatures": ...}, as
+## dot_cloud_envelope.gd writes it and tools/pack_fetch.py reads it); a bare manifest as it is.
+static func _unwrap(doc: Variant) -> Variant:
+	if not (doc is Dictionary) or not (doc as Dictionary).has("payload"):
+		return doc
+	var payload: Variant = (doc as Dictionary)["payload"]
+	if payload is Dictionary:
+		return payload
+	var b64 := str(payload).replace("-", "+").replace("_", "/")
+	while b64.length() % 4 != 0:
+		b64 += "="
+	return JSON.parse_string(Marshalls.base64_to_utf8(b64))
+
+
+## The path a scene or resource file [param file] is loaded by (an export's x.tscn.remap stands for x.tscn); "" otherwise.
+static func _resource_of(file: String) -> String:
+	var f := file.trim_suffix(".remap")
+	for ext in [".tscn", ".scn", ".tres", ".res"]:
+		if f.ends_with(ext):
+			return f
+	return ""
+
+
+## Every script built into [param root] (its resource_path holds "::"), found through its properties, arrays and
+## dictionaries (a PackedScene keeps its sub-resources in _bundled's variants). Files of their own are checked as files.
+static func _builtin_scripts(root: Resource) -> Array[GDScript]:
+	var found: Array[GDScript] = []
+	var seen := {}
+	var todo: Array = [root]
+	while not todo.is_empty():
+		var v: Variant = todo.pop_back()
+		if v is Dictionary:
+			todo.append_array((v as Dictionary).keys())
+			todo.append_array((v as Dictionary).values())
+		elif v is Array:
+			todo.append_array(v as Array)
+		elif v is Resource:
+			var r := v as Resource
+			if seen.has(r.get_instance_id()):
+				continue
+			seen[r.get_instance_id()] = true
+			if r is GDScript:
+				if r.resource_path.contains("::") or r.resource_path == "":
+					found.append(r as GDScript)
+				continue
+			if r != root and r.resource_path != "" and not r.resource_path.contains("::"):
+				continue  # another file: checked as its own entry
+			for p: Dictionary in r.get_property_list():
+				if int(p["usage"]) & PROPERTY_USAGE_STORAGE:
+					todo.append(r.get(str(p["name"])))
+	return found
 
 
 static func _yml_value(text: String, key: String) -> String:

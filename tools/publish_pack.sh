@@ -279,8 +279,10 @@ if [ -z "$DRY" ] && [ -n "$SRC" ] && [ -f "$SRC/game.yml" ]; then
     touch "$TMP/boot.stamp"
     "${RUN[@]}" publish --out "$TMP/boot" --version 0.0.0 "${DARGS[@]}" >&2 \
         || { echo "publish_pack: the boot gate's dry run failed. Nothing was sent." >&2; exit 1; }
-    GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" \
-        || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
+    brc=0; GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$TMP/boot" "$BOOTLOCK" || brc=$?
+    # 1 is the probe's verdict on the pack; anything else is the gate failing to judge it (no engine, host, mount: exit 2).
+    [ $brc -ne 1 ] || { echo "publish_pack: refusing to upload: the pack does not boot mounted on the host addons.lock pins (above). Nothing was sent." >&2; exit 1; }
+    [ $brc -eq 0 ] || { echo "publish_pack: refusing to upload: the boot gate could not judge the pack (exit $brc: engine, host or mount, above); this is not a verdict on the pack. Nothing was sent." >&2; exit 2; }
     rm -rf "$TMP/boot"
     # The upload builds the pack again from $SRC: a file changed since the booted build would go up unbooted.
     changed="$(find "$SRC" -path "$SRC/.godot" -prune -o -type f -newer "$TMP/boot.stamp" -print -quit)"
@@ -290,6 +292,7 @@ if [ "$DRY" ]; then "${RUN[@]}" publish --out "$OUT" "${ARGS[@]}"; exit $?; fi
 "${RUN[@]}" publish --upload --token-file "$(abs "$TOKEN_FILE")" --lock "$(abs "$LOCK")" --out "$OUT" "${ARGS[@]}" || exit $?
 # The bytes that went up are in $OUT: boot them too, so a change during the upload's own build cannot ship unseen.
 if [ -n "${BOOTLOCK:-}" ]; then
-    GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$OUT" "$BOOTLOCK" \
-        || { echo "publish_pack: THE UPLOADED VERSION DOES NOT BOOT (above), though the pre-upload build did: its source changed during the publish. Do not point servers at it; publish a fixed version." >&2; exit 1; }
+    brc=0; GODOT="$GODOT" bash "$HERE/tools/pack_boot_test.sh" "$OUT" "$BOOTLOCK" || brc=$?
+    [ $brc -ne 1 ] || { echo "publish_pack: THE UPLOADED VERSION DOES NOT BOOT (above), though the pre-upload build did: its source changed during the publish. Do not point servers at it; publish a fixed version." >&2; exit 1; }
+    [ $brc -eq 0 ] || { echo "publish_pack: the upload went through, but the boot gate could not judge the uploaded version (exit $brc, above): fetch it (tools/pack_fetch.py) and boot it with tools/pack_boot_test.sh before pointing servers at it." >&2; exit 2; }
 fi
